@@ -8,6 +8,10 @@ on:
       - '*.md'
       - 'LICENSE'
       - 'CONTRIBUTING.md'
+      - 'CONTRIBUTING_zh.md'
+      - 'DCO.md'
+      - 'SECURITY.md'
+      - '.github/ISSUE_TEMPLATE/**'
       - '.gitignore'
   pull_request:
     branches: [ "main", "master", "dev" ]
@@ -16,6 +20,10 @@ on:
       - '*.md'
       - 'LICENSE'
       - 'CONTRIBUTING.md'
+      - 'CONTRIBUTING_zh.md'
+      - 'DCO.md'
+      - 'SECURITY.md'
+      - '.github/ISSUE_TEMPLATE/**'
       - '.gitignore'
   workflow_dispatch: # 允许手动触发
 

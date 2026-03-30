@@ -53,7 +53,7 @@ commit message 同理：`fix: correct affinity decay on session reload`。
 
 ## 安全漏洞
 
-请勿在公开 Issue 中披露可利用细节；请按 README 中维护者说明或 Security 政策私下报告。
+请勿在公开 Issue 中披露可利用细节；报告方式见 **[SECURITY.md](SECURITY.md)**。
 
 ## 关于从 MIT 迁移到 AGPL-3.0
 

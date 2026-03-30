@@ -306,6 +306,7 @@ This repository is licensed under [**AGPL-3.0**](LICENSE).
 - **Local / self-hosted use**: free to use, modify, and redistribute under AGPL terms.
 - **Network service / SaaS**: if you offer the modified program over a network, you must comply with AGPL source-offer obligations.
 - **Contributing**: PRs welcome — demo GIFs/screenshots, example SFW persona cards, translations, bug reports (OS + Python version + logs). Read [CONTRIBUTING.md](CONTRIBUTING.md) first and sign off each commit with `git commit -s` per [DCO 1.1](DCO.md).
+- **Security**: Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 
 *This section is a summary, not legal advice; the [LICENSE](LICENSE) and [DCO](DCO.md) texts prevail.*
 
