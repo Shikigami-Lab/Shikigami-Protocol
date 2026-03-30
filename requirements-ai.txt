@@ -1,0 +1,18 @@
+# ── AI 记忆模块（向量检索）──────────────────────────────────────────────────────
+# 安装后需重启应用；向量层默认关闭，安装此包后在设置中开启 vector_enabled。
+chromadb>=0.5.0
+# 4.46+ 修复 PreTrainedModel 导出；上限 <5 兼容 sentence-transformers
+transformers>=4.46.0,<5.0.0
+sentence-transformers>=3.0.0
+rank-bm25>=0.2.2
+# 本地 embedding 使用 GPU 时需额外安装 torch（与 torchvision 成对安装）：
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# ── 中国大陆下载源（可选）───────────────────────────────────────────────────────
+# ModelScope SDK：用于从阿里云 ModelScope 拉取模型文件（更适合大陆网络环境）。
+# 注意：该包可能会引入较重的深度学习依赖（含 torch 等），建议在 UI 中按需安装。
+modelscope
+
+# ── Qwen3-TTS（进程内，本地推理，可选）─────────────────────────────────────────
+# qwen-tts 通常会带来 torch 依赖，体积较大。UI 中应提示「安装耗时较久，建议在 Wi-Fi 环境」。
+qwen-tts>=0.0.1

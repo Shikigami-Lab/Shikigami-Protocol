@@ -1,0 +1,93 @@
+{
+  "name": "shikigami-protocol",
+  "version": "0.9.18",
+  "author": "Innominat <92572975+fyd126113@users.noreply.github.com>",
+  "license": "AGPL-3.0",
+  "description": "Shikigami Protocol — AI Companion Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node start.js",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win",
+    "build-mac": "electron-builder --mac",
+    "build-linux": "electron-builder --linux",
+    "build-all": "electron-builder -mwl",
+    "release": "npm version patch && git push origin dev --follow-tags",
+    "release-minor": "npm version minor && git push origin dev --follow-tags"
+  },
+  "build": {
+    "appId": "com.shikigami.protocol",
+    "publish": {
+      "provider": "github",
+      "owner": "Shikigami-Lab",
+      "repo": "Shikigami-Protocol"
+    },
+    "productName": "Shikigami Protocol",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".",
+        "to": ".",
+        "filter": [
+          "server.exe",
+          "server",
+          "config/**",
+          "static/**",
+          "assets/**",
+          "profiles/*.json",
+          "profiles/example*/**",
+          "docs/*.md",
+          "README.md",
+          "LICENSE",
+          "CONTRIBUTING.md",
+          "!profiles/**/*.db*",
+          "!profiles/**/chroma_db",
+          "!config/app.yaml",
+          "!config/sessions_meta.json",
+          "!config/ui_prefs.json"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/shikigami_protocol_icon.png",
+      "extraResources": [
+        {
+          "from": "python_embed",
+          "to": "python_embed",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "shortcutName": "Shikigami Protocol",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "installer.nsh"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/shikigami_protocol_icon.png",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/shikigami_protocol_icon.png",
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

@@ -1,0 +1,28 @@
+services:
+  shikigami:
+    build: .
+    image: shikigami-protocol
+    container_name: shikigami
+    restart: unless-stopped
+    ports:
+      - "7788:7788"
+    volumes:
+      # Persistent user data — survive container rebuilds
+      - ./profiles:/app/profiles
+      - ./models:/app/models
+      - ./Voices:/app/Voices
+      # Config is mounted read-write so settings UI can save changes
+      - ./config:/app/config
+      # .env for API keys (copy from .env.example first)
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUTF8=1
+      - PYTHONUNBUFFERED=1
+    # Uncomment to pass GPU into container (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

@@ -1,0 +1,40 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Node / Electron (not needed in container)
+node_modules/
+dist/
+
+# User data — mount these as volumes, never bake into image
+profiles/
+models/
+data/
+.env
+Voices/
+
+# VCS
+.git/
+.gitignore
+
+# Logs / temp
+*.log
+*.tmp
+tmp/
+
+# IDE / OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Windows-only scripts
+*.bat
+
+# Build artefacts
+*.nsis
+*.exe
+*.dmg
+*.AppImage

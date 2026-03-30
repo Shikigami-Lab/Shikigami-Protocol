@@ -1,0 +1,43 @@
+flowchart TB
+    classDef input fill:#e1f5fe,stroke:#03a9f4,stroke-width:2px,color:#01579b;
+    classDef core fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#4a148c;
+    classDef memory fill:#e8f5e9,stroke:#4caf50,stroke-width:2px,color:#1b5e20;
+    classDef asm fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#e65100;
+    classDef output fill:#ffebee,stroke:#f44336,stroke-width:2px,color:#b71c1c;
+    classDef auto fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:#f57f17,stroke-dasharray: 5 5;
+
+    INPUT["① 交互输入\n💬 用户消息 · 👁️ VLM视觉 · ⛅ 环境感知 · 🔧 基础工具"]:::input
+
+    subgraph ENGINES ["② 状态引擎  +  ③ 记忆流水线"]
+        direction LR
+        Emotion["🎭 情绪引擎\n复合情绪 + 强度"]:::core
+        Affinity["✨ 好感度\n8段阶梯"]:::core
+        Energy["🔋 精力系统\n衰减 / 恢复"]:::core
+        Facts["📝 事实提取\n→ 向量检索 ChromaDB\n→ 日摘要 7日遗忘"]:::memory
+    end
+
+    subgraph AUTONOMOUS ["④ 自主驱动  Autonomous"]
+        direction LR
+        Reflection["💭 后台自省 Reflection\n内心独白 & 紧迫度"]:::auto
+        ASE["🔔 主动破冰 ASE\n沉默时自主发言"]:::auto
+        Reflection -.->|urgency| ASE
+    end
+
+    ASSEMBLER{"⑤ Prompt 组装器\n人格 · 状态 · 记忆 · 环境\n按优先级 0–90 融合"}:::asm
+
+    subgraph OUTPUT ["⑥ 执行与输出"]
+        direction LR
+        LLM["🧠 LLM\nGemini / OpenAI / Ollama"]:::output
+        TTS["🗣️ TTS\nEdge / SoVITS / Qwen"]:::output
+        UI["💻 前端\nElectron · SSE流式"]:::output
+        LLM --> TTS
+        LLM --> UI
+        TTS --> UI
+    end
+
+    INPUT --> ENGINES
+    INPUT --> ASSEMBLER
+    ENGINES --> ASSEMBLER
+    AUTONOMOUS -.->|注入上下文 / 主动触发| ASSEMBLER
+    ASE -.->|触发截屏| INPUT
+    ASSEMBLER ==>|System Prompt| LLM

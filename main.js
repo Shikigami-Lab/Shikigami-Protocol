@@ -1,0 +1,609 @@
+'use strict';
+
+/**
+ * main.js — Shikigami Protocol Electron main process
+ *
+ * Responsibilities:
+ *   1. Read host/port from config/app.yaml (never hardcode)
+ *   2. Kill any stale process holding that port, then spawn server.py
+ *   3. Poll /sessions until server is ready, then create BrowserWindow
+ *   4. System tray: close window → hide (not quit)
+ *   5. IPC: 'take-screenshot' → desktopCapturer → base64 PNG
+ *   6. IPC: 'quit-app' → kill server → app.quit()
+ */
+
+const {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  ipcMain,
+  desktopCapturer,
+  nativeImage,
+  screen,
+  shell,
+} = require('electron');
+const { spawn, exec } = require('child_process');
+const path = require('path');
+const http = require('http');
+const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
+
+// ─────────────────── Single instance lock ───────────────────
+// Prevent two Electron processes (and thus two server.py instances) from running
+// at the same time — e.g. when the user double-clicks the exe while it's already open.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
+// ─────────────────── Runtime config (filled in whenReady) ───────────────────
+
+let SERVER_HOST   = '127.0.0.1';
+let SERVER_PORT   = 8000;
+let SERVER_URL    = '';           // set after reading app.yaml
+
+const POLL_INTERVAL  = 500;      // ms between readiness checks
+const POLL_MAX_TRIES = 60;       // 30 s total wait
+
+let mainWindow       = null;
+let splashWindow     = null;
+let tray             = null;
+let serverProcess    = null;
+let isQuitting       = false;
+let currentSplashPct = 0;
+let currentSplashMsg = 'Starting...';
+let splashReady      = false;          // true after ready-to-show fires
+let splashQueue      = [];             // buffered updates before window is ready
+
+// ─────────────────── Config helpers ───────────────────
+
+function getAppRoot() {
+  return app.isPackaged ? process.resourcesPath : __dirname;
+}
+
+/**
+ * Parse host and port from config/app.yaml without a full YAML parser.
+ * Falls back to 127.0.0.1:8000 if the file is missing or malformed.
+ */
+function readServerConfig(appRoot) {
+  try {
+    const yaml = fs.readFileSync(path.join(appRoot, 'config', 'app.yaml'), 'utf8');
+    const portMatch = yaml.match(/^port:\s*(\d+)/m);
+    const hostMatch = yaml.match(/^host:\s*["']?([^\s"'#\r\n]+)["']?/m);
+    return {
+      port: portMatch ? parseInt(portMatch[1], 10) : 7788,
+      host: hostMatch ? hostMatch[1] : '127.0.0.1',
+    };
+  } catch (_) {
+    return { port: 7788, host: '127.0.0.1' };
+  }
+}
+
+function getPythonCmd(appRoot) {
+  // --- PyInstaller Mode (Fallback to python if not compiled) ---
+  if (app.isPackaged) {
+    const exeName = process.platform === 'win32' ? 'server.exe' : 'server';
+    const exePath = path.join(appRoot, exeName);
+    if (fs.existsSync(exePath)) return exePath;
+  }
+  
+  // --- Source Mode ---
+  const venvPython = process.platform === 'win32'
+    ? path.join(appRoot, '.venv', 'Scripts', 'python.exe')
+    : path.join(appRoot, '.venv', 'bin', 'python');
+  if (fs.existsSync(venvPython)) return venvPython;
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+// ─────────────────── Port cleanup ───────────────────
+
+/**
+ * On Windows: find and kill any process LISTENING on the given port.
+ * Waits 600 ms after kill so the OS has time to release the socket.
+ */
+function killPortOwner(port) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') { resolve(); return; }
+
+    exec(`netstat -ano | findstr :${port}`, (err, stdout) => {
+      if (!stdout) { resolve(); return; }
+
+      const pids = new Set();
+      for (const line of stdout.split('\n')) {
+        if (!line.includes('LISTENING')) continue;
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && /^\d+$/.test(pid) && pid !== '0') pids.add(pid);
+      }
+
+      if (!pids.size) { resolve(); return; }
+
+      console.log(`[electron] killing stale process(es) on port ${port}: ${[...pids].join(', ')}`);
+      for (const pid of pids) {
+        spawn('taskkill', ['/F', '/PID', pid], { stdio: 'ignore' });
+      }
+      setTimeout(resolve, 600); // wait for OS to release port
+    });
+  });
+}
+
+// ─────────────────── Python server ───────────────────
+
+function startServer() {
+  const appRoot    = getAppRoot();
+  const pythonCmd  = getPythonCmd(appRoot);
+  const isCompiled = !pythonCmd.endsWith('python.exe') && !pythonCmd.endsWith('python') && !pythonCmd.endsWith('python3');
+  
+  const args = isCompiled ? [] : [path.join(appRoot, 'server.py')];
+
+  console.log(`[electron] appRoot:   ${appRoot}`);
+  console.log(`[electron] command:   ${pythonCmd}`);
+  if (!isCompiled) console.log(`[electron] script:    ${args[0]}`);
+  console.log(`[electron] endpoint:  ${SERVER_URL}`);
+
+  serverProcess = spawn(pythonCmd, args, {
+    cwd: appRoot,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', PYTHONUNBUFFERED: '1' },
+  });
+
+  serverProcess.stdout.on('data', (d) => {
+    const text = d.toString();
+    process.stdout.write(`[server] ${text}`);
+    // Parse SPLASH:<pct>:<msg> lines emitted by server.py for real-time progress
+    text.split('\n').forEach(line => {
+      const m = line.match(/^SPLASH:(\d+):(.*)$/);
+      if (m) setSplashProgress(parseInt(m[1], 10), m[2].trim());
+    });
+  });
+  serverProcess.stderr.on('data', (d) =>
+    process.stderr.write(`[server:err] ${d}`)
+  );
+  serverProcess.on('exit', (code) => {
+    if (!isQuitting) {
+      console.error(`[server] exited unexpectedly (code=${code})`);
+    }
+  });
+}
+
+/**
+ * Update splash progress by real startup step (not time-based).
+ * Stores state so splash shows correct progress when it first appears.
+ * @param {number} pct 0–100
+ * @param {string} msg status text
+ */
+function _execSplash(pct, msg) {
+  if (!splashWindow || splashWindow.isDestroyed() || !splashWindow.webContents) return;
+  const escaped = (msg || '').replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+  splashWindow.webContents.executeJavaScript(
+    `window.__setSplashProgress && window.__setSplashProgress(${pct}, '${escaped}')`
+  ).catch(() => {});
+}
+
+function setSplashProgress(pct, msg) {
+  currentSplashPct = pct;
+  currentSplashMsg = msg || currentSplashMsg;
+  if (!splashWindow || splashWindow.isDestroyed() || !splashWindow.webContents) return;
+  if (!splashReady) {
+    splashQueue.push({ pct: currentSplashPct, msg: currentSplashMsg });
+    return;
+  }
+  _execSplash(currentSplashPct, currentSplashMsg);
+}
+
+/**
+ * Read startup progress written by Python server (real steps: 35–100).
+ * Returns { pct, msg } or null if file missing/invalid.
+ */
+function readStartupProgress() {
+  try {
+    const p = path.join(getAppRoot(), 'startup_progress.json');
+    if (!fs.existsSync(p)) return null;
+    const raw = fs.readFileSync(p, 'utf8');
+    const data = JSON.parse(raw);
+    if (typeof data.pct !== 'number' || data.pct < 0) return null;
+    return { pct: Math.min(100, data.pct), msg: (data.msg && String(data.msg)) || '' };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Poll GET /sessions until HTTP 200 or retries exhausted.
+ * Progress updates now come via stdout (SPLASH: lines) — no file polling needed.
+ */
+function serverReady() {
+  return new Promise((resolve, reject) => {
+    let tries = 0;
+
+    function attempt() {
+      tries += 1;
+      http.get(`${SERVER_URL}/sessions`, (res) => {
+        res.resume();
+        if (res.statusCode === 200) {
+          setSplashProgress(100, 'Opening window...');
+          resolve();
+        } else {
+          scheduleRetry();
+        }
+      }).on('error', scheduleRetry);
+    }
+
+    function scheduleRetry() {
+      if (tries >= POLL_MAX_TRIES) {
+        setSplashProgress(100, 'Connection timed out, opening window...');
+        reject(new Error('Python server did not become ready in time'));
+        return;
+      }
+      setTimeout(attempt, POLL_INTERVAL);
+    }
+
+    attempt();
+  });
+}
+
+function killServer() {
+  if (!serverProcess) return;
+  const pid = serverProcess.pid;
+  serverProcess = null;
+  try {
+    if (process.platform === 'win32') {
+      // execFileSync blocks until taskkill exits — ensures server.exe is dead
+      // before Electron exits, so no locked files during uninstall.
+      const { execFileSync } = require('child_process');
+      try {
+        execFileSync('taskkill', ['/pid', String(pid), '/f', '/t'], { stdio: 'ignore', timeout: 5000 });
+      } catch (_) { /* process may already be gone */ }
+    } else {
+      process.kill(pid, 'SIGTERM');
+    }
+  } catch (_) { /* best-effort */ }
+}
+
+// ─────────────────── App icon ───────────────────
+
+/**
+ * Generate a round purple circle icon programmatically (no external file needed).
+ * Uses nativeImage.createFromBitmap which accepts raw RGBA pixel data.
+ * @param {number} size  Side length in pixels (power of 2 recommended)
+ */
+function makeIcon(size) {
+  const buf = Buffer.alloc(size * size * 4, 0); // all transparent
+  const cx = size / 2 - 0.5;
+  const cy = size / 2 - 0.5;
+  const r  = size / 2 - 1.5;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dist = Math.hypot(x - cx, y - cy);
+      if (dist > r) continue;
+      const i = (y * size + x) * 4;
+      // Indigo-purple gradient: darker in center, brighter towards edge
+      const t = dist / r;
+      buf[i]     = Math.round(80  + t * 60);  // R
+      buf[i + 1] = Math.round(60  + t * 40);  // G
+      buf[i + 2] = Math.round(200 + t * 30);  // B
+      buf[i + 3] = 255;                        // A
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size });
+}
+
+// Prefer assets/icon.ico or assets/shikigami_protocol_icon.png; else generated circle
+function getAppIcon() {
+  const appRoot = getAppRoot();
+  const icoPath = path.join(appRoot, 'assets', 'icon.ico');
+  const pngPath = path.join(appRoot, 'assets', 'shikigami_protocol_icon.png');
+  if (fs.existsSync(icoPath)) return nativeImage.createFromPath(icoPath);
+  if (fs.existsSync(pngPath)) return nativeImage.createFromPath(pngPath);
+  return makeIcon(64);
+}
+const TRAY_ICON = makeIcon(16);
+
+// ─────────────────── Splash (show immediately, before server ready) ───────────────────
+
+function createSplashWindow() {
+  const appRoot = getAppRoot();
+  const splashPath = path.join(appRoot, 'static', 'splash.html');
+  if (!fs.existsSync(splashPath)) {
+    console.warn('[electron] static/splash.html not found, skipping splash');
+    return;
+  }
+  const SPLASH_SIZE = 900;
+  const primary = screen.getPrimaryDisplay();
+  const { width: workW, height: workH } = primary.workAreaSize;
+  const splashX = Math.floor((workW - SPLASH_SIZE) / 2) + primary.workArea.x;
+  const splashY = Math.floor((workH - SPLASH_SIZE) / 2) + primary.workArea.y;
+
+  splashWindow = new BrowserWindow({
+    width: SPLASH_SIZE,
+    height: SPLASH_SIZE,
+    x: splashX,
+    y: splashY,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    show: false,
+    icon: getAppIcon(),
+    title: 'Shikigami Protocol',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  splashWindow.loadFile(splashPath);
+  splashWindow.setMenuBarVisibility(false);
+  splashWindow.once('ready-to-show', () => {
+    splashWindow.setBounds({ x: splashX, y: splashY, width: SPLASH_SIZE, height: SPLASH_SIZE });
+    splashWindow.show();
+    splashReady = true;
+    // Replay buffered SPLASH updates with staggered delays so the bar animates
+    const queue = splashQueue.splice(0);
+    if (queue.length > 0) {
+      queue.forEach(({ pct, msg }, i) => {
+        setTimeout(() => _execSplash(pct, msg), i * 220);
+      });
+    } else {
+      _execSplash(currentSplashPct, currentSplashMsg);
+    }
+  });
+  splashWindow.on('closed', () => { splashWindow = null; });
+}
+
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+}
+
+// ─────────────────── Browser window ───────────────────
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 800,
+    minHeight: 580,
+    backgroundColor: '#1a1a2e',
+    show: false,
+    icon: getAppIcon(),
+    title: 'Shikigami Protocol',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+
+  mainWindow.loadURL(SERVER_URL);
+  mainWindow.setMenuBarVisibility(false);
+
+  // Handle target="_blank" links: open docs-viewer pages in a proper child window.
+  // Any other same-origin navigation is allowed in-place; deny everything else.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.includes('/docs-viewer.html')) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 920,
+          height: 720,
+          autoHideMenuBar: true,
+          icon: getAppIcon(),
+          webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+        },
+      };
+    }
+    // Open external URLs in the system browser, deny new windows for everything else.
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    mainWindow.focus();
+    closeSplashWindow();
+  });
+
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
+}
+
+// ─────────────────── System tray ───────────────────
+
+function createTray() {
+  const appRoot = getAppRoot();
+  const icoPath = path.join(appRoot, 'assets', 'icon.ico');
+  const pngPath = path.join(appRoot, 'assets', 'shikigami_protocol_icon.png');
+  let icon = TRAY_ICON;
+  if (fs.existsSync(icoPath)) {
+    icon = nativeImage.createFromPath(icoPath);
+  } else if (fs.existsSync(pngPath)) {
+    icon = nativeImage.createFromPath(pngPath);
+    const small = icon.resize({ width: 16, height: 16 });
+    if (!small.isEmpty()) icon = small;
+  }
+
+  tray = new Tray(icon);
+  tray.setToolTip('Shikigami Protocol');
+
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: '显示窗口',
+      click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } },
+    },
+    { type: 'separator' },
+    { label: '退出 Shikigami', click: () => quitApp() },
+  ]));
+
+  tray.on('double-click', () => {
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+  });
+}
+
+// ─────────────────── Clean quit ───────────────────
+
+function quitApp() {
+  isQuitting = true;
+  killServer();
+  if (tray) { tray.destroy(); tray = null; }
+  app.quit();
+}
+
+// ─────────────────── IPC handlers ───────────────────
+
+ipcMain.handle('take-screenshot', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1920, height: 1080 },
+    });
+    if (!sources || sources.length === 0) return null;
+    return 'data:image/png;base64,' + sources[0].thumbnail.toPNG().toString('base64');
+  } catch (e) {
+    console.error('[screenshot] error:', e.message);
+    return null;
+  }
+});
+
+ipcMain.handle('quit-app', () => quitApp());
+
+ipcMain.handle('open-external-url', (_event, url) => {
+  if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+    shell.openExternal(url);
+  }
+});
+
+ipcMain.handle('check-for-updates', () => {
+  if (!app.isPackaged) return;
+  autoUpdater.checkForUpdates().catch((e) =>
+    console.error('[updater] check failed:', e.message)
+  );
+});
+
+ipcMain.handle('download-update', () => {
+  autoUpdater.downloadUpdate().catch((e) =>
+    console.error('[updater] download failed:', e.message)
+  );
+});
+
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
+// ─────────────────── App lifecycle ───────────────────
+
+// Disable Electron's HTTP disk cache so local static file changes always load fresh.
+// The backend is a local FastAPI server; caching only causes stale HTML/CSS/JS issues.
+app.commandLine.appendSwitch('disable-http-cache');
+
+// Set Windows App User Model ID — required for correct Task Manager grouping + icon
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.shikigami.protocol');
+}
+
+app.whenReady().then(async () => {
+  const appRoot = getAppRoot();
+
+  // 1. First-run: copy app.yaml.example → app.yaml if the latter doesn't exist
+  const yamlPath    = path.join(appRoot, 'config', 'app.yaml');
+  const examplePath = path.join(appRoot, 'config', 'app.yaml.example');
+  if (!fs.existsSync(yamlPath) && fs.existsSync(examplePath)) {
+    try {
+      fs.copyFileSync(examplePath, yamlPath);
+      console.log('[electron] created config/app.yaml from example');
+    } catch (e) {
+      console.warn('[electron] could not copy app.yaml.example:', e.message);
+    }
+  }
+
+  // 2. Read actual host/port from config/app.yaml
+  const cfg = readServerConfig(appRoot);
+  SERVER_HOST = cfg.host;
+  SERVER_PORT = cfg.port;
+  const clientHost = (SERVER_HOST === '0.0.0.0' || SERVER_HOST === '::') ? '127.0.0.1' : SERVER_HOST;
+  SERVER_URL  = `http://${clientHost}:${SERVER_PORT}`;
+  console.log(`[electron] server URL: ${SERVER_URL}`);
+  setSplashProgress(10, 'Config loaded');
+
+  // 3. Kill any stale process still holding the port
+  await killPortOwner(SERVER_PORT);
+  setSplashProgress(20, 'Releasing port...');
+
+  // 4. Show splash (loads local static/splash.html); ready-to-show will sync current progress
+  createSplashWindow();
+
+  // 5. Start server and wait for it
+  // Clear stale startup_progress.json from last run before polling begins,
+  // otherwise the interval will immediately read pct=100 and show a full bar.
+  try { fs.writeFileSync(path.join(appRoot, 'startup_progress.json'), '{"pct":0,"msg":""}', 'utf8'); } catch (_) {}
+  startServer();
+  setSplashProgress(30, 'Waiting for service to be ready...');
+  console.log('[electron] waiting for Python server to become ready...');
+
+  try {
+    await serverReady();
+    console.log('[electron] server ready — opening main window');
+  } catch (e) {
+    console.error('[electron]', e.message);
+    closeSplashWindow();
+    // Open window anyway — frontend will show connection error
+  }
+
+  createWindow();
+  createTray();
+
+  // ── Auto-updater ────────────────────────────────────────────────────────────
+  if (app.isPackaged) {
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    const sendUpdate = (status, data = {}) => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('update-status', { status, ...data });
+    };
+
+    autoUpdater.on('checking-for-update',  ()    => sendUpdate('checking'));
+    autoUpdater.on('update-available',     (i)   => sendUpdate('available',   { version: i.version }));
+    autoUpdater.on('update-not-available', ()    => sendUpdate('not-available'));
+    autoUpdater.on('download-progress',    (p)   => sendUpdate('downloading', { percent: Math.round(p.percent) }));
+    autoUpdater.on('update-downloaded',    (i)   => sendUpdate('ready',       { version: i.version }));
+    autoUpdater.on('error',                (e)   => {
+      console.error('[updater] error:', e);
+      sendUpdate('error', { message: e.message });
+    });
+
+    // Silent check 5 s after launch so the window is already visible
+    setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 5000);
+  }
+
+  app.on('activate', () => {
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+  });
+
+  // When user tries to open a second instance, focus the existing window instead.
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
+  killServer();
+});
+
+app.on('window-all-closed', () => {
+  // Intentionally empty — tray keeps the app alive
+});

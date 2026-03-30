@@ -1,0 +1,69 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main", "master", "dev" ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - 'CONTRIBUTING.md'
+      - '.gitignore'
+  pull_request:
+    branches: [ "main", "master", "dev" ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - 'CONTRIBUTING.md'
+      - '.gitignore'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10" # 项目推荐的 Python 版本
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: 'npm'
+
+    - name: Install Python Dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        # 安装依赖时如果失败可以尝试忽略一些本地特定的库，这里先正常安装核心库
+        pip install -r requirements.txt
+        pip install ruff
+
+    - name: Run Python Linter (Ruff)
+      shell: bash
+      run: |
+        # 仅检查致命的语法错误 (E9, F63, F7, F82)，不强制要求格式
+        ruff check . --select=E9,F63,F7,F82
+
+    - name: Check Python Syntax
+      shell: bash
+      run: |
+        # 编译主文件，检查是否存在基础语法错误
+        python -m py_compile server.py
+
+    - name: Install Node Dependencies
+      shell: bash
+      run: npm install
+
+    - name: Check Main Script Syntax
+      shell: bash
+      run: |
+        # 检查 main.js 语法是否正常
+        node --check main.js

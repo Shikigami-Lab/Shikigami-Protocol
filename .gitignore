@@ -1,0 +1,98 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 公开仓库专用 .gitignore（由 scripts/public_overlay 覆盖到同步目标）
+# 目的：防止 .env、运行数据、本地人格与模型等误入 git，避免私库信息泄漏。
+# 私库根目录 .gitignore 会先于 overlay 复制；本文件在 sync_public 最后一步覆盖同名项。
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 密钥与环境变量（勿提交；仅 .env.example 可公开）──────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ── 运行时数据（与 verify_public_tree 禁止项一致；勿提交）────────────────────
+data/
+sessions/
+groups/
+backups/
+Voices/
+
+# ── 人格目录：仅保留仓库内几个示例 JSON；本地运行产生的子目录 / DB 一律忽略 ──
+profiles/*/
+profiles/*.json
+!profiles/example_luna.json
+!profiles/example_luna_en.json
+!profiles/example_mochi.json
+!profiles/example_mochi_en.json
+
+# ── SQLite / Chroma / 向量库（可能在 profiles 下）────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+**/chroma_db/
+
+# ── 大模型与权重（按需本地下载）──────────────────────────────────────────────
+models/
+*.bin
+*.safetensors
+
+# ── Node / Electron 构建 ───────────────────────────────────────────────────────
+node_modules/
+dist/
+release/
+out/
+
+# ── 可能含本机路径或会话 id 的运行时配置 ─────────────────────────────────────
+config/sessions_meta.json
+config/ui_prefs.json
+
+# ── Electron：启动时由 Python 写入 ───────────────────────────────────────────
+startup_progress.json
+
+# ── Private 同步脚本（仅本地使用，不上传 GitHub）──────────────────────────────
+scripts/sync_private.py
+scripts/
+
+# ── 日志 ───────────────────────────────────────────────────────────────────────
+*.log
+**/logs/
+
+# ── IDE / 系统 ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+*.swp
+.DS_Store
+Thumbs.db
+/.tmp.driveupload
+/.tmp.drivedownload
+CLAUDE.md
+/docs/private
+/build
+server.spec
+server.exe
+server
+python_embed/
+python_embed.zip
+get-pip.py
+user_packages/
+/assets/readme/raw
+/.claude
+.claude/settings.json
+test_models.py
+test_models_results.md
+test_models_lmstudio.py
+test_models_lmstudio_results.md

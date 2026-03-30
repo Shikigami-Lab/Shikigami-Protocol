@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>文档</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #1a1a1e;
+      --text: #e8e8ed;
+      --muted: #9898a8;
+      --accent: #7c9cff;
+      --border: #333;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f5f8;
+        --text: #1a1a1e;
+        --muted: #5a5a6a;
+        --accent: #3457d5;
+        --border: #ccc;
+      }
+    }
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); margin: 0; line-height: 1.65; }
+    .toolbar {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 2;
+    }
+    .toolbar a { color: var(--accent); text-decoration: none; }
+    .toolbar a:hover { text-decoration: underline; }
+    .toolbar .sep { color: var(--muted); user-select: none; }
+    .doc-body { max-width: 48rem; margin: 0 auto; padding: 24px 20px 48px; }
+    .doc-body :is(h1, h2, h3) { margin-top: 1.25em; margin-bottom: 0.5em; line-height: 1.3; }
+    .doc-body h1 { font-size: 1.65rem; }
+    .doc-body h2 { font-size: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35em; }
+    .doc-body h3 { font-size: 1.05rem; }
+    .doc-body p { margin: 0.75em 0; }
+    .doc-body ul, .doc-body ol { padding-left: 1.35rem; }
+    .doc-body li { margin: 0.35em 0; }
+    .doc-body code {
+      background: rgba(127, 127, 127, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.88em;
+    }
+    .doc-body pre {
+      background: rgba(127, 127, 127, 0.12);
+      padding: 12px 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .doc-body pre code { background: none; padding: 0; font-size: 0.82rem; }
+    .doc-body table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 14px; }
+    .doc-body th, .doc-body td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    .doc-body th { background: rgba(127, 127, 127, 0.08); }
+    .doc-body blockquote {
+      border-left: 3px solid var(--accent);
+      margin: 1em 0;
+      padding: 4px 0 4px 16px;
+      color: var(--muted);
+    }
+    .doc-body hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+    .doc-body a { color: var(--accent); }
+    .err { color: #e57373; padding: 24px 20px; max-width: 48rem; margin: 0 auto; }
+    .loading { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <a href="#" id="btnBack" onclick="window.close(); return false;">← <span id="lblBack">返回应用</span></a>
+    <span class="sep">|</span>
+    <a id="rawLink" href="#"><span id="lblRaw">查看 Markdown 源码</span></a>
+  </div>
+  <div id="content" class="doc-body loading">…</div>
+  <script>
+    (function () {
+      var STEMS = {
+        GETTING_STARTED: 1,
+        ARCHITECTURE_REFERENCE: 1,
+        SETUP_FIRST_RUN: 1,
+        profile_prompts: 1,
+      };
+      var params = new URLSearchParams(window.location.search);
+      var doc = params.get('doc') || '';
+      var contentEl = document.getElementById('content');
+      var rawLink = document.getElementById('rawLink');
+
+      function allowName(name) {
+        if (!name || /[\\/]/.test(name)) return false;
+        var m = name.match(/^(.+?)\.(zh|en)\.md$/i);
+        if (m && STEMS[m[1]]) return true;
+        m = name.match(/^(.+?)\.md$/i);
+        return !!(m && STEMS[m[1]]);
+      }
+
+      function rewriteMdLinks(container) {
+        container.addEventListener('click', function (e) {
+          var a = e.target.closest('a');
+          if (!a || !container.contains(a)) return;
+          var href = a.getAttribute('href');
+          if (!href || /^https?:\/\//i.test(href) || href.startsWith('#')) return;
+          var base = href.replace(/^\.\//, '').split('/').pop();
+          if (!base || !allowName(base)) return;
+          e.preventDefault();
+          window.location.search = 'doc=' + encodeURIComponent(base);
+        });
+      }
+
+      if (!doc || !allowName(doc)) {
+        contentEl.className = 'err';
+        contentEl.textContent =
+          '无效的文档参数。请从「设置 → 入门」中的链接进入，或使用 ?doc=GETTING_STARTED.zh.md（白名单：*.zh.md / *.en.md，或旧名 *.md）。';
+        rawLink.style.display = 'none';
+        return;
+      }
+
+      rawLink.href = '/user-docs/' + encodeURIComponent(doc);
+      document.title = doc.replace(/\.md$/, '') + ' — 文档';
+
+      fetch('/user-docs/' + encodeURIComponent(doc))
+        .then(function (r) {
+          if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+          return r.text();
+        })
+        .then(function (md) {
+          if (typeof marked === 'undefined' || typeof marked.parse !== 'function') {
+            throw new Error('marked 未加载');
+          }
+          contentEl.className = 'doc-body';
+          contentEl.innerHTML = marked.parse(md);
+          rewriteMdLinks(contentEl);
+        })
+        .catch(function (err) {
+          contentEl.className = 'err';
+          contentEl.textContent = '加载失败：' + (err && err.message ? err.message : String(err));
+        });
+    })();
+  </script>
+</body>
+</html>

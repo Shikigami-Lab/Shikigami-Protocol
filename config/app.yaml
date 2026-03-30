@@ -1,0 +1,218 @@
+# 公开版用 config：仅保留「Gemini」「ollama_local」两个 LLM 预设，新用户不会看到私有配置里的全部模型
+port: 7788
+host: "0.0.0.0"
+log_level: "error"
+default_llm: "Gemini"
+default_tts: "edge_tts"
+max_history_turns: 60
+user_name: "用户"
+
+llm_presets:
+  Gemini:
+    type: openai_compat
+    api_key: ''
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    model: gemini-3-flash-preview
+    temperature: 1.0
+    top_p: 0.5
+    unsupported_params:
+    - presence_penalty
+    - frequency_penalty
+  ollama_local:
+    type: openai_compat
+    api_key: ''
+    base_url: http://localhost:11434/v1
+    model: qwen2.5:14b
+    temperature: 0.7
+    top_p: 0.7
+    presence_penalty: 0.05
+    frequency_penalty: 0.05
+
+tts:
+  edge_tts:
+    voice: "zh-CN-XiaoyiNeural"
+    rate: +0%
+  gpt_sovits:
+    host: "127.0.0.1"
+    port: 9880
+    text_lang: "zh"
+    prompt_lang: "zh"
+    speed_factor: 1.0
+    temperature: 2.0
+    top_p: 1.0
+    top_k: 5
+    repetition_penalty: 1.35
+    prompt_text: ""
+    ref_audio_path: ""
+    dir: ''
+  qwen3_tts:
+    mode: "voice_clone"
+    model_id: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+    device: "cuda:0"
+    dtype: "bfloat16"
+    attn_implementation: "eager"
+    use_torch_compile: true
+    use_sentence_chunking: true
+    sentence_max_chars: 30
+    language: "Chinese"
+    speaker: "Vivian"
+    instruct: ""
+    voice_description: ""
+    ref_audio_path: ""
+    ref_text: ""
+    temperature: 0.9
+    top_p: 1.0
+    top_k: 50
+    repetition_penalty: 1.05
+
+  kokoro:
+    voice: ''
+    lang: zh
+    speed: 1.0
+    auto_detect_lang: true
+stt:
+  enabled: false
+  model_size: "medium"
+  model_path: ""
+  device: "cpu"
+  compute_type: "int8"
+  language: "zh"
+
+engines:
+  emotion:
+    enabled: true
+    classification_frequency: 5
+  affinity:
+    enabled: true
+    llm_adjust_frequency: 5
+    delta_clamp: 15.0
+  energy:
+    refresh_interval: 300
+    recovery_skip_if_active_secs: 300
+    message_cost: 3
+    recovery_gain_per_300s: 2
+    full_recovery_secs: 14400
+
+secondary_models:
+  analysis:
+    enabled: true
+    preset: "Gemini"
+  reflection:
+    enabled: true
+    primary_preset: "Gemini"
+    fallback_preset: "Gemini"
+
+    gen_params: {}
+memory:
+  enabled: true
+  vector_enabled: true
+  extraction_frequency: 1
+  extraction_weight_threshold: 0.5
+  max_facts_in_prompt: 30
+  day_summary_enabled: true
+  day_summary_keep_days: 7
+  day_summary_max_messages: 300
+  day_summary_max_conv_chars: 12000
+  recent_fact_quota: 10
+  semantic_fact_quota: 20
+  recent_days: 3
+  semantic_distance: 0.45
+  vector_dedup_distance_threshold: 0.15
+  embedding:
+    provider: gemini
+    gemini_model: gemini-embedding-001
+    local_model: all-MiniLM-L6-v2
+    device: auto
+    offline: false
+  max_history_turns: 60
+  vector_recent_threshold: 0.65
+  vector_historical_threshold: 0.4
+  vector_recent_limit: 3
+  vector_historical_limit: 2
+  daily_run_at_hour: 0
+  daily_run_at_minute: 5
+  daily_forgetting_enabled: true
+  daily_decay_factor: 0.998
+  daily_decay_min_weight: 0.1
+  daily_reinforcement_enabled: true
+  daily_consolidation_enabled: true
+  daily_consolidation_after_days: 30
+  daily_consolidation_weight_below: 1.0
+  daily_consolidation_batch_max: 15
+
+reflection:
+  enabled: false
+  interval_seconds: 180
+  interval_min_seconds: 20
+  interval_max_seconds: 1800
+  retry_seconds: 60
+  recent_turns: 10
+  state_ttl_seconds: 600
+  idle_throttle_after_seconds: 3600
+  idle_interval_seconds: 600
+  recent_dialogue_max_turns: 8
+
+ase:
+  enabled: false
+  mode: "medium"
+  vlm_mode: "never"
+  modes:
+    low:
+      check_interval: 600
+      min_silent_seconds: 900
+      urgency_threshold: 0.7
+      min_interval: 1800
+      max_per_24h: 30
+      max_consecutive_without_response: 3
+      message_config:
+        extra_behavior: ''
+    medium:
+      check_interval: 300
+      min_silent_seconds: 300
+      urgency_threshold: 0.6
+      min_interval: 600
+      max_per_24h: 150
+      max_consecutive_without_response: 5
+      message_config:
+        extra_behavior: ''
+    high:
+      check_interval: 120
+      min_silent_seconds: 180
+      urgency_threshold: 0.2
+      min_interval: 240
+      max_per_24h: 30
+      max_consecutive_without_response: 10
+      message_config:
+        extra_behavior: ''
+    game:
+      check_interval: 60
+      min_silent_seconds: 90
+      urgency_threshold: 0
+      min_interval: 120
+      max_per_24h: 40
+      message_config:
+        n_history_turns: 5
+        max_facts_in_prompt: 3
+        extra_behavior: ""
+    focus:
+      check_interval: 600
+      min_silent_seconds: 1200
+      urgency_threshold: 0.75
+      min_interval: 1800
+      max_per_24h: 3
+      max_consecutive_without_response: 2
+      message_config:
+        extra_behavior: ''
+  proactive_hints:
+    morning_greeting_enabled: true
+    morning_hours: [5, 6, 7, 8, 9, 10]
+    check_in_enabled: true
+    check_in_after_silent_seconds: 3600
+    check_in_probability: 0.5
+
+vlm:
+  enabled: false
+  model_preset: "Gemini"
+  for_chat: true
+  for_ase: true
+  ase_wait_seconds: 3

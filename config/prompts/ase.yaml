@@ -1,0 +1,122 @@
+ase:
+# =============================================================================
+# ase.yaml — 主动发言引擎 context strings (src/core/ase.py)
+# =============================================================================
+
+# ── 时段标签（_build_heartbeat_ctx 中使用）────────────────────────────────────
+
+  time_periods:
+    dawn:      {zh: "清晨", en: "early morning"}
+    morning:   {zh: "上午", en: "morning"}
+    midday:    {zh: "午间", en: "midday"}
+    afternoon: {zh: "下午", en: "afternoon"}
+    evening:   {zh: "傍晚", en: "evening"}
+    night:     {zh: "深夜", en: "late night"}
+
+# ── 接续上次主动发言 ──────────────────────────────────────────────────────────
+# $snippet = 上次发言截断文本
+
+  last_spoke_continuation:
+    zh: "【接续上次主动发言】你上次主动说的是：「$snippet」。用户尚未回复。请接着这句话往下说或换一个角度，不要原样重复，也不要问对方是否不在或不想回复。"
+    en: "[Continue last proactive message] You last initiated with: \"$snippet\". The user hasn't replied yet. Continue from that, or take a different angle — don't repeat verbatim, and don't ask if they're away or don't want to reply."
+
+# ── 时段提示（仅深夜/清晨）────────────────────────────────────────────────────
+# $time_ctx = 时段标签
+
+  time_note:
+    zh: "此刻是$time_ctx。"
+    en: "It's $time_ctx right now."
+
+# ── 场景上下文（VLM/thought/topic/静默）──────────────────────────────────────
+
+  vlm_notice:
+    zh: "你注意到对方的屏幕上——$vlm_description"
+    en: "You notice what's on their screen — $vlm_description"
+
+  thought_after_vlm:
+    zh: "这让你想起了：$thought"
+    en: "This makes you think of: $thought"
+
+  thought_alone:
+    zh: "你一直留意着：$thought"
+    en: "You've been keeping this in mind: $thought"
+
+  topic_with_thought:
+    zh: "你们上次还聊到了「$topic_hint」。"
+    en: "You were also talking about \"$topic_hint\" last time."
+
+  topic_alone:
+    zh: "你想起了之前关于「$topic_hint」的对话。"
+    en: "You're thinking back to the conversation about \"$topic_hint\"."
+
+  silence_generic:
+    zh: "现在是$time_ctx，四周很静。"
+    en: "It's $time_ctx and everything is quiet."
+
+  date_hint:
+    zh: "当前日期与节日见上方时间上下文；若自然可带出节日或日期相关的一句。"
+    en: "See the time context above for current date and holidays; if natural, bring in a holiday or date-related remark."
+
+  style_hint_prefix:
+    zh: "角色此刻倾向：$style_hint"
+    en: "Character's current tendency: $style_hint"
+
+# ── ASE 行为指导（character-agnostic）────────────────────────────────────────
+
+  behavioral_guidance:
+    zh: "【此刻你是主动开口，不是在回应对方的提问】\n- 直接说你想说的，不要以「有什么我能帮你的吗」或「我想问你……」之类的开头\n- 简短、自然，说完就够，不需要展开成长篇\n- 不要主动提起对方「不在」「不说话了」之类的话题\n- 如果此刻真的没有值得说的话，可以只回复「（静默）」"
+    en: "[You are speaking proactively — not responding to a question]\n- Say what you want to say directly; don't open with \"Is there anything I can help you with?\" or \"I wanted to ask you...\"\n- Brief and natural — say it and that's enough, no need to expand into a long message\n- Don't bring up that they're \"not here\" or \"not talking\"\n- If there's genuinely nothing worth saying right now, you may reply with just \"(silence)\""
+
+# ── Stage trigger 消息（_build_stage_trigger，随机选一）─────────────────────
+
+  stage_triggers:
+    vlm:
+      zh:
+        - "你注意到了屏幕上的一些东西，心里有话想说。"
+        - "你的目光在屏幕上停了一会儿，想开口说点什么。"
+        - "屏幕上有些东西让你心里一动，你想说点什么。"
+      en:
+        - "You noticed something on the screen and have something to say."
+        - "Your gaze lingered on the screen for a moment — you feel like saying something."
+        - "Something on the screen stirred you, and you want to say something."
+
+    thought:
+      zh:
+        - "你有点想开口了。"
+        - "你想了想，想接一句。"
+        - "你刚才在想的事，可以提一嘴。"
+      en:
+        - "You feel like speaking up."
+        - "You thought it over and want to add something."
+        - "What you were just thinking about — you can bring it up."
+
+    topic:
+      zh: "你想起了之前没说完的事，心里有话想说。"
+      en: "You're thinking of something from before that wasn't finished — you have something to say."
+
+    default:
+      zh:
+        - "你沉默了一段时间，此刻有话想说。"
+        - "你心里有些话，想开口。"
+        - "你此刻有话想说。"
+      en:
+        - "You've been quiet for a while — right now you have something to say."
+        - "There's something on your mind, you want to speak."
+        - "You have something to say right now."
+
+# ── 各模式默认 extra_behavior（UI 里留空时使用）────────────────────────────────
+
+  mode_extra_behavior:
+    game:
+      zh: |
+        【游戏模式】你正在陪用户玩游戏。
+        - 说话简短活泼，控制在 1~2 句以内
+        - 可以讨论游戏进展、加油打气、调侃失误
+        - 不要长篇大论，不要突然切换到无关话题
+        - 如果看到了屏幕内容，结合画面说话
+      en: |
+        [Game Mode] You're keeping the user company while they play.
+        - Keep it short and lively — 1-2 sentences max
+        - Feel free to comment on game progress, cheer them on, or tease a mishap
+        - No long speeches; don't switch to unrelated topics
+        - If you can see the screen, work the visuals into your reply

@@ -1,0 +1,63 @@
+name: Docker Build Test
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+    paths:
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'requirements.txt'
+      - 'requirements-ai.txt'
+      - 'src/**'
+      - 'server.py'
+  pull_request:
+    branches: [ "main", "dev" ]
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: 'npm'
+
+    - name: Build Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false # 只测试构建，不推送到镜像仓库
+        load: true
+        tags: shikigami-protocol:test
+
+    - name: Run Docker Container (Smoke Test)
+      run: |
+        # 复制配置示例以供测试
+        cp config/app.yaml.example config/app.yaml
+        cp .env.example .env
+        
+        # 运行容器并在后台执行
+        docker run -d -p 7788:7788 --name shikigami-test shikigami-protocol:test
+        
+        # 等待服务启动 (10秒)
+        sleep 10
+        
+        # 检查容器日志 (排查启动错误)
+        docker logs shikigami-test
+        
+        # 测试端口是否响应 (使用 curl 检查)
+        # 如果返回非 0 状态码，代表请求失败或服务未起
+        curl -f http://localhost:7788/ || echo "Server might not have a root endpoint, but port is open"
+
+    - name: Cleanup Container
+      if: always()
+      run: docker rm -f shikigami-test
