@@ -313,6 +313,7 @@ shikigami-protocol/
 - **本地与自托管**：在遵守 AGPL 的前提下，可以自由使用、修改、再分发。
 - **网络服务 / SaaS**：若基于本项目的修改版本向用户提供网络服务，须遵守 AGPL 关于提供「对应源码」等义务。
 - **贡献**：欢迎 PR（Demo 截图/GIF、示例 SFW 角色卡、翻译、Bug 报告）。提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，并按 [DCO 1.1](DCO.md) 使用 `git commit -s`（`Signed-off-by`）。
+- **安全**：请勿在公开 Issue 中披露可利用漏洞；报告方式见 [SECURITY.md](SECURITY.md)。
 
 *以上为摘要，不构成法律意见；以 [LICENSE](LICENSE) 与 [DCO](DCO.md) 全文为准。*
 

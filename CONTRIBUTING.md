@@ -53,7 +53,7 @@ AI tools are neither encouraged nor discouraged. If you use them, you are still 
 
 ## Security issues
 
-Do **not** post exploit details in public issues. Report according to the security / maintainer contact described in the README or Security policy.
+Do **not** post exploit details in public issues. See **[SECURITY.md](SECURITY.md)** for how to report vulnerabilities privately.
 
 ## Relicensing from MIT to AGPL-3.0
 

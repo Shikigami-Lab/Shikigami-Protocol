@@ -127,6 +127,10 @@ GEMINI_API_KEY=你的密钥
 
 也可在 UI 启动后通过 **设置 → 模型** 直接填写，会自动写回 `.env`。
 
+### PUBLIC_MODE（公开分发 / 受限构建）
+
+面向终端用户的安装包可在环境中设置 `PUBLIC_MODE=true`（见 `.env.example`），用于限制情绪键集合等「公开树」行为；**日常自用源码运行一般不要开启**。服务器侧在 `server.py` 中读取该变量并写入 `app.state.public_mode`。
+
 ---
 
 ## 常见问题与排查
