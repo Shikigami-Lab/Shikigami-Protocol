@@ -45,6 +45,8 @@ async def start_energy_refresh(
         for session in sessions:
             try:
                 energy_cfg = get_effective_engine_config(app, session.profile_id, "energy")
+                if energy_cfg.get("enabled", True) is False:
+                    continue
                 refresh_interval = energy_cfg.get("refresh_interval", 300)
                 recovery_gain = energy_cfg.get("recovery_gain_per_300s")
                 if recovery_gain is not None:

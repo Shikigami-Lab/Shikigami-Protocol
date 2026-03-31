@@ -211,10 +211,14 @@ class EmotionEngine:
         app,
     ) -> bool:
         """每 N 条 AI 回复触发一次情绪 LLM 分类。返回 True 若情绪发生变化。"""
+        from src.config.effective_config import get_effective_engine_config
+        engine_cfg = get_effective_engine_config(app, session.profile_id, "emotion")
+        if engine_cfg.get("enabled", True) is False:
+            return False
+        freq = engine_cfg.get("classification_frequency", 5)
+
         state = self.load_state(session)
         count = state.get("classifier_call_count", 0)
-        from src.config.effective_config import get_effective_engine_config
-        freq = get_effective_engine_config(app, session.profile_id, "emotion").get("classification_frequency", 5)
 
         state["classifier_call_count"] = count + 1
         self.save_state(session, state)
@@ -500,7 +504,14 @@ class EmotionEngine:
 
             changed = primary != prev_primary
             if changed:
-                self.apply_emotion_to_energy(session, primary)
+                try:
+                    from src.config.effective_config import get_effective_engine_config
+                    energy_cfg = get_effective_engine_config(app, session.profile_id, "energy")
+                    if energy_cfg.get("enabled", True) is not False:
+                        self.apply_emotion_to_energy(session, primary)
+                except Exception:
+                    # 不让能量联动影响情绪分类主流程
+                    pass
             return changed
 
         except Exception as e:

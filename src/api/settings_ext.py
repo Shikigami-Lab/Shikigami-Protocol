@@ -2006,6 +2006,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
             "affinity_enabled":     g_af.get("enabled", True),
             "affinity_freq":        g_af.get("llm_adjust_frequency", 5),
             "affinity_delta_clamp": g_af.get("delta_clamp", 15),
+            "energy_enabled":       g_en.get("enabled", True),
             "energy_interval":      g_en.get("refresh_interval", 300),
             "reflection_enabled":   g_rf.get("enabled", True),
             "ase_enabled":          g_ase.get("enabled", True),
@@ -2017,6 +2018,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
         "affinity_enabled":      af.get("enabled"),
         "affinity_freq":         af.get("llm_adjust_frequency"),
         "affinity_delta_clamp":  af.get("delta_clamp"),
+        "energy_enabled":        en.get("enabled"),
         "energy_interval":       en.get("refresh_interval"),
         "reflection_enabled":    rf.get("enabled"),
         "ase_enabled":           ase.get("enabled"),
@@ -2030,6 +2032,7 @@ class ProfileEngineConfigBody(BaseModel):
     affinity_enabled:     Optional[bool]  = None
     affinity_freq:        Optional[int]   = None
     affinity_delta_clamp: Optional[float] = None
+    energy_enabled:       Optional[bool]  = None
     energy_interval:      Optional[int]   = None
     reflection_enabled:   Optional[bool]  = None
     ase_enabled:          Optional[bool]  = None
@@ -2060,6 +2063,7 @@ async def save_profile_engine_config(profile_id: str, body: ProfileEngineConfigB
 
     _set("emotion",     "enabled",                  body.emotion_enabled)
     _set("affinity",    "enabled",                  body.affinity_enabled)
+    _set("energy",      "enabled",                  body.energy_enabled)
     _set("reflection",  "enabled",                  body.reflection_enabled)
     _set("ase",         "enabled",                  body.ase_enabled)
     if body.emotion_freq is not None:

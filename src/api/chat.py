@@ -223,12 +223,14 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     emotion_engine = getattr(request.app.state, "emotion_engine", None)
                     if emotion_engine:
                         from src.config.effective_config import get_effective_engine_config
-                        cost = get_effective_engine_config(request.app, session.profile_id, "energy").get("message_cost", 2.0)
+                        energy_cfg = get_effective_engine_config(request.app, session.profile_id, "energy")
+                        cost = energy_cfg.get("message_cost", 2.0)
                         try:
                             cost = max(0.0, min(50.0, float(cost)))
                         except (TypeError, ValueError):
                             cost = 2.0
-                        emotion_engine.apply_message_cost(session, cost=cost)
+                        if energy_cfg.get("enabled", True) is not False:
+                            emotion_engine.apply_message_cost(session, cost=cost)
                         recent_ai = store.get_recent_ai_messages(3)
                         asyncio.create_task(_fire_task(
                             lambda: emotion_engine.maybe_classify(session, recent_ai, request.app),
@@ -436,12 +438,14 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                 emotion_engine = getattr(request.app.state, "emotion_engine", None)
                 if emotion_engine:
                     from src.config.effective_config import get_effective_engine_config
-                    cost = get_effective_engine_config(request.app, session.profile_id, "energy").get("message_cost", 2.0)
+                    energy_cfg = get_effective_engine_config(request.app, session.profile_id, "energy")
+                    cost = energy_cfg.get("message_cost", 2.0)
                     try:
                         cost = max(0.0, min(50.0, float(cost)))
                     except (TypeError, ValueError):
                         cost = 2.0
-                    emotion_engine.apply_message_cost(session, cost=cost)
+                    if energy_cfg.get("enabled", True) is not False:
+                        emotion_engine.apply_message_cost(session, cost=cost)
                     recent_ai = store.get_recent_ai_messages(3)
                     asyncio.create_task(_fire_task(
                         lambda: emotion_engine.maybe_classify(session, recent_ai, request.app),

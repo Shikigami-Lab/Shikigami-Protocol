@@ -230,6 +230,8 @@ const SettingsMixin = {
       promptAutofillShowDebug: false,
       specialDates: [],
       newSpecialDate: { date: '', label: '' },
+      _specialDatesLoaded: false,
+      _specialDatesSaveTimer: null,
 
       // ── Inline action confirmation (replaces window.confirm to avoid Electron focus-loss) ──
       confirmingAction: null,  // { key, label, data }
@@ -748,6 +750,14 @@ const SettingsMixin = {
         if (!this._profileEnginesFormLoaded || !this.profileForm.profile_id) return;
         clearTimeout(this._profileEnginesSaveTimer);
         this._profileEnginesSaveTimer = setTimeout(() => this.saveProfileEngineConfig({ skipToast: true }), 800);
+      },
+    },
+    specialDates: {
+      deep: true,
+      handler() {
+        if (!this._specialDatesLoaded || !this.profileForm.profile_id) return;
+        clearTimeout(this._specialDatesSaveTimer);
+        this._specialDatesSaveTimer = setTimeout(() => this.saveSpecialDates({ skipToast: true }), 800);
       },
     },
     profilePromptForm: {
@@ -2406,11 +2416,13 @@ const SettingsMixin = {
     },
 
     async loadSpecialDates(profileId) {
+      this._specialDatesLoaded = false;
       try {
         const r = await fetch(getBaseUrl() + API_PATHS.profileSpecialDates(profileId));
         const d = await r.json();
         this.specialDates = d.dates || [];
       } catch (_) { this.specialDates = []; }
+      this.$nextTick(() => { this._specialDatesLoaded = true; });
     },
     addSpecialDate() {
       if (!this.newSpecialDate.date || !this.newSpecialDate.label) return;
