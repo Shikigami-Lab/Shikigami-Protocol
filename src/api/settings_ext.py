@@ -569,11 +569,9 @@ async def test_tts_config(request: Request):
 
         provider = get_tts_provider(tts_cfg)
         test_text = "你好，这是一条语音测试。"
-        chunks = []
-        async for chunk in provider.stream(test_text):
-            if chunk:
-                chunks.append(chunk)
-        audio_bytes = b"".join(chunks)
+        audio_bytes = await provider.synthesize(test_text)
+        if not audio_bytes:
+            raise RuntimeError("empty audio returned from provider")
         audio_b64 = base64.b64encode(audio_bytes).decode()
         mime = "audio/mpeg" if tts_type == "edge_tts" else "audio/wav"
         return {"ok": True, "audio": audio_b64, "mime": mime}
@@ -880,6 +878,9 @@ class GenerateVoiceBody(BaseModel):
 class SaveGeneratedVoiceBody(BaseModel):
     targets: List[str] = ["gpt_sovits", "qwen3_tts"]
     filename: str = ""
+    # Optional reference text used to generate this voice; when provided,
+    # it will be saved into the per-profile ref_text fields together with audio.
+    ref_text: Optional[str] = None
 
 
 def _generate_voice_design_sync(
@@ -979,7 +980,7 @@ async def generate_profile_voice(profile_id: str, body: GenerateVoiceBody, reque
 
 @router.post("/profiles/{profile_id}/save-generated-voice")
 async def save_generated_voice(profile_id: str, body: SaveGeneratedVoiceBody):
-    """将预览 WAV 保存为永久参考音频，并更新 profile 的 ref_audio_path 字段。"""
+    """将预览 WAV 保存为永久参考音频，并更新 profile 的 ref_audio_path/ref_text 字段。"""
     preview_path = os.path.join(_PROJECT_ROOT, "Voices", f"{profile_id}_preview.wav")
     if not os.path.isfile(preview_path):
         raise HTTPException(status_code=404, detail="未找到预览文件，请先生成音色")
@@ -996,10 +997,20 @@ async def save_generated_voice(profile_id: str, body: SaveGeneratedVoiceBody):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
     with open(path, "r", encoding="utf-8") as f:
         card = json.load(f)
+    # Persist audio path for selected targets
     if "gpt_sovits" in body.targets:
         card["gpt_sovits_ref_audio_path"] = rel_path
     if "qwen3_tts" in body.targets:
         card["qwen3_tts_ref_audio_path"] = rel_path
+
+    # Optionally persist the reference text alongside the audio so that
+    # subsequent sessions and UIs can display/override it.
+    ref_text = (body.ref_text or "").strip() if body.ref_text is not None else None
+    if ref_text:
+        if "gpt_sovits" in body.targets:
+            card["gpt_sovits_ref_text"] = ref_text
+        if "qwen3_tts" in body.targets:
+            card["qwen3_tts_ref_text"] = ref_text
     with open(path, "w", encoding="utf-8") as f:
         json.dump(card, f, ensure_ascii=False, indent=2)
 

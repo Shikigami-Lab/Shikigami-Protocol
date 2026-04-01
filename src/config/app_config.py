@@ -80,7 +80,12 @@ class AppConfig:
         if not sec.get("enabled"):
             return None
         preset_name = sec.get("preset", "")
-        return self.llm_presets.get(preset_name) if preset_name else None
+        # 特殊值："" = 使用激活模型；"__none__" = 不使用分析模型
+        if preset_name == "__none__":
+            return None
+        if not preset_name:
+            return self.get_active_llm_preset()
+        return self.llm_presets.get(preset_name)
 
     def get_engine_config(self, engine: str) -> Dict[str, Any]:
         """返回指定引擎的配置 dict，不存在时返回空 dict。"""
@@ -190,10 +195,15 @@ class AppConfig:
         if not sec.get("enabled", True):
             return None
         primary_name = sec.get("primary_preset", "")
-        if primary_name and primary_name in self.llm_presets:
+        # 特殊值："__none__"=忽略该槽位；"__active__"=使用激活模型
+        if primary_name == "__active__":
+            return self.get_active_llm_preset()
+        if primary_name and primary_name != "__none__" and primary_name in self.llm_presets:
             return self.llm_presets[primary_name]
         fallback_name = sec.get("fallback_preset", "")
-        if fallback_name and fallback_name in self.llm_presets:
+        if fallback_name == "__active__":
+            return self.get_active_llm_preset()
+        if fallback_name and fallback_name != "__none__" and fallback_name in self.llm_presets:
             return self.llm_presets[fallback_name]
         return None
 

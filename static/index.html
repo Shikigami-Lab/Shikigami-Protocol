@@ -1517,7 +1517,8 @@
             <div class="form-field">
               <div class="form-label">{{ t('lblUsePreset') }}</div>
               <select class="form-select" v-model="analysisModelPreset">
-                <option value="">{{ t('optSelectPreset') }}</option>
+                <option value="__none__">{{ t('optNotSet') }}</option>
+                <option value="">{{ t('optActiveModel') }}</option>
                 <option v-for="(p, k) in llmPresets" :key="k" :value="k">{{ k }}</option>
               </select>
             </div>
@@ -1583,7 +1584,8 @@
               <select class="form-select" style="font-size:12px;padding:3px 6px;"
                       v-model="reflectionForm.reflection_primary_preset"
                       :disabled="!reflectionForm.reflection_enabled || !reflectionForm.reflection_model_enabled">
-                <option value="">{{ t('optNotSet') }}</option>
+                <option value="__none__">{{ t('optNotSet') }}</option>
+                <option value="__active__">{{ t('optActiveModel') }}</option>
                 <option v-for="(_, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
               </select>
             </div>
@@ -1599,7 +1601,8 @@
               <select class="form-select" style="font-size:12px;padding:3px 6px;"
                       v-model="reflectionForm.reflection_fallback_preset"
                       :disabled="!reflectionForm.reflection_enabled || !reflectionForm.reflection_model_enabled">
-                <option value="">{{ t('optNotSet') }}</option>
+                <option value="__none__">{{ t('optNotSet') }}</option>
+                <option value="__active__">{{ t('optActiveModel') }}</option>
                 <option v-for="(_, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
               </select>
             </div>
@@ -1669,7 +1672,8 @@
               <select class="form-select" style="font-size:12px;padding:3px 6px;"
                       v-model="reflectionForm.vlm_model_preset"
                       :disabled="!reflectionForm.vlm_enabled">
-                <option value="">{{ t('optNotSet') }}</option>
+                <option value="__none__">{{ t('optNotSet') }}</option>
+                <option value="__active__">{{ t('optActiveModel') }}</option>
                 <option v-for="(_, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
               </select>
             </div>
@@ -1735,6 +1739,7 @@
               <div class="form-label">{{ t('lblExtractionModel') }}</div>
               <select class="form-select" v-model="memoryProfileForm.extraction_llm_preset"
                       style="min-width:160px;" :disabled="!selectedProfileId">
+                <option value="__none__">{{ t('optNotSet') }}</option>
                 <option value="">{{ t('optActiveModel') }}</option>
                 <option v-for="(_, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
               </select>

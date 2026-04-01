@@ -45,15 +45,17 @@ class GptSoVitsProvider(TTSProvider):
         payload = {
             "text": text,
             "text_lang": self.text_lang,
-            "prompt_text": self.prompt_text,
-            "prompt_lang": self.prompt_lang,
-            "ref_audio_path": self.ref_audio_path,
             "speed_factor": self.speed_factor,
             "temperature": self.temperature,
             "top_p": self.top_p,
             "top_k": self.top_k,
             "repetition_penalty": self.repetition_penalty,
         }
+        if self.prompt_text:
+            payload["prompt_text"] = self.prompt_text
+            payload["prompt_lang"] = self.prompt_lang
+        if self.ref_audio_path:
+            payload["ref_audio_path"] = self.ref_audio_path
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 r = await client.post(f"{self.base_url}/tts", json=payload)

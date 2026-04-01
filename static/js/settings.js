@@ -2351,6 +2351,8 @@ const SettingsMixin = {
           body: JSON.stringify({
             targets,
             filename: this.profileForm.voiceGenFilename.trim(),
+            // Persist the same reference text used for generation into profile ref_text
+            ref_text: (this.profileForm.voiceGenText || '').trim(),
           }),
         });
         if (res.ok) {
@@ -2358,6 +2360,13 @@ const SettingsMixin = {
           // 同步 profileForm 里对应 ref path
           if (targets.includes('gpt_sovits'))  this.profileForm.gpt_sovits_ref_audio_path = d.saved_path;
           if (targets.includes('qwen3_tts'))   this.profileForm.qwen3_tts_ref_audio_path  = d.saved_path;
+          // Also sync the reference text into profile-level fields so that
+          // users don't need to copy it manually after saving the generated voice.
+          const refText = (this.profileForm.voiceGenText || '').trim();
+          if (refText) {
+            if (targets.includes('gpt_sovits')) this.profileForm.gpt_sovits_ref_text = refText;
+            if (targets.includes('qwen3_tts'))  this.profileForm.qwen3_tts_ref_text  = refText;
+          }
           this.showToast(this.t('toastVoiceGenSaved'), 'success');
         } else {
           const d = await res.json().catch(() => ({}));

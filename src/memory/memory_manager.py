@@ -514,6 +514,9 @@ class MemoryManager:
             from src.llm.registry import get_provider
             from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response
             extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
+            # 特殊值："__none__"=不生成摘要；""=使用激活模型
+            if extraction_preset_name == "__none__":
+                return None
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:
@@ -590,6 +593,9 @@ class MemoryManager:
         try:
             from src.llm.registry import get_provider
             extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
+            # 特殊值："__none__"=不做合并；""=使用激活模型
+            if extraction_preset_name == "__none__":
+                return False, 0
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:
@@ -951,6 +957,10 @@ class MemoryManager:
             from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response
             # 支持独立的提取模型配置；未配置则用当前激活 preset
             extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
+            # 特殊值："__none__"=不做记忆提取；""=使用激活模型
+            if extraction_preset_name == "__none__":
+                logger.debug("[MemoryManager] extraction_llm_preset='__none__', skip extraction")
+                return 0
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:

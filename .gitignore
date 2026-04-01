@@ -63,8 +63,9 @@ config/ui_prefs.json
 startup_progress.json
 
 # ── Private 同步脚本（仅本地使用，不上传 GitHub）──────────────────────────────
-scripts/sync_private.py
-scripts/
+scripts/*
+!scripts/start_gptsovits.bat
+!scripts/start_gptsovits.sh
 
 # ── 日志 ───────────────────────────────────────────────────────────────────────
 *.log

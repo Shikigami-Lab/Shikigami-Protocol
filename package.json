@@ -39,6 +39,8 @@
           "config/**",
           "static/**",
           "assets/**",
+          "scripts/start_gptsovits.bat",
+          "scripts/start_gptsovits.sh",
           "profiles/*.json",
           "profiles/example*/**",
           "docs/*.md",
