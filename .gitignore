@@ -66,6 +66,7 @@ startup_progress.json
 scripts/*
 !scripts/start_gptsovits.bat
 !scripts/start_gptsovits.sh
+!scripts/check_runtime_deps.py
 
 # ── 日志 ───────────────────────────────────────────────────────────────────────
 *.log
