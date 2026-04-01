@@ -124,6 +124,8 @@ memory:
     local_model: all-MiniLM-L6-v2
     device: auto
     offline: false
+    model: gemini-embedding-001
+    base_url: ''
     api_key: ''
   max_history_turns: 60
   vector_recent_threshold: 0.65
