@@ -61,6 +61,10 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Check runtime dependencies (CI Python)
+      shell: bash
+      run: python scripts/check_runtime_deps.py
+
     - name: Build Python binary
       shell: bash
       run: |
@@ -90,6 +94,7 @@ jobs:
           --collect-all dotenv \
           --collect-all openai \
           --collect-all pydantic_core \
+          --hidden-import timeit \
           --hidden-import uvicorn.logging \
           --hidden-import uvicorn.loops.auto \
           --hidden-import uvicorn.protocols.http.auto \
