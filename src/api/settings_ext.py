@@ -1193,6 +1193,9 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
             f"  base_prompt（字符串）：800-2000 字。丰富的身份描述，涵盖：核心身份/背景，表面行为（3-5 个特征），深层性格（亲密后才展现），"
             f"{_extra_zh}核心人格特质，表达规则（禁止说/做什么），记忆与互动风格\n"
             f"  style_constraint（字符串）：200-400 字。语气指南、字数限制（如'40-150字'）、禁止用语、对用户的称谓、句式风格规则\n"
+            f"  core_anchor（字符串）：3～6 条分号分隔的特质陈述（每条不超过 20 字）。"
+            f"这些是角色**无论经历什么都不会改变**的本质特征，以简短口语化的行为倾向描述（如「遇强则强，绝不低头」），而非单个形容词。"
+            f"缺点和矛盾性特质同样有资格。禁止包含格式规范或回复长度要求。\n"
         )
     else:
         system_prompt = (
@@ -1207,6 +1210,10 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
             f"memory & interaction style\n"
             f"  style_constraint (string): 200-400 chars. Tone guide, length limit (e.g. '40-150字'), "
             f"forbidden patterns, address term for user, sentence style rules\n"
+            f"  core_anchor (string): 3-6 semicolon-separated trait statements (max ~20 chars each). "
+            f"These are the character's IMMUTABLE traits that never change regardless of experience. "
+            f"Use concrete behavioral statements (e.g. 'stands firm against pressure, never backs down'), not single adjectives. "
+            f"Flaws and contradictions are welcome. Do NOT include formatting rules or reply-length constraints.\n"
         )
     # emotion / energy section (already locale-aware)
     if not body.disable_emotion:
@@ -1341,6 +1348,7 @@ _SCOPE_TO_TOP_KEYS = {
     "reflection": ("reflection_custom_prompt",),
     "memory": ("memory_extraction_prompt", "memory_day_summary_prompt"),
     "style": ("style_constraint",),
+    "anchor": ("core_anchor",),
 }
 
 
@@ -1490,6 +1498,13 @@ def _filter_autofill_patch(
                 out["style_constraint"] = s
                 filled.append("style_constraint")
 
+    if "core_anchor" in allowed_keys and patch.get("core_anchor") is not None:
+        s = str(patch.get("core_anchor") or "").strip()
+        if s:
+            if not fill_empty_only or _is_empty_short_string(snapshot.get("core_anchor"), 10):
+                out["core_anchor"] = s
+                filled.append("core_anchor")
+
     return out, filled
 
 
@@ -1576,6 +1591,7 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
         "  memory_extraction_prompt: 200-400 chars. Same 【角色要点】 prefix, then first-person memory extraction instructions.\n"
         "  memory_day_summary_prompt: 150-280 chars. Same 【角色要点】 prefix, then first-person diary-style day summary instruction.\n"
         "  style_constraint: 150-400 chars. Tone, length limit, forbidden patterns, address term — only if missing in snapshot.\n"
+        "  core_anchor: 3-6 semicolon-separated trait statements (max ~20 chars each). These are the character's IMMUTABLE traits — never-changing regardless of experience. Use concrete behavioral statements, not single adjectives. Include flaws/contradictions. Do NOT include formatting rules or reply-length constraints.\n"
         "Rules: Output ONLY raw JSON — no markdown fences, no commentary. Use the same language as base_prompt when possible (Chinese if base_prompt is Chinese).\n"
         "If nothing needs filling, output exactly: {}\n"
     )
@@ -2876,4 +2892,104 @@ async def set_special_dates(profile_id: str, body: SpecialDatesBody):
                 profile_id, len(body.dates))
     return {"ok": True}
 
+
+# ── Persona Evolution ─────────────────────────────────────────────────────────
+
+@router.get("/profiles/{profile_id}/persona_evolution")
+async def get_persona_evolution(profile_id: str):
+    """返回当前人格演化状态：原件、演化版、core_anchor。"""
+    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+    storage_root = os.path.join(_PROFILES_DIR, profile_id)
+    from src.core.persona_evolution import get_changelog
+    return {
+        "base_prompt_original": card.get("base_prompt", ""),
+        "style_constraint_original": card.get("style_constraint", ""),
+        "persona_evolved": card.get("persona_evolved") or {},
+        "changelog": get_changelog(storage_root),
+    }
+
+
+class PersonaEvolutionAnchorBody(BaseModel):
+    preset_name: str = ""
+
+
+@router.post("/profiles/{profile_id}/persona_evolution/extract_anchor")
+async def extract_persona_anchor(profile_id: str, _body: PersonaEvolutionAnchorBody, request: Request):
+    """（重新）提炼 core_anchor 并写入 profile.persona_evolved.core_anchor。"""
+    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+
+    base = (card.get("base_prompt") or "").strip()
+    style = (card.get("style_constraint") or "").strip()
+    if len(base) < 15:
+        raise HTTPException(status_code=400, detail="base_prompt too short")
+
+    persona_name = card.get("display_name") or card.get("name") or profile_id
+    app = request.app
+    from src.core.persona_evolution import extract_anchor
+    anchor = await extract_anchor(persona_name, base, style, app, profile_id=profile_id)
+    if not anchor:
+        raise HTTPException(status_code=500, detail="anchor extraction failed")
+
+    card.setdefault("persona_evolved", {})["core_anchor"] = anchor
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(card, f, ensure_ascii=False, indent=2)
+
+    return {"ok": True, "core_anchor": anchor}
+
+
+class PersonaEvolutionSaveBody(BaseModel):
+    """前端手动编辑后保存演化版本和/或 anchor。"""
+    core_anchor: Optional[str] = None
+    base_prompt: Optional[str] = None
+    style_constraint: Optional[str] = None
+    enabled: Optional[bool] = None
+    min_interval_turns: Optional[int] = None
+
+
+@router.put("/profiles/{profile_id}/persona_evolution")
+async def save_persona_evolution(profile_id: str, body: PersonaEvolutionSaveBody):
+    """保存用户手动编辑的 persona_evolved 字段（anchor / 演化版 base_prompt / style / 开关）。"""
+    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+
+    card.setdefault("persona_evolved", {})
+    if body.core_anchor is not None:
+        card["persona_evolved"]["core_anchor"] = body.core_anchor.strip()
+    if body.base_prompt is not None:
+        card["persona_evolved"]["base_prompt"] = body.base_prompt.strip()
+    if body.style_constraint is not None:
+        card["persona_evolved"]["style_constraint"] = body.style_constraint.strip()
+    if body.enabled is not None:
+        card["persona_evolved"]["enabled"] = body.enabled
+    if body.min_interval_turns is not None:
+        card["persona_evolved"]["min_interval_turns"] = max(10, body.min_interval_turns)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(card, f, ensure_ascii=False, indent=2)
+    return {"ok": True}
+
+
+class PersonaRollbackBody(BaseModel):
+    version: int
+
+
+@router.post("/profiles/{profile_id}/persona_evolution/rollback")
+async def rollback_persona_evolution(profile_id: str, body: PersonaRollbackBody):
+    """回滚 persona_evolved 到指定版本（base_prompt + style_constraint）。"""
+    storage_root = os.path.join(_PROFILES_DIR, profile_id)
+    from src.core.persona_evolution import rollback
+    ok = rollback(profile_id, storage_root, body.version)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Version {body.version} not found in changelog")
     return {"ok": True}

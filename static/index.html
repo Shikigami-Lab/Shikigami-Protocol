@@ -923,6 +923,7 @@
             <li v-html="t('onboardingCheck3')"></li>
             <li v-html="t('onboardingCheck4')"></li>
             <li v-html="t('onboardingCheck5')"></li>
+            <li v-html="t('onboardingCheck6')"></li>
           </ol>
         </div>
 
@@ -2437,6 +2438,87 @@
                   <div class="form-label" style="font-size:13px;font-weight:600;">{{ t('lblStyleConstraint') }}</div>
                   <textarea class="form-input" :rows="textareaRows(profileForm.style_constraint, 8, 40)" v-model="profileForm.style_constraint"
                     style="resize:vertical;font-size:13px;line-height:1.6;"></textarea>
+                </div>
+
+                <!-- 人格演化 -->
+                <div class="section-collapsible">
+                  <div class="section-collapsible-header" @click="personaEvolutionOpen = !personaEvolutionOpen">
+                    {{ t('secPersonaEvolution') }}
+                    <span>{{ personaEvolutionOpen ? '▲' : '▼' }}</span>
+                  </div>
+                  <div v-show="personaEvolutionOpen" class="section-collapsible-body">
+                    <p class="form-hint" style="margin-bottom:12px;">{{ t('hintPersonaEvolution') }}</p>
+
+                    <!-- 开关 + 频率 -->
+                    <div class="param-row">
+                      <span class="param-label">{{ t('lblEvolutionEnabled') }}</span>
+                      <label class="toggle-switch">
+                        <input type="checkbox" v-model="personaEvolutionForm.enabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="param-row" style="margin-top:8px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblEvolutionInterval') }}</span>
+                      <input type="number" class="seg-num-input" min="10" max="1000" step="10" style="width:72px;"
+                             v-model.number="personaEvolutionForm.min_interval_turns" />
+                    </div>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintEvolutionInterval') }}</p>
+
+                    <!-- 核心锚点 -->
+                    <div class="section-divider">{{ t('lblCoreAnchor') }}</div>
+                    <p class="form-hint">{{ t('hintCoreAnchor') }}</p>
+                    <textarea class="form-input" rows="3" v-model="personaEvolutionForm.core_anchor"
+                              style="font-size:12px;resize:vertical;"
+                              :placeholder="t('lblCoreAnchor')"></textarea>
+                    <button class="s-btn s-btn-secondary" style="margin-top:6px;font-size:12px;"
+                            @click="extractAnchorFromProfile"
+                            :disabled="personaEvolutionExtracting">
+                      {{ personaEvolutionExtracting ? t('btnExtractingAnchor') : t('btnExtractAnchor') }}
+                    </button>
+
+                    <!-- 原始人格（只读） -->
+                    <div class="section-divider" style="margin-top:14px;">{{ t('lblOriginalPersona') }}</div>
+                    <p class="form-hint">{{ t('hintOriginalPersona') }}</p>
+                    <textarea class="form-input" rows="5" readonly
+                              :value="personaEvolutionForm.base_prompt_original"
+                              style="font-size:11px;resize:vertical;opacity:0.7;"></textarea>
+                    <textarea class="form-input" rows="3" readonly
+                              :value="personaEvolutionForm.style_constraint_original"
+                              style="font-size:11px;resize:vertical;opacity:0.7;margin-top:6px;"></textarea>
+
+                    <!-- 演化版本 -->
+                    <div class="section-divider" style="margin-top:14px;">{{ t('lblEvolvedPersona') }}</div>
+                    <p class="form-hint">{{ t('hintEvolvedPersona') }}</p>
+                    <div v-if="!personaEvolutionForm.evolution_count" style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
+                      {{ t('hintNoEvolution') }}
+                    </div>
+                    <div v-else style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">
+                      {{ t('lblEvolutionCount').replace('$count', personaEvolutionForm.evolution_count) }}
+                      <span v-if="personaEvolutionForm.evolved_at">
+                        · {{ t('lblEvolutionLastAt').replace('$date', fmtEvolutionDate(personaEvolutionForm.evolved_at)) }}
+                      </span>
+                    </div>
+                    <textarea class="form-input" rows="5" v-model="personaEvolutionForm.base_prompt_evolved"
+                              style="font-size:12px;resize:vertical;"></textarea>
+                    <textarea class="form-input" rows="3" v-model="personaEvolutionForm.style_constraint_evolved"
+                              style="font-size:12px;resize:vertical;margin-top:6px;"></textarea>
+
+                    <!-- 演化日志 -->
+                    <div v-if="personaEvolutionForm.changelog.length" style="margin-top:14px;">
+                      <div class="section-divider">{{ t('lblEvolutionLog') }}</div>
+                      <p class="form-hint">{{ t('hintEvolutionLog') }}</p>
+                      <div v-for="entry in personaEvolutionForm.changelog" :key="entry.version"
+                           style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                          <span style="font-weight:600;">第 {{ entry.version }} 次 · {{ fmtEvolutionDate(entry.evolved_at) }}</span>
+                          <button class="s-btn s-btn-secondary" style="font-size:11px;padding:2px 8px;"
+                                  @click="rollbackPersonaEvolution(entry.version)">{{ t('btnRollback') }}</button>
+                        </div>
+                        <div v-if="entry.change_summary" style="color:var(--text-primary);margin-bottom:3px;">{{ entry.change_summary }}</div>
+                        <div v-if="entry.reason" style="color:var(--text-secondary);">{{ entry.reason }}</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- 情绪 Prompt 覆盖 -->

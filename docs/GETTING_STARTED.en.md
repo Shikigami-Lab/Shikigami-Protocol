@@ -42,8 +42,8 @@ You can also edit **`.env`** directly to set `HTTP_PROXY` / `HTTPS_PROXY` — sa
 
 | Tab | Purpose |
 |:---|:---|
-| **Onboarding** | **Step-by-step Guide (Recommended)**: network setup, AI memory deps & models, TTS / STT deps & models. |
-| **Personas** | Persona card list, edit, **AI Wizard** generation, sidebar order, per-persona memory / engine overrides |
+| **Onboarding** | **Step-by-step guide**: checklist, network, memory/TTS/STT; companion behavior points to settings — details in the “Emotion, energy…” section below. |
+| **Personas** | Persona card list, edit, **AI Wizard** generation, sidebar order, per-persona memory / engine overrides; **Prompt Editing** sub-tab includes Persona Evolution |
 | **LLM** | LLM preset management, API keys, local OpenAI-compatible URLs, auxiliary models (emotion / affinity) |
 | **Memory** | Long-term facts, vector memory toggle, embedding model (cloud Gemini or local BGE), diary and forgetting preview |
 | **TTS** | Voice engines: Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
@@ -53,6 +53,51 @@ You can also edit **`.env`** directly to set `HTTP_PROXY` / `HTTPS_PROXY` — sa
 | **System** | Theme, proxy, HF mirror, offline toggle |
 
 Persona cards can also configure emotion/energy/affinity prompts, memory strategy, and TTS reference audio — see [profile_prompts.en.md](./profile_prompts.en.md) for field reference.
+
+---
+
+## Emotion, energy, affinity, reflection & ASE
+
+These features go beyond plain chat: the persona has **mood, stamina, long-term rapport**, can **reflect in the background**, and may **message you first** after silence. Defaults work without editing prompts; tune below if you want clingier, calmer, or more “tool-like” behavior.
+
+### Emotion engine
+
+- **What it does**: Classifies layered emotions from dialogue, shaping reply tone (and TTS instruct if used).
+- **Where**: **Settings → Personas → Behavior** toggles the engine; per-emotion **rules** live in the persona emotion prompt areas (`emotion_prompts`, `emotion_zh_descriptions`). See [profile_prompts.en.md](./profile_prompts.en.md) → `emotion_config`.
+
+### Energy system
+
+- **What it does**: Chat drains energy; it recovers over offline/wall-clock time. Bands map to “more/less talkative” via `energy_prompts`.
+- **Where**: Defaults in `config/app.yaml` → `engines.energy`; per-persona energy behavior in **Personas → Behavior**; band texts in **energy prompt** overrides (write **how to speak**, not scene narration).
+
+### Affinity engine
+
+- **What it does**: Adjusts an affinity score from recent dialogue (tiers from stranger to bonded). `affinity_prompts` set distance, tone, and boundaries per tier.
+- **Where**: **Personas → Behavior**; auxiliary LLM in **LLM** settings; tier text in **affinity prompts** on the persona. See `profile_prompts.en.md`.
+
+### Reflection
+
+- **What it does**: Background LLM runs produce short inner state (e.g. topic hints) for chat and ASE. **Uses tokens on a schedule.**
+- **Where**: Global toggle and intervals in **Reflection / ASE** (or Behavior); **LLM → reflection model**; per-persona `reflection_config` under **Persona reflection** settings. Prefer a **cheap or local** model. Save segments as the UI indicates.
+
+### Proactive speech (ASE)
+
+- **What it does**: Under silence, urgency, cooldown, and daily caps, the persona may **send a proactive line**. Can combine with tools/trends/VLM.
+- **Where**: ASE toggle and **mode** (low/medium/high/game/focus) in settings; timing thresholds largely in `config/app.yaml` → `ase.modes`; screenshot behavior with **VLM** options.
+
+**Tips**: Stabilize base persona before enabling ASE. If too chatty, raise urgency threshold or use **low** mode first.
+
+### Persona Evolution
+
+- **What it does**: Every N conversation turns (same counter as emotion and affinity engines), the AI quietly rewrites `base_prompt` and `style_constraint` — nudged by accumulated facts and affinity state. The persona grows through shared experience rather than being frozen at the first draft forever.
+- **Core anchor**: You (or the AI's "Re-extract" button) write a few semicolon-separated immutable traits, e.g. `hides warmth behind distance; never admits she cares first; can't be pushed around`. These are passed as a hard constraint on every rewrite, guarding against the RLHF drift that turns every character into a polite, soulless chatbot.
+- **Where**: **Settings → Personas → Prompt Editing**, in the **Persona Evolution** collapsible below Style Constraint:
+  - **Enable toggle** (off by default) and **trigger interval** (every N conversation turns, default 200 — uses the same counter as the emotion/affinity engines).
+  - **Re-extract**: let the AI distill a core anchor from the current persona text — edit it afterwards as you like.
+  - **Original persona (read-only)**: your hand-written original, never touched by evolution, always visible for comparison.
+  - **Current evolved version**: the live persona; editable by hand and auto-saved on change.
+  - **Evolution log**: per-run change summary and rationale; click **Roll back** to restore any prior version.
+- **Tips**: Let the persona accumulate a few dozen turns of memory before enabling. If you've crafted a very precise persona and don't want autonomous rewrites, leave it off — the anchor and changelog are still useful as read-only context.
 
 ---
 
@@ -104,7 +149,7 @@ Enable and configure weather and trend tools (RSS / API) in the **Tools** tab. O
 
 | Doc | When to read |
 |:---|:---|
-| **This doc (GETTING_STARTED)** | UI is running — want to know "how many steps, where to click, what to enable" |
+| **This doc (GETTING_STARTED)** | UI is running — steps, where to click, what to enable; emotion/energy/affinity/reflection/ASE → section above |
 | **SETUP_FIRST_RUN** | Installing Python / Node from scratch, running `init.bat`, Docker, crash fixes |
 | **profile_prompts** | Writing or tuning persona JSON by hand; also the source of truth for AI wizard generation |
 | **ARCHITECTURE_REFERENCE** | Contributors / architects checking module boundaries and required files |

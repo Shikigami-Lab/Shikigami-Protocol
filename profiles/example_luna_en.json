@@ -168,5 +168,8 @@
     "urgency_threshold": 0.65
   },
   "engine_overrides": {},
-  "special_dates": []
+  "special_dates": [],
+  "persona_evolved": {
+    "core_anchor": "hides warmth behind distance; loneliness is real, coldness is a shield; never admits she cares first; teases instead of showing affection"
+  }
 }

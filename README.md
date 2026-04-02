@@ -42,6 +42,7 @@ We believe AI companions should be both smart and beautiful. The interface ships
 - **Emotion & Affinity Engine**: Goes beyond text completion with state machines for mood and fatigue.
 - **Proactive Engagement (ASE)**: If you go quiet, the character reflects and speaks up autonomously.
 - **Integrated Memory Pipeline**: Built-in fact extraction and vector retrieval. They remember.
+- **Persona Evolution**: Memory shapes identity. As shared experience accumulates, the persona quietly reconstructs itself — a *core anchor* keeps the original edge intact so the character grows without losing what makes them them.
 - **100% Private**: Local-first architecture. Your chat data never leaves your disk.
 
 ---
@@ -55,6 +56,7 @@ We believe AI companions should be both smart and beautiful. The interface ships
 | **Emotion & state** | Often relies on long system prompts to *perform* emotion; cross-turn continuity and decay are left to extensions and luck. | **Emotion × energy × affinity state machine** tied to the chat loop — state persists and decays; not a one-shot mood reset. |
 | **Silence & initiative** | If you don't send a message, the thread idles; some "proactive" pushes are scheduled blasts, weakly tied to context. | **Reflection + urgency + ASE** — background monologue and urgency build up; **breaks the silence** when thresholds are met, not a dumb timer. |
 | **Memory & cognition** | Often chat history retrieval + vector chunks; quality depends on extensions and tuning. | **Fact extraction + vector retrieval + daily summaries** — pipelines are **built in** and aligned with prompt segments and retrieval policy. |
+| **Persona growth** | Static system prompt; no memory feedback loop into the persona itself. | **Persona Evolution**: memories drive periodic `base_prompt` + `style_constraint` reconstruction. A *core anchor* (immutable trait statements) prevents RLHF "customer-service creep"; changelog + one-click rollback built in. |
 | **World context** | Lorebooks and manual background are common; time, weather, trends, and screen may not be unified. | **Time / lunar / solar terms, weather, trends** can be injected; optional **VLM** screen context for replies and pre-speech. |
 | **Companion tools** | Todos, reminders, and search often come from extensions; how tightly they bind to the persona varies. | **Todos, timers, web search** (`/todo`, `/timer`, `/search`) live in the chat flow — remember, nudge, look things up — **not** desktop automation or multi-step agents. |
 | **Data & sovereignty** | Cloud products sit under platform accounts and policies; local-only setups can still sprawl across extensions. | **Local-first**, data on disks you control; **AGPL** — no platform custody of your persona and logs. |
@@ -236,6 +238,16 @@ Not a corporate bot. A life partner who actually cares.
 - **Seamless Knowledge**:
   - **Live Search**: Use `/search` to pull web data directly into the chat.
   - **Stay Focused**: Never tab out; information flows naturally into the chat.
+
+### 🌱 Persona Evolution
+
+The character that comes back a month later is not the same one you met on day one — and that is by design.
+
+- **Memory-driven reconstruction**: every N memory refreshes, the AI rewrites `base_prompt` + `style_constraint` based on accumulated facts and affinity state. No manual editing required.
+- **Core anchor**: a set of immutable trait statements (e.g. *"hides warmth behind distance; never admits she cares first"*) passed as a hard constraint on every rewrite — preventing the RLHF drift that turns characters into polite customer-service bots over time.
+- **Original preserved**: the user-authored original is kept read-only, always visible. Evolution writes to a parallel `persona_evolved` field; the original is untouched.
+- **Full audit trail**: per-run changelog with change summary, rationale, and one-click rollback to any prior version.
+- **User in control**: evolution can be disabled per-persona; the evolved version is manually editable; the core anchor is editable and re-extractable at any time.
 
 ### 🎭 Persona System & Community Compatibility
 
