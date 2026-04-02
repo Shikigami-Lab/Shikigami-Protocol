@@ -68,40 +68,11 @@ jobs:
     - name: Build Python binary
       shell: bash
       run: |
-        # Use PyInstaller to compile server.py into a standalone executable.
-        if [ "$RUNNER_OS" = "Windows" ]; then
-          SEP=";"
-        else
-          SEP=":"
-        fi
-        
-        # We collect all core libraries and handle dynamic imports.
+        # Use server.spec which collects all core libraries, all importable stdlib
+        # modules (via sys.stdlib_module_names), and handles dynamic imports.
         # This ensures the backend starts even on machines with NO python installed.
-        pyinstaller --onefile server.py \
-          --collect-all uvicorn \
-          --collect-all fastapi \
-          --collect-all starlette \
-          --collect-all pydantic \
-          --collect-all edge_tts \
-          --collect-all httpx \
-          --collect-all jinja2 \
-          --collect-all anyio \
-          --collect-all sniffio \
-          --collect-all click \
-          --collect-all websockets \
-          --collect-all yaml \
-          --collect-all ruamel \
-          --collect-all dotenv \
-          --collect-all openai \
-          --collect-all pydantic_core \
-          --hidden-import timeit \
-          --hidden-import uvicorn.logging \
-          --hidden-import uvicorn.loops.auto \
-          --hidden-import uvicorn.protocols.http.auto \
-          --hidden-import uvicorn.protocols.websockets.auto \
-          --hidden-import uvicorn.lifespan.on \
-          --add-data "package.json${SEP}."
-        
+        pyinstaller server.spec
+
         # Move the binary to the root for electron-builder to pick it up.
         if [ "$RUNNER_OS" = "Windows" ]; then
           mv dist/server.exe ./server.exe

@@ -243,6 +243,13 @@ class TimeContextSegment(PromptSegment):
         first_ts  = ctx.store.first_message_time()
         days_known = int((time.time() - first_ts) / 86400) if first_ts else 0
 
+        try:
+            from src.config.effective_config import _load_profile_card
+            _rc = _load_profile_card(ctx.session.profile_id).get("reflection_config") or {}
+            absence_threshold_h: float = float(_rc.get("long_absence_hours", 48))
+        except Exception:
+            absence_threshold_h = 48.0
+
         greeting_tier = "active"
         if last_user_ts is None:
             greeting_tier = "first_of_day"
@@ -251,7 +258,7 @@ class TimeContextSegment(PromptSegment):
             last_dt = datetime.fromtimestamp(last_user_ts)
             if last_dt.date() < today:
                 greeting_tier = "first_of_day"
-                if gap_h >= 48:
+                if gap_h >= absence_threshold_h:
                     greeting_tier = "long_absence"
             elif gap_h >= 1:
                 greeting_tier = "short_gap"
