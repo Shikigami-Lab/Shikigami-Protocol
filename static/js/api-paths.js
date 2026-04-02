@@ -39,6 +39,9 @@ window.API_PATHS = {
   profileMemoryConfig: (id) => `/profiles/${encodeURIComponent(id)}/memory_config`,
   profileSegments: (id) => `/profiles/${encodeURIComponent(id)}/segments`,
   profileReflectionConfig: (id) => `/profiles/${encodeURIComponent(id)}/reflection_config`,
+  profilePersonaEvolution: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution`,
+  profilePersonaEvolutionAnchor: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/extract_anchor`,
+  profilePersonaEvolutionRollback: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/rollback`,
   /** POST: AI 补全人格 Prompt 空白字段（与分析模型同通道） */
   profilePromptAutofill: () => '/profiles/prompt_autofill',
   lorebooks: () => '/lorebooks',

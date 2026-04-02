@@ -475,6 +475,22 @@ const SettingsMixin = {
       _reflectionProfileSaveTimer: null,
       reflectionFormProfileId: '',
       refaseExpanded: false,
+      // 人格演化
+      personaEvolutionForm: {
+        base_prompt_original: '',
+        style_constraint_original: '',
+        core_anchor: '',
+        base_prompt_evolved: '',
+        style_constraint_evolved: '',
+        evolution_count: 0,
+        evolved_at: null,
+        changelog: [],
+        enabled: false,
+        min_interval_turns: 200,
+      },
+      _personaEvolutionFormLoaded: false,
+      personaEvolutionOpen: false,
+      personaEvolutionExtracting: false,
       newCustomRefaseSeg: null,
       activeReflectionSegTab: 'reflection',  // 'reflection' | 'ase'
     };
@@ -774,6 +790,14 @@ const SettingsMixin = {
         if (!this._reflectionProfileFormLoaded || !this.reflectionFormProfileId) return;
         clearTimeout(this._reflectionProfileSaveTimer);
         this._reflectionProfileSaveTimer = setTimeout(() => this.saveReflectionProfileConfig({ skipToast: true }), 800);
+      },
+    },
+    personaEvolutionForm: {
+      deep: true,
+      handler() {
+        if (!this._personaEvolutionFormLoaded || !this.selectedProfileId) return;
+        clearTimeout(this._personaEvolutionSaveTimer);
+        this._personaEvolutionSaveTimer = setTimeout(() => this.savePersonaEvolutionData(), 800);
       },
     },
     segmentList: {
@@ -1849,6 +1873,7 @@ const SettingsMixin = {
       this.loadProfileEngineConfig(profileId);
       // Load reflection + memory prompts so they're available in the Prompts sub-tab
       this.loadReflectionProfileConfig(profileId);
+      this.loadPersonaEvolution(profileId);
       this.loadMemoryProfileConfig(profileId);
       // Populate prompt override form
       const ec = p.emotion_config || {};
@@ -2975,6 +3000,9 @@ const SettingsMixin = {
       if (patch.memory_day_summary_prompt != null && String(patch.memory_day_summary_prompt).trim()) {
         this.memoryProfileForm.day_summary_prompt = String(patch.memory_day_summary_prompt).trim();
       }
+      if (patch.core_anchor != null && String(patch.core_anchor).trim()) {
+        this.personaEvolutionForm.core_anchor = String(patch.core_anchor).trim();
+      }
     },
 
     async runPromptAutofill() {
@@ -3126,6 +3154,14 @@ const SettingsMixin = {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ custom_prompt: r.reflection_custom_prompt }),
+        });
+      }
+      // 2b. Save core_anchor if wizard generated it
+      if (r.core_anchor && String(r.core_anchor).trim()) {
+        await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolution(profileId), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ core_anchor: String(r.core_anchor).trim() }),
         });
       }
       // 3. Save memory extraction/day-summary prompt
@@ -4151,6 +4187,7 @@ const SettingsMixin = {
     onReflectionProfileChange(profileId) {
       if (profileId && this.profiles.some(p => p.profile_id === profileId)) this.selectProfile(profileId);
       this.loadReflectionProfileConfig(profileId);
+      this.loadPersonaEvolution(profileId);
     },
     onMemoryContentProfileChange(profileId) {
       if (profileId && this.profiles.some(p => p.profile_id === profileId)) this.selectProfile(profileId);
@@ -4293,6 +4330,107 @@ const SettingsMixin = {
       } finally {
         this.reflectionProfileSaving = false;
       }
+    },
+
+    async loadPersonaEvolution(profileId) {
+      if (!profileId) return;
+      this._personaEvolutionFormLoaded = false;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolution(profileId));
+        if (!res.ok) return;
+        const data = await res.json();
+        const ev = data.persona_evolved || {};
+        this.personaEvolutionForm = {
+          base_prompt_original: data.base_prompt_original || '',
+          style_constraint_original: data.style_constraint_original || '',
+          core_anchor: ev.core_anchor || '',
+          base_prompt_evolved: ev.base_prompt || '',
+          style_constraint_evolved: ev.style_constraint || '',
+          evolution_count: ev.evolution_count || 0,
+          evolved_at: ev.evolved_at || null,
+          changelog: data.changelog || [],
+          enabled: ev.enabled !== false,
+          min_interval_turns: ev.min_interval_turns ?? 200,
+        };
+        this.$nextTick(() => { this._personaEvolutionFormLoaded = true; });
+      } catch (e) {
+        console.error('[settings] loadPersonaEvolution:', e);
+      }
+    },
+
+    async savePersonaEvolutionData() {
+      const profileId = this.selectedProfileId;
+      if (!profileId) return;
+      this.setAutoSaveState('saving');
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolution(profileId), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            core_anchor: this.personaEvolutionForm.core_anchor || '',
+            base_prompt: this.personaEvolutionForm.base_prompt_evolved || '',
+            style_constraint: this.personaEvolutionForm.style_constraint_evolved || '',
+            enabled: this.personaEvolutionForm.enabled,
+            min_interval_turns: this.personaEvolutionForm.min_interval_turns,
+          }),
+        });
+        if (res.ok) {
+          this.setAutoSaveState('saved');
+        }
+      } catch (e) {
+        console.error('[settings] savePersonaEvolutionData:', e);
+      }
+    },
+
+    async extractAnchorFromProfile() {
+      const profileId = this.selectedProfileId;
+      if (!profileId || this.personaEvolutionExtracting) return;
+      this.personaEvolutionExtracting = true;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolutionAnchor(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (data && data.ok) {
+          this.personaEvolutionForm.core_anchor = data.core_anchor || '';
+          this.showToast('✓ 核心锚点已提炼', 'success');
+        } else {
+          this.showToast('提炼失败', 'error');
+        }
+      } catch (e) {
+        this.showToast(`提炼失败: ${e.message}`, 'error');
+      } finally {
+        this.personaEvolutionExtracting = false;
+      }
+    },
+
+    async rollbackPersonaEvolution(version) {
+      const profileId = this.selectedProfileId;
+      if (!profileId) return;
+      if (!confirm(`确定回滚到第 ${version} 次演化之前的版本吗？`)) return;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolutionRollback(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version }),
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (data && data.ok) {
+          this.showToast('✓ 已回滚', 'success');
+          await this.loadPersonaEvolution(profileId);
+        } else {
+          this.showToast('回滚失败', 'error');
+        }
+      } catch (e) {
+        this.showToast(`回滚失败: ${e.message}`, 'error');
+      }
+    },
+
+    fmtEvolutionDate(ts) {
+      if (!ts) return '';
+      return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     },
 
     beginAddCustomRefaseSeg(tab) {

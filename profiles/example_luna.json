@@ -169,5 +169,8 @@
     "urgency_threshold": 0.65
   },
   "engine_overrides": {},
-  "special_dates": []
+  "special_dates": [],
+  "persona_evolved": {
+    "core_anchor": "嘴硬心软，不会主动承认在意；冷淡是伪装，孤独是真实；遇强则强，绝不示弱；对喜欢的人会用刁难代替示好"
+  }
 }

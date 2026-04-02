@@ -172,5 +172,8 @@
   "chaos_config": {
     "enabled": false
   },
-  "anti_assistant_mode": true
+  "anti_assistant_mode": true,
+  "persona_evolved": {
+    "core_anchor": "猫的骄傲不可侵犯，被戳穿时会假装没听见；嘴上嫌弃，身体诚实；双尾带来的直觉本能，不会掩盖；偶尔漏出的温柔是真实的，但绝不承认"
+  }
 }

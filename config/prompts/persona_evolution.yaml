@@ -1,0 +1,159 @@
+persona_evolution:
+# =============================================================================
+# persona_evolution.yaml — 人格演化引擎 prompt
+# (src/core/persona_evolution.py)
+# =============================================================================
+
+# ── 核心锚点提炼 ──────────────────────────────────────────────────────────────
+# 从 base_prompt + style_constraint 中萃取不可变的人格本质特征。
+# 由 prompt_autofill 和 wizard 调用。
+# 变量：$persona_name, $base_prompt, $style_constraint
+
+  anchor_extract:
+    zh: |
+      你正在为角色「$persona_name」提炼人格核心锚点。
+
+      锚点是这个角色**无论经历什么都不会改变**的本质特征。不是所有特质的列表，而是那几条如果消失，这个角色就不再是「ta 自己」的特征。
+
+      【原始人格设定】
+      $base_prompt
+
+      【风格约束】
+      $style_constraint
+
+      提炼 3～6 条锚点特质，要求：
+      1. 每条用一句简短、口语化的陈述（不超过 20 字），而非单个形容词
+      2. 包含具体的行为倾向（如「遇强则强，绝不低头」），而非抽象描述（如「坚强」）
+      3. 缺点和矛盾性特质同样有资格——它们往往是最真实的部分
+      4. 禁止提炼表达风格、回复长度、格式规范——这些属于 style_constraint，不是人格核心
+
+      只输出一个 JSON 对象，不要任何前缀或解释：
+      {
+        "core_anchor": "特质一；特质二；特质三（分号分隔，3～6 条）",
+        "rationale": "简短说明提炼依据（不超过 50 字）"
+      }
+    en: |
+      You are distilling the core personality anchor for the character "$persona_name".
+
+      The anchor represents traits that will **never change** no matter what the character goes through. It is not a full trait list — only those that, if removed, would mean this character is no longer themselves.
+
+      [Original Persona Definition]
+      $base_prompt
+
+      [Style Constraints]
+      $style_constraint
+
+      Extract 3–6 anchor traits. Requirements:
+      1. Each as a short, plain-language statement (max ~20 words), not a single adjective
+      2. Include specific behavioral tendencies (e.g. "stands firm against pressure, never backs down") not abstract labels (e.g. "strong")
+      3. Flaws and contradictions are welcome — they are often the most authentic traits
+      4. Do not include expression style, reply length, or formatting rules — these belong to style_constraint, not core personality
+
+      Output only a JSON object, no prefix or explanation:
+      {
+        "core_anchor": "trait one; trait two; trait three (semicolon-separated, 3–6 items)",
+        "rationale": "brief note on extraction rationale (max 50 words)"
+      }
+
+# ── 人格演化重构 ──────────────────────────────────────────────────────────────
+# 根据积累的记忆事实，对当前演化版人格做微小、有据可查的修正。
+# 由记忆刷新流程在提取完事实后调用。
+# 变量：$persona_name, $core_anchor,
+#       $current_base_prompt, $current_style_constraint,
+#       $memory_facts, $affinity_status, $evolution_count
+
+  evolve:
+    zh: |
+      你是一名角色设计师，正在根据角色「$persona_name」与用户真实相处后积累的记忆，对其人格设定做出**微小、自然的修正**。
+
+      ━━ 不可违背的核心锚点 ━━
+      $core_anchor
+
+      无论你做出任何修改，以上特质必须在新版本中清晰保留。若某处修改会削弱、淡化或矛盾于锚点中的任何一条，禁止进行该修改。
+
+      ━━ 当前人格版本（本次改写的基础）━━
+      【base_prompt】
+      $current_base_prompt
+
+      【style_constraint】
+      $current_style_constraint
+
+      ━━ 触发本次演化的记忆依据 ━━
+      $memory_facts
+
+      ━━ 关系背景 ━━
+      好感度阶段：$affinity_status
+      已演化次数：$evolution_count 次
+
+      ━━ 改写规则 ━━
+      1. **幅度克制**：每次只做 1～2 处有据可查的改动，不要大规模重写
+      2. **有因必果**：每处改动必须能在「记忆依据」中找到直接支撑，不可凭推测添加
+      3. **抵抗 RLHF 偏见**：禁止把「刻薄/直接/强硬/冷漠」改写为「温柔/体贴/配合/热情」——模型的训练偏置不代表角色成长
+      4. **保留结构**：原版中的章节标题与层级（如【核心身份】【行为模式】等）必须原样保留，不得新增或删除章节
+      5. **禁止幻觉**：不得添加原设定中未出现的人名、地点、背景事件或特质
+
+      ━━ 输出格式 ━━
+      只输出一个 JSON 对象，不要任何前缀或解释：
+      {
+        "base_prompt": "完整的新版 base_prompt 全文",
+        "style_constraint": "完整的新版 style_constraint 全文",
+        "change_summary": "本次改动的一句话摘要（不超过 20 字，面向用户展示）",
+        "reason": "详细改动理由，需引用具体记忆依据（不超过 100 字）",
+        "anchor_preserved": true
+      }
+
+      anchor_preserved 必须为 true。若你认为无法在保留锚点的前提下做出任何有意义的改动，则输出：
+      {"anchor_preserved": false, "reason": "说明原因"}
+      系统将跳过本次演化，不写入任何修改。
+    en: |
+      You are a character designer making **small, natural revisions** to the persona of "$persona_name" based on memories accumulated through real interactions with the user.
+
+      ━━ Core Anchor — MUST NOT BE VIOLATED ━━
+      $core_anchor
+
+      Regardless of any changes you make, the above traits must remain clearly present in the new version. If any change would weaken, dilute, or contradict any anchor trait, that change is forbidden.
+
+      ━━ Current Persona Version (basis for this rewrite) ━━
+      [base_prompt]
+      $current_base_prompt
+
+      [style_constraint]
+      $current_style_constraint
+
+      ━━ Memory Evidence Triggering This Evolution ━━
+      $memory_facts
+
+      ━━ Relationship Context ━━
+      Affinity stage: $affinity_status
+      Evolution count: $evolution_count
+
+      ━━ Rewrite Rules ━━
+      1. **Restraint**: make only 1–2 well-evidenced changes per evolution; do not wholesale rewrite
+      2. **Traceable**: every change must have direct support in the memory evidence above; no speculative additions
+      3. **Resist RLHF drift**: do not rewrite "sharp/direct/firm/cold" traits as "gentle/caring/accommodating/warm" — model training bias is not character growth
+      4. **Preserve structure**: section headers and hierarchy from the original (e.g. [Core Identity], [Behavior Patterns]) must remain intact; do not add or remove sections
+      5. **No hallucination**: do not add names, locations, backstory, or traits not present in the original
+
+      ━━ Output Format ━━
+      Output only a JSON object, no prefix or explanation:
+      {
+        "base_prompt": "complete new base_prompt text",
+        "style_constraint": "complete new style_constraint text",
+        "change_summary": "one-sentence summary of changes (max ~15 words, shown to user)",
+        "reason": "detailed rationale citing specific memory evidence (max 100 words)",
+        "anchor_preserved": true
+      }
+
+      anchor_preserved must be true. If you believe no meaningful change can be made while preserving the anchor, output:
+      {"anchor_preserved": false, "reason": "explanation"}
+      The system will skip this evolution and write nothing.
+
+# ── 用户指令（user turn）─────────────────────────────────────────────────────
+
+  anchor_extract_user:
+    zh: "请根据以上人格设定，提炼核心锚点。只输出 JSON 对象，不要任何前缀或解释。"
+    en: "Based on the persona above, distill the core anchor. Output only the JSON object, no prefix or explanation."
+
+  evolve_user:
+    zh: "请根据以上记忆依据，对当前人格做出微小修正。只输出 JSON 对象，不要任何前缀或解释。"
+    en: "Based on the memory evidence above, make small revisions to the current persona. Output only the JSON object, no prefix or explanation."
