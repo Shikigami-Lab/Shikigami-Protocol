@@ -113,6 +113,8 @@ class AffinityEngine:
         count = state.get("llm_call_count", 0)
         from src.config.effective_config import get_effective_engine_config
         engine_cfg = get_effective_engine_config(app, session.profile_id, "affinity")
+        if engine_cfg.get("enabled", True) is False:
+            return
         freq = engine_cfg.get("llm_adjust_frequency", 5)
         delta_clamp = float(engine_cfg.get("delta_clamp", 15.0))
 

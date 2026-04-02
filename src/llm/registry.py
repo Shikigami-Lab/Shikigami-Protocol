@@ -77,7 +77,13 @@ def ensure_analysis_provider(config: Any) -> None:
     if not sec.get("enabled"):
         return
     preset_name = sec.get("preset", "")
-    preset = config.llm_presets.get(preset_name) if (hasattr(config, "llm_presets") and preset_name) else None
+    # 特殊值："__none__"=禁用；""=使用激活模型
+    if preset_name == "__none__":
+        return
+    if not preset_name:
+        preset = config.get_active_llm_preset() if hasattr(config, "get_active_llm_preset") else None
+    else:
+        preset = config.llm_presets.get(preset_name) if hasattr(config, "llm_presets") else None
     if not preset:
         return
     overrides = {k: sec.get(k) for k in ("temperature", "top_p", "presence_penalty", "frequency_penalty", "max_tokens")}

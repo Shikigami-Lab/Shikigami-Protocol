@@ -70,6 +70,15 @@ def _build_tts_config(websocket: WebSocket, profile_id_override: Optional[str] =
             except Exception as e:
                 logger.warning(f"[ws/tts] profile load failed: {e}")
 
+            # Resolve and validate global/profile ref_audio_path: if file missing, drop it
+            if tts_cfg.get("ref_audio_path"):
+                resolved = _resolve_ref_audio_path(tts_cfg["ref_audio_path"])
+                if resolved and os.path.isfile(resolved):
+                    tts_cfg["ref_audio_path"] = resolved
+                else:
+                    logger.warning(f"[ws/tts] gpt_sovits ref_audio_path not found, disabling voice clone: {tts_cfg['ref_audio_path']}")
+                    tts_cfg.pop("ref_audio_path", None)
+
         elif tts_type == "kokoro":
             tts_cfg.update(config.tts_config.get("kokoro", {}))
             tts_cfg["type"] = "kokoro"

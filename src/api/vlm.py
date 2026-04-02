@@ -63,7 +63,14 @@ async def describe_image(body: VlmRequest, request: Request):
         return {"description": ""}
 
     preset_name = vlm_cfg.get("model_preset", "Gemini-3.0")
-    preset = config.get_llm_preset(preset_name)
+    # 特殊值："__none__"=不使用 VLM；"__active__"=使用激活聊天模型
+    if preset_name == "__none__":
+        logger.debug("[VLM] model_preset='__none__', returning empty description")
+        return {"description": ""}
+    if preset_name == "__active__":
+        preset = config.get_active_llm_preset()
+    else:
+        preset = config.get_llm_preset(preset_name)
     if not preset or not preset.get("api_key"):
         return JSONResponse(
             status_code=503,

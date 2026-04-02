@@ -230,6 +230,8 @@ const SettingsMixin = {
       promptAutofillShowDebug: false,
       specialDates: [],
       newSpecialDate: { date: '', label: '' },
+      _specialDatesLoaded: false,
+      _specialDatesSaveTimer: null,
 
       // ── Inline action confirmation (replaces window.confirm to avoid Electron focus-loss) ──
       confirmingAction: null,  // { key, label, data }
@@ -748,6 +750,14 @@ const SettingsMixin = {
         if (!this._profileEnginesFormLoaded || !this.profileForm.profile_id) return;
         clearTimeout(this._profileEnginesSaveTimer);
         this._profileEnginesSaveTimer = setTimeout(() => this.saveProfileEngineConfig({ skipToast: true }), 800);
+      },
+    },
+    specialDates: {
+      deep: true,
+      handler() {
+        if (!this._specialDatesLoaded || !this.profileForm.profile_id) return;
+        clearTimeout(this._specialDatesSaveTimer);
+        this._specialDatesSaveTimer = setTimeout(() => this.saveSpecialDates({ skipToast: true }), 800);
       },
     },
     profilePromptForm: {
@@ -2341,6 +2351,8 @@ const SettingsMixin = {
           body: JSON.stringify({
             targets,
             filename: this.profileForm.voiceGenFilename.trim(),
+            // Persist the same reference text used for generation into profile ref_text
+            ref_text: (this.profileForm.voiceGenText || '').trim(),
           }),
         });
         if (res.ok) {
@@ -2348,6 +2360,13 @@ const SettingsMixin = {
           // 同步 profileForm 里对应 ref path
           if (targets.includes('gpt_sovits'))  this.profileForm.gpt_sovits_ref_audio_path = d.saved_path;
           if (targets.includes('qwen3_tts'))   this.profileForm.qwen3_tts_ref_audio_path  = d.saved_path;
+          // Also sync the reference text into profile-level fields so that
+          // users don't need to copy it manually after saving the generated voice.
+          const refText = (this.profileForm.voiceGenText || '').trim();
+          if (refText) {
+            if (targets.includes('gpt_sovits')) this.profileForm.gpt_sovits_ref_text = refText;
+            if (targets.includes('qwen3_tts'))  this.profileForm.qwen3_tts_ref_text  = refText;
+          }
           this.showToast(this.t('toastVoiceGenSaved'), 'success');
         } else {
           const d = await res.json().catch(() => ({}));
@@ -2406,11 +2425,13 @@ const SettingsMixin = {
     },
 
     async loadSpecialDates(profileId) {
+      this._specialDatesLoaded = false;
       try {
         const r = await fetch(getBaseUrl() + API_PATHS.profileSpecialDates(profileId));
         const d = await r.json();
         this.specialDates = d.dates || [];
       } catch (_) { this.specialDates = []; }
+      this.$nextTick(() => { this._specialDatesLoaded = true; });
     },
     addSpecialDate() {
       if (!this.newSpecialDate.date || !this.newSpecialDate.label) return;

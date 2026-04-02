@@ -44,6 +44,17 @@ class EnergyStateSegment(PromptSegment):
     default_trigger_param = 1.0
 
     def build(self, ctx: BuildContext) -> SegmentResult:
+        # 若该人格关闭能量系统，则不注入能量文案（避免“关了但还在提示能量风格”）
+        try:
+            app = (ctx.extras or {}).get("app")
+            if app and getattr(ctx.session, "profile_id", None):
+                from src.config.effective_config import get_effective_engine_config
+                energy_cfg = get_effective_engine_config(app, ctx.session.profile_id, "energy")
+                if energy_cfg.get("enabled", True) is False:
+                    return SegmentResult(fired=False)
+        except Exception:
+            pass
+
         state_path = os.path.join(ctx.session.storage_root, "emotion_state.json")
         if not os.path.exists(state_path):
             return SegmentResult(fired=False)
