@@ -68,10 +68,11 @@ jobs:
     - name: Build Python binary
       shell: bash
       run: |
-        # Use server.spec which collects all core libraries, all importable stdlib
-        # modules (via sys.stdlib_module_names), and handles dynamic imports.
-        # This ensures the backend starts even on machines with NO python installed.
-        pyinstaller server.spec
+        # scripts/build_binary.py runs PyInstaller with --collect-all for all
+        # third-party deps and --hidden-import for every importable stdlib module
+        # (generated from sys.stdlib_module_names at build time), so dynamic
+        # runtime imports like timeit/pickletools are never missing.
+        python scripts/build_binary.py
 
         # Move the binary to the root for electron-builder to pick it up.
         if [ "$RUNNER_OS" = "Windows" ]; then
