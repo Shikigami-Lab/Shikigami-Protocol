@@ -34,13 +34,17 @@ class PersonaSegment(PromptSegment):
         if profile.get("anti_assistant_mode"):
             parts.append(self.ANTI_ASSISTANT_ZH)
 
-        # 优先使用演化版本，原始字段作为 fallback
+        # 演化仅在 enabled 时使用 persona_evolved 中的稿子；关闭演化则始终用人格卡根字段
         evolved = profile.get("persona_evolved") or {}
-        base = (evolved.get("base_prompt") or profile.get("base_prompt") or "").strip()
+        if evolved.get("enabled", True):
+            base = (evolved.get("base_prompt") or profile.get("base_prompt") or "").strip()
+            style = (evolved.get("style_constraint") or profile.get("style_constraint") or "").strip()
+        else:
+            base = (profile.get("base_prompt") or "").strip()
+            style = (profile.get("style_constraint") or "").strip()
         if base:
             parts.append(base)
 
-        style = (evolved.get("style_constraint") or profile.get("style_constraint") or "").strip()
         if style:
             parts.append(style)
 

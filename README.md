@@ -25,7 +25,11 @@
 
 > ⚠️ **Project Status**: Public Beta (v0.10.x; see `package.json` and [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) for the exact version). Core architecture is stable and ready to use, but unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
 
-Most AI chat tools reset to zero when you close the tab. Shikigami Protocol is built around the opposite premise: a local character that holds genuine memory of you, carries real emotional state across every conversation, and will reach out on its own when you've been gone too long. Open-source, fully local — your data, your character, your call.
+Most AI chat tools reset to zero when you close the tab. Shikigami Protocol is built around the opposite premise: a local character that holds genuine memory of you, carries real emotional state across every conversation, and will reach out on its own when you've been gone too long. Open-source, AGPL-3.0 — **conversation logs, memory, and engine state stay on your disk**; **LLM inference and embeddings** can be cloud APIs, fully local (e.g. Ollama), or a mix — your stack, your choice.
+
+- **Local-first data** — chat, facts, vectors, and persona state live on your machine.
+- **Reflection + ASE** — background inner monologue while you're quiet; breaks the silence when urgency builds, not a dumb timer.
+- **Group chat** — multiple personas in one session, streamed with clear attribution.
 
 ![Shikigami Protocol UI: Multiple themes — light, dark, and more](assets/readme/ui-themes.png)
 
@@ -69,16 +73,17 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 
 ### ✨ Core Highlights
 
-- **Out-of-the-box Desktop App**: Standalone `.exe` with a clean UI — no coding required.
+- **Reflection + proactive speech (ASE)**: Background **Reflection** generates inner monologue while you are away; **ASE** turns that into real outreach — check-ins, teasing, or “you’re late tonight” moments when thresholds are met, not scheduled spam.
+- **Group chat**: Several personas in one room, each with streaming replies and clean speaker attribution — built in, not a bolt-on tab per character.
+- **Out-of-the-box Desktop App**: Installers on [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) — Windows `.exe`, macOS `.dmg`, Linux `.AppImage` — packaged UI, no coding required.
 - **Cross-device Web UI**: Runs a local server with a responsive web UI. Access from your phone or tablet on the same network — no separate app needed.
 - **Emotion & Affinity Engine**: State machines for mood, energy, and relationship tier — not a one-shot system prompt.
-- **Proactive Engagement (ASE)**: If you go quiet, the character reflects in the background and reaches out on its own.
 - **Integrated Memory Pipeline**: Fact extraction, vector retrieval, daily summaries, and Ebbinghaus-curve forgetting — all built in.
 - **Persona Evolution**: Memory shapes identity. As shared experience accumulates, the persona quietly reconstructs itself — a *core anchor* keeps the original edge intact so the character grows without losing what makes them them.
 - **Emotion-aware TTS**: Four engines — Edge TTS, KokoroTTS, GPT-SoVITS, Qwen3-TTS. Voice instruct and pitch adapt to current mood state.
 - **Voice Input (STT)**: SenseVoice or Whisper runs locally; talk naturally, type less.
 - **AI Persona Wizard**: Describe a character in plain text — the wizard fills in emotion prompts, memory config, reflection style, and voice settings in one shot.
-- **100% Private**: Local-first architecture. Your chat data never leaves your disk.
+- **Privacy where it counts**: Local-first storage for chats, memory, and engine state. Model calls may still go to your chosen cloud or stay entirely on-device depending on presets — see onboarding and `config/app.yaml`.
 
 ---
 
@@ -94,7 +99,8 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 | **Persona growth** | Static system prompt; no memory feedback loop into the persona itself. | **Persona Evolution**: accumulated memories gradually reshape the persona. A *core anchor* prevents RLHF "customer-service creep"; full changelog + one-click rollback built in. |
 | **World context** | Lorebooks and manual background are common; time, weather, trends, and screen may not be unified. | **Time / lunar / solar terms, weather, trends** can be injected; optional **VLM** screen context for replies and pre-speech. |
 | **Companion tools** | Todos, reminders, and search often come from extensions; how tightly they bind to the persona varies. | **Todos, timers, web search** (`/todo`, `/timer`, `/search`) live in the chat flow — remember, nudge, look things up — **not** desktop automation or multi-step agents. |
-| **Data & sovereignty** | Cloud products sit under platform accounts and policies; local-only setups can still sprawl across extensions. | **Local-first**, data on disks you control; **AGPL** — no platform custody of your persona and logs. |
+| **Multi-persona sessions** | Often one character per thread or separate tabs; group scenes depend on extensions and glue. | **Group chat** — multiple personas in one session, streamed output, per-character attribution. |
+| **Data & sovereignty** | Cloud products sit under platform accounts and policies; local-only setups can still sprawl across extensions. | **Local-first** for logs and state on disks you control; **AGPL** — no platform custody of your persona and history. Inference/embeddings follow *your* provider choice. |
 
 *For technical depth, see [Features](#features) below.*
 
@@ -110,9 +116,9 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 
 ### Option 1: 📥 Download the installer (recommended for new users)
 
-Go to the [Releases page](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest) and download the latest `Shikigami Protocol Setup vX.X.X.exe` (Windows). Double-click to install and follow the built-in setup guide. **No Python or Node.js required.**
+Go to the [Releases page](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest) and download the build for your OS: **Windows** `Shikigami Protocol Setup vX.X.X.exe`, **macOS** `.dmg`, **Linux** `.AppImage`. Double-click to install (or run the AppImage) and follow the built-in setup guide. **No Python or Node.js required** for these builds.
 
-You'll need an LLM API key (Gemini / OpenAI / Ollama all work) — the onboarding screen will walk you through it.
+You'll need API keys and/or a local stack for the LLM (Gemini / OpenAI / Ollama, etc.) — the onboarding screen will walk you through it.
 
 ---
 
@@ -268,7 +274,7 @@ The character that comes back a month later is not the same one you met on day o
 
 | Field | Default | Notes |
 |---|---|---|
-| `default_llm` | `"Gemini-3.0"` | Default LLM preset |
+| `default_llm` | `"Gemini"` | Key under `llm_presets` (e.g. model `gemini-3-flash-preview` in `config/app.yaml`) |
 | `default_tts` | `"edge_tts"` | TTS backend |
 | `engines.emotion.enabled` | `true` | Emotion engine |
 | `engines.affinity.enabled` | `true` | Affinity engine |

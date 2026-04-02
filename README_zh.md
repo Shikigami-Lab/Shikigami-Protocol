@@ -25,7 +25,11 @@
 
 > ⚠️ **项目状态**：Public Beta（v0.10.x；具体版本见根目录 `package.json` 与 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)）。核心架构已稳定可用，仍可能存在未知 Bug。欢迎在 [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) 中交流反馈。
 
-绝大多数 AI 聊天工具在你关掉页面的瞬间就归零了。Shikigami Protocol 从相反的方向出发：一个本地运行的角色，对你积累真实的记忆，在每次对话之间保持连续的情绪状态，在你消失太久时会主动找你说话。完全开源，完全本地——数据在你手里，角色是你的。
+绝大多数 AI 聊天工具在你关掉页面的瞬间就归零了。Shikigami Protocol 从相反的方向出发：一个本地运行的角色，对你积累真实的记忆，在每次对话之间保持连续的情绪状态，在你消失太久时会主动找你说话。完全开源，AGPL-3.0 — **聊天记录、记忆提取与状态机数据保存在你的设备上**；**大模型推理与向量嵌入**可选用云端 API、完全本地（如 Ollama）或混合部署，由你在 `config/app.yaml` 与引导页里决定。
+
+- **数据本地优先** — 对话、事实库、向量与引擎状态落在本机磁盘。
+- **自省 + 主动发言 (ASE)** — 你沉默时后台生成内心独白并积累「想说的话」，达标后主动开口，而不是简单定时推送。
+- **群聊** — 多人格同一会话，流式输出、发言归属清晰。
 
 ![Shikigami Protocol UI: 多套内置主题随意切换](assets/readme/ui-themes.png)
 
@@ -69,16 +73,17 @@
 
 ### ✨ 核心亮点
 
-- **开箱即用的本地客户端**：提供带图形界面的免安装 `.exe` 包，无需折腾代码环境。
+- **自省 + 主动破冰 (ASE)**：**后台自省 (Reflection)** 在你离线或安静时生成内心活动；**ASE** 将其转化为真实 outreach——关心、打趣或「你今天晚了」一类语境化开口，达标触发而非无脑定时。
+- **群聊**：多人格共室对话，各角色流式回复、署名清晰，一体化支持而非每人开一窗硬凑。
+- **开箱即用的桌面端**：[Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 提供 **Windows `.exe`、macOS `.dmg`、Linux `.AppImage`**，图形化引导，无需先搭 Python/Node 环境。
 - **跨设备 Web UI**：内置响应式网页界面，手机/平板连同一局域网即可直接访问，无需单独 App。
 - **情绪与好感度引擎**：情绪状态机 × 能量衰减 × 8 段关系阶梯，不是单轮重置的假脾气。
-- **主动破冰 (ASE)**：在你沉默时，角色在后台自省并积累发言冲动，达到阈值后主动找你说话。
 - **长短时记忆流水线**：事实提取、向量检索、日记摘要、艾宾浩斯遗忘曲线，全部内置。
 - **人格演化**：记忆塑造性格。随着共同经历积累，人设会悄悄重构——*核心锚点* 守住初稿的棱角，让角色在成长的同时不失本性。
 - **情绪化 TTS**：四套引擎可选（Edge TTS / KokoroTTS / GPT-SoVITS / Qwen3-TTS），音色与语气随情绪状态自动调整。
 - **语音输入 (STT)**：SenseVoice 或 Whisper 本地转录，直接说话，无需联网。
 - **AI 角色向导**：一句话描述角色，向导自动补全情绪文案、记忆配置、自省风格与声音设置。
-- **数据完全私有**：采用本地优先架构，所有聊天记录均保存在你的设备上。
+- **隐私落在「数据」上**：对话、记忆与引擎状态本地持久化；具体走云端还是本地模型取决于你的预设与 API 配置，见引导页与 `config/app.yaml`。
 
 ---
 
@@ -94,7 +99,8 @@
 | **人格成长** | System Prompt 静态存储；记忆不会反哺人格本身。 | **人格演化**：积累的记忆驱动人格渐进式重构。*核心锚点* 防止 RLHF 漂移让角色越养越「客服化」；演化日志 + 一键回滚内置。 |
 | **环境与感知** | 常靠世界书或手动喂背景；未必统一接入时间、天气、热点与屏幕。 | **时间 / 农历节气、天气、趋势** 可注入；可选 **VLM** 截屏参与对话与发言前上下文。 |
 | **陪伴性工具** | 待办、提醒、搜索等常靠扩展拼装；与角色、会话的绑定程度参差。 | **待办 / 计时器 / 网页搜索**（如 `/todo`、`/timer`、`/search`）与对话流一体，服务**记事、到期提醒、随聊查资料**；**不是**替你操作电脑或多步 Agent 工作流。 |
-| **数据与主权** | 云端产品受平台账号与政策约束；纯本地方案也可能多扩展、多配置拼装。 | **本地优先**，数据在自管介质；**AGPL**，无平台替你托管对话与人格。 |
+| **多人格同场** | 常见为单线程或一角色一 Tab，群组场景依赖扩展与手工拼装。 | **群聊** — 多人格同一会话、流式输出、发言归属清晰。 |
+| **数据与主权** | 云端产品受平台账号与政策约束；纯本地方案也可能多扩展、多配置拼装。 | **日志与状态本地优先**，数据在自管介质；**AGPL**，无平台替你托管对话与人格。推理/嵌入走哪类提供商由你决定。 |
 
 *更细的技术说明见下方 [功能详览](#cn-features)。*
 
@@ -110,9 +116,9 @@
 
 ### 方式一：📥 下载安装包（推荐新手）
 
-前往 [Releases 页面](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest) 下载最新版 `Shikigami Protocol Setup vX.X.X.exe`（Windows）。双击安装，内含图形化配置引导，**无需安装 Python 或 Node.js**。
+前往 [Releases 页面](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest) 按系统下载：**Windows** `Shikigami Protocol Setup vX.X.X.exe`，**macOS** `.dmg`，**Linux** `.AppImage`。安装或运行后跟随图形化引导，**这些安装包本身不要求预装 Python 或 Node.js**。
 
-启动后需要配置一个 LLM API Key（Gemini / OpenAI / Ollama 均可），App 内有引导页面会一步步带你完成。
+启动后需配置大模型（云端 API Key 和/或本地栈，如 Gemini / OpenAI / Ollama 等），App 内引导会逐步说明。
 
 ---
 
@@ -275,7 +281,7 @@ AI 不应住在黑盒里，它正与你共处同一时空。
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `default_llm` | `"Gemini-3.0"` | 默认 LLM 预设 |
+| `default_llm` | `"Gemini"` | `llm_presets` 下的预设名（示例模型见 `config/app.yaml`，如 `gemini-3-flash-preview`） |
 | `default_tts` | `"edge_tts"` | 默认 TTS |
 | `engines.emotion.enabled` | `true` | 情绪引擎 |
 | `engines.affinity.enabled` | `true` | 好感度引擎 |
