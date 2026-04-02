@@ -109,6 +109,19 @@ jobs:
           mv dist/server ./server
         fi
 
+    - name: Smoke-test built server binary
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          BINARY="./server.exe"
+        else
+          BINARY="./server"
+          chmod +x "$BINARY"
+        fi
+        # 测试打好的二进制本体，而非 CI Python 环境。
+        # 任何缺失的 stdlib/第三方模块都会导致此步骤失败，阻断 Release。
+        "$BINARY" --self-check
+
     - name: Bundle Python embeddable + pip (Windows only)
       if: runner.os == 'Windows'
       shell: bash

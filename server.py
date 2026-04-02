@@ -5,6 +5,36 @@ import sys
 import warnings
 from pathlib import Path
 
+# ── CI 构建后冒烟测试入口 ────────────────────────────────────────────────────
+# 在任何第三方/项目 import 之前处理，确保缺模块时能给出清晰错误而非随机崩溃。
+# 由 release.yml 的 "Smoke-test built server binary" 步骤调用。
+if '--self-check' in sys.argv:
+    import importlib as _ilib
+    _SMOKE = [
+        # 已知 PyInstaller 容易因动态 import 而漏掉的 stdlib
+        'timeit', 'pickletools', 'profile', 'pstats', 'cProfile',
+        'doctest', 'dis', 'tracemalloc', 'multiprocessing',
+        'pickle', 'pprint', 'inspect', 'ast', 'csv', 'sqlite3',
+        # 核心第三方依赖
+        'fastapi', 'uvicorn', 'pydantic', 'httpx', 'openai',
+        'edge_tts', 'websockets', 'dotenv', 'yaml', 'ruamel',
+        'soundfile', 'anyio', 'starlette', 'click',
+    ]
+    _fail = []
+    for _m in _SMOKE:
+        try:
+            _ilib.import_module(_m)
+        except Exception as _e:
+            _fail.append(f'{_m}: {_e}')
+    if _fail:
+        print('[self-check] FAILED — missing modules:', file=sys.stderr)
+        for _f in _fail:
+            print(f'  {_f}', file=sys.stderr)
+        sys.exit(1)
+    print('[self-check] OK')
+    sys.exit(0)
+# ─────────────────────────────────────────────────────────────────────────────
+
 # pydub 在未安装 ffmpeg 时发出 RuntimeWarning，写入 stderr 被 Electron 误标为 err。
 # SenseVoice/funasr 使用 torchaudio 加载音频，不依赖 ffmpeg，可安全忽略。
 warnings.filterwarnings("ignore", message=".*ffmpeg.*", category=RuntimeWarning)
