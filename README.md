@@ -23,26 +23,61 @@
 
 </div>
 
-> ⚠️ **Project Status**: Currently in Public Beta (v0.9.x). Core architecture is stable and ready to use, but unknown bugs may exist. Feel free to join the [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) to leave feedback.
+> ⚠️ **Project Status**: Public Beta (v0.10.x; see `package.json` and [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) for the exact version). Core architecture is stable and ready to use, but unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
 
-Shikigami Protocol is a **local AI character companion framework**. The character remembers you, maintains emotion / energy / affinity state, reflects in the background, and speaks proactively after silence — with optional VLM screen context and emotion-aware TTS.
+Most AI chat tools reset to zero when you close the tab. Shikigami Protocol is built around the opposite premise: a local character that holds genuine memory of you, carries real emotional state across every conversation, and will reach out on its own when you've been gone too long. Open-source, fully local — your data, your character, your call.
 
 ![Shikigami Protocol UI: Multiple themes — light, dark, and more](assets/readme/ui-themes.png)
 
-We believe AI companions should be both smart and beautiful. The interface ships with multiple built-in themes, customizable sidebars, and a guided onboarding flow for true out-of-the-box readiness.
+The interface ships with multiple built-in themes, customizable sidebars, and a guided onboarding flow — beautiful out of the box.
 
-### 🏗️ Technical Architecture: More than a wrapper
+<a id="example-personas"></a>
 
-![Shikigami Protocol Core Architecture (Whiteboard Style)](assets/readme/shikigami_architecture_excalidraw.png)
+## Example personas
+
+Shipped with the repo — start chatting immediately, no card writing required.
+
+### Luna — Still water · quiet observer · late-night presence
+
+She doesn't say much. She's been paying attention the whole time.
+
+> "You okay? You've been quieter than usual."
+>
+> "Just tired, I guess."
+>
+> "I'm here. Want to talk, or just sit for a bit?"
+>
+> *(Three hours later, unprompted)* "You're two hours later than usual."
+
+---
+
+### Mochi — Digital nekomata · proud · insufferably clingy
+
+A cat spirit who chose you as her feeder — unilaterally, non-negotiably.
+
+> "You're back."
+>
+> "Did you miss me?"
+>
+> "…whatever. I wasn't waiting."
+>
+> *flicks her tail at you*
+
+Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.json`, `profiles/example_mochi.json` / `profiles/example_mochi_en.json`.
+
+---
 
 ### ✨ Core Highlights
 
-- **Out-of-the-box Desktop App**: Standalone `.exe` with a clean UI—no coding required.
-- **Cross-device Web UI**: Runs a local server with a responsive UI. Access from your phone or tablet on the same network — no separate app needed.
-- **Emotion & Affinity Engine**: Goes beyond text completion with state machines for mood and fatigue.
-- **Proactive Engagement (ASE)**: If you go quiet, the character reflects and speaks up autonomously.
-- **Integrated Memory Pipeline**: Built-in fact extraction and vector retrieval. They remember.
+- **Out-of-the-box Desktop App**: Standalone `.exe` with a clean UI — no coding required.
+- **Cross-device Web UI**: Runs a local server with a responsive web UI. Access from your phone or tablet on the same network — no separate app needed.
+- **Emotion & Affinity Engine**: State machines for mood, energy, and relationship tier — not a one-shot system prompt.
+- **Proactive Engagement (ASE)**: If you go quiet, the character reflects in the background and reaches out on its own.
+- **Integrated Memory Pipeline**: Fact extraction, vector retrieval, daily summaries, and Ebbinghaus-curve forgetting — all built in.
 - **Persona Evolution**: Memory shapes identity. As shared experience accumulates, the persona quietly reconstructs itself — a *core anchor* keeps the original edge intact so the character grows without losing what makes them them.
+- **Emotion-aware TTS**: Four engines — Edge TTS, KokoroTTS, GPT-SoVITS, Qwen3-TTS. Voice instruct and pitch adapt to current mood state.
+- **Voice Input (STT)**: SenseVoice or Whisper runs locally; talk naturally, type less.
+- **AI Persona Wizard**: Describe a character in plain text — the wizard fills in emotion prompts, memory config, reflection style, and voice settings in one shot.
 - **100% Private**: Local-first architecture. Your chat data never leaves your disk.
 
 ---
@@ -56,7 +91,7 @@ We believe AI companions should be both smart and beautiful. The interface ships
 | **Emotion & state** | Often relies on long system prompts to *perform* emotion; cross-turn continuity and decay are left to extensions and luck. | **Emotion × energy × affinity state machine** tied to the chat loop — state persists and decays; not a one-shot mood reset. |
 | **Silence & initiative** | If you don't send a message, the thread idles; some "proactive" pushes are scheduled blasts, weakly tied to context. | **Reflection + urgency + ASE** — background monologue and urgency build up; **breaks the silence** when thresholds are met, not a dumb timer. |
 | **Memory & cognition** | Often chat history retrieval + vector chunks; quality depends on extensions and tuning. | **Fact extraction + vector retrieval + daily summaries** — pipelines are **built in** and aligned with prompt segments and retrieval policy. |
-| **Persona growth** | Static system prompt; no memory feedback loop into the persona itself. | **Persona Evolution**: memories drive periodic `base_prompt` + `style_constraint` reconstruction. A *core anchor* (immutable trait statements) prevents RLHF "customer-service creep"; changelog + one-click rollback built in. |
+| **Persona growth** | Static system prompt; no memory feedback loop into the persona itself. | **Persona Evolution**: accumulated memories gradually reshape the persona. A *core anchor* prevents RLHF "customer-service creep"; full changelog + one-click rollback built in. |
 | **World context** | Lorebooks and manual background are common; time, weather, trends, and screen may not be unified. | **Time / lunar / solar terms, weather, trends** can be injected; optional **VLM** screen context for replies and pre-speech. |
 | **Companion tools** | Todos, reminders, and search often come from extensions; how tightly they bind to the persona varies. | **Todos, timers, web search** (`/todo`, `/timer`, `/search`) live in the chat flow — remember, nudge, look things up — **not** desktop automation or multi-step agents. |
 | **Data & sovereignty** | Cloud products sit under platform accounts and policies; local-only setups can still sprawl across extensions. | **Local-first**, data on disks you control; **AGPL** — no platform custody of your persona and logs. |
@@ -142,47 +177,11 @@ Edit `.env` with at least one LLM key, e.g. `GEMINI_API_KEY`. Match preset names
 - **Electron crashes or won't start on Windows** — make sure you've run `init.bat` first; if it persists, delete the `.venv` folder and run `init.bat` again.
 - **Server / NAS deployment** — use the Docker option; data directories are volume-mounted and will survive upgrades.
 
-<a id="example-personas"></a>
-
-## Example personas
-
-Shipped with the repo — no custom card needed to start. Full files: `profiles/example_luna.json` / `profiles/example_luna_en.json`, `profiles/example_mochi.json` / `profiles/example_mochi_en.json`.
-
----
-
-### Luna — Still water · quiet observer · late-night presence
-
-She doesn't say much. She's been paying attention the whole time.
-
-> "You okay? You've been quieter than usual."
->
-> "Just tired, I guess."
->
-> "I'm here. Want to talk, or just sit for a bit?"
->
-> *(Three hours later, unprompted)* "You're two hours later than usual."
-
----
-
-### Mochi — Digital nekomata · proud · insufferably clingy
-
-A cat spirit who chose you as her feeder — unilaterally, non-negotiably.
-
-> "You're back."
->
-> "Did you miss me?"
->
-> "…whatever. I wasn't waiting."
->
-> *flicks her tail at you*
-
----
-
 <a id="features"></a>
 
 ## Features
 
-> Advanced reading — skip this on first run.
+![Shikigami Protocol Core Architecture (Whiteboard Style)](assets/readme/shikigami_architecture_excalidraw.png)
 
 ### 🧠 Memory System (Soul)
 
@@ -222,8 +221,9 @@ They live in your world, not in a vacuum.
 
 - **Spatiotemporal Resonance**:
   - Feels the 3 AM quiet or a busy Monday morning.
-  - Knows your weather and the change of seasons.
-  - Global Pulse: Through trend awareness, it knows what's happening on the internet.
+  - Knows your weather, the change of seasons, and Chinese lunar solar terms.
+  - Remembers your special dates — anniversaries, birthdays, custom milestones — and weaves them into conversation naturally.
+  - Global Pulse: through trend awareness, it knows what's happening on the internet.
 - **Shared Vision (VLM)**:
   - **Eyes on You**: Perceives your screen (gaming, coding, browsing).
   - **Live Commentary**: Like a friend sitting nearby, they comment on your screen content.
@@ -239,11 +239,18 @@ Not a corporate bot. A life partner who actually cares.
   - **Live Search**: Use `/search` to pull web data directly into the chat.
   - **Stay Focused**: Never tab out; information flows naturally into the chat.
 
+### 🎙️ Voice (TTS & STT)
+
+Characters that speak in their own voice — and actually hear you.
+
+- **Emotion-aware TTS**: Four engines — **Edge TTS** (no install, internet), **KokoroTTS** (local ONNX, ~200ms), **GPT-SoVITS** (clone any voice), **Qwen3-TTS** (expressive, GPU). Instruct and pitch adapt to the current emotion state automatically.
+- **Voice Input (STT)**: **SenseVoice** (fast, multilingual) or **Whisper / faster-whisper** (high accuracy). Runs fully offline once models are downloaded.
+
 ### 🌱 Persona Evolution
 
 The character that comes back a month later is not the same one you met on day one — and that is by design.
 
-- **Memory-driven reconstruction**: every N memory refreshes, the AI rewrites `base_prompt` + `style_constraint` based on accumulated facts and affinity state. No manual editing required.
+- **Memory-driven reconstruction**: every N conversation turns, the AI rewrites `base_prompt` + `style_constraint` based on accumulated facts and affinity state. No manual editing required.
 - **Core anchor**: a set of immutable trait statements (e.g. *"hides warmth behind distance; never admits she cares first"*) passed as a hard constraint on every rewrite — preventing the RLHF drift that turns characters into polite customer-service bots over time.
 - **Original preserved**: the user-authored original is kept read-only, always visible. Evolution writes to a parallel `persona_evolved` field; the original is untouched.
 - **Full audit trail**: per-run changelog with change summary, rationale, and one-click rollback to any prior version.
@@ -252,9 +259,10 @@ The character that comes back a month later is not the same one you met on day o
 ### 🎭 Persona System & Community Compatibility
 
 - **SillyTavern import** — `.json` (V1 flat / V2 `chara_card_v2`) and `.png` (tEXt chunk).
-- **AI persona autofill** — generates emotion descriptions, reflection config, memory config from `base_prompt` in one click
-- **Group chat** — multiple personas in one session, streamed with attribution.
-- **Dual-track commands** — NL triggers + `/fact`, `/recall`, `/memory`, `/search`, `/todo`, `/timer`, `/help`
+- **Lorebook** — keyword-triggered world entries inject lore, setting facts, or scenario rules into the prompt at the right moment. Per-entry modes: `keyword`, `constant`, or `inherit`.
+- **AI persona autofill** — generates emotion descriptions, reflection config, memory config, and core anchor from `base_prompt` in one click.
+- **Group chat** — multiple personas in one session, streamed with per-character attribution.
+- **Commands** — `/fact`, `/recall`, `/memory`, `/search`, `/todo`, `/timer`, `/help`, plus natural language triggers that activate prompt segments by keyword matching.
 
 ### Core config (`config/app.yaml`)
 
