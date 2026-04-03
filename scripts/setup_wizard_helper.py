@@ -61,10 +61,14 @@ def cmd_pip_install(spec: dict) -> int:
         cmd = [py, "-m", "pip", "install", "--upgrade", "--target", target_dir] + list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
+            if "download.pytorch.org" in index_url:
+                cmd += ["--extra-index-url", "https://pypi.org/simple"]
     else:
         cmd = [py, "-m", "pip", "install", "--upgrade"] + list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
+            if "download.pytorch.org" in index_url:
+                cmd += ["--extra-index-url", "https://pypi.org/simple"]
     _emit({"type": "pip", "phase": "running", "target": target, "message": "pip install…"})
     tail: list[str] = []
     try:
@@ -88,7 +92,61 @@ def cmd_pip_install(spec: dict) -> int:
         _emit({"type": "pip", "phase": "error", "target": target, "error": str(exc)[:500]})
         return 1
     ok = code == 0
+    if ok and target == "torch_cuda":
+        if mode == "frozen":
+            target_dir = os.path.join(root, "user_packages")
+            os.makedirs(target_dir, exist_ok=True)
+            rcmd = [
+                py,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--target",
+                target_dir,
+                "qwen-tts>=0.0.1",
+                "soundfile>=0.12.0",
+            ]
+        else:
+            rcmd = [
+                py,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "qwen-tts>=0.0.1",
+                "soundfile>=0.12.0",
+            ]
+        _emit({"type": "pip", "phase": "running", "target": "qwen_tts", "message": "pip install qwen-tts (repair)…"})
+        try:
+            proc2 = subprocess.Popen(
+                rcmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=root,
+                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            )
+            tail = []
+            if proc2.stdout:
+                for line in proc2.stdout:
+                    line = line.rstrip()
+                    tail = (tail + [line])[-40:]
+                    _emit({"type": "pip", "phase": "running", "target": "qwen_tts", "message": line[-240:]})
+            code2 = proc2.wait(timeout=3600)
+        except Exception as exc:
+            ok = False
+            tail = [str(exc)]
+            code2 = 1
+        else:
+            ok = code2 == 0
+        if not ok:
+            target = "qwen_tts"
     err_tail = "\n".join(tail)[-800:] if not ok else None
+    if not ok and not (err_tail and err_tail.strip()):
+        err_tail = f"pip exited with code {code if target != 'qwen_tts' else code2}"
     _emit(
         {
             "type": "pip",

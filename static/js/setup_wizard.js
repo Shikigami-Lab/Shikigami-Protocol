@@ -109,12 +109,20 @@
       tw,
       formatPipError,
       bundleTitle(b) {
+        if (!b || !b.id) return '';
         const en = localStorage.getItem('locale') === 'en';
-        return en ? (b.title_en || b.title_zh) : (b.title_zh || b.title_en);
+        const k = `modelBundle_${b.id}_title`;
+        const L = window.LOCALES && window.LOCALES[en ? 'en' : 'zh'];
+        if (L && L[k]) return L[k];
+        return en ? (b.title_en || b.title_zh || b.id) : (b.title_zh || b.title_en || b.id);
       },
       bundleDesc(b) {
+        if (!b || !b.id) return '';
         const en = localStorage.getItem('locale') === 'en';
-        return en ? (b.description_en || b.description_zh) : (b.description_zh || b.description_en);
+        const k = `modelBundle_${b.id}_desc`;
+        const L = window.LOCALES && window.LOCALES[en ? 'en' : 'zh'];
+        if (L && L[k]) return L[k];
+        return en ? (b.description_en || b.description_zh || '') : (b.description_zh || b.description_en || '');
       },
       clearOpErrors() {
         this.pipErrorText = '';
@@ -232,7 +240,8 @@
         const pkgs = packages || [];
         if (!pkgs.length) return;
         if (!skipConfirm && !window.confirm(tw('confirmUninstallPackage'))) return;
-        this.pendingAfterPipUninstall = null;
+        // 勿在「先卸 torch 再装 CUDA」链式流程里清空：skipConfirm=true 时由 pipTorchCuda 预设 pending。
+        if (!skipConfirm) this.pendingAfterPipUninstall = null;
         this.startOp({ op: 'pip-uninstall', packages: pkgs, dirs: dirs || [] });
       },
       pipQwen() {

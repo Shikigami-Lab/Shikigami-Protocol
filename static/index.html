@@ -920,6 +920,34 @@
         </ol>
         <p class="setup-guide-packaged-note" v-html="t('onboardingPackagedNote')"></p>
 
+        <p class="setup-guide-tab-blurb muted">{{ t('onboardingTabBlurb') }}</p>
+
+        <p class="setup-guide-lead">{{ t('onboardingLead') }}</p>
+        <p class="setup-guide-doc-links">
+          <span class="setup-guide-doc-intro">{{ t('onboardingDocLinksIntro') }}</span>
+          <a :href="userDocUrl('GETTING_STARTED')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenGettingStarted') }}</a>
+          <span class="setup-guide-doc-sep">·</span>
+          <a :href="userDocUrl('SETUP_FIRST_RUN')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenSetupFirstRun') }}</a>
+          <span class="setup-guide-doc-sep">·</span>
+          <a :href="userDocUrl('profile_prompts')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenProfilePrompts') }}</a>
+        </p>
+        <p class="setup-guide-doc-links setup-guide-doc-links-dev">
+          <span>{{ t('onboardingDocLinksDevIntro') }}</span>
+          <a :href="userDocUrl('ARCHITECTURE_REFERENCE')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenMinimum') }}</a>
+        </p>
+
+        <div class="setup-guide-section setup-guide-checklist-section">
+          <h3 class="setup-guide-h3">{{ t('onboardingChecklistTitle') }}</h3>
+          <ol class="setup-guide-checklist">
+            <li v-html="t('onboardingCheck1')"></li>
+            <li v-html="t('onboardingCheck2')"></li>
+            <li v-html="t('onboardingCheck3')"></li>
+            <li v-html="t('onboardingCheck4')"></li>
+            <li v-html="t('onboardingCheck5')"></li>
+            <li v-html="t('onboardingCheck6')"></li>
+          </ol>
+        </div>
+
         <div class="setup-guide-section" v-if="setupGuide">
           <h3 class="setup-guide-h3">{{ t('onboardingQuickTitle') }}</h3>
           <p class="setup-guide-quick-hint muted">{{ t('onboardingQuickHint') }}</p>
@@ -954,8 +982,6 @@
           </div>
         </div>
         <p v-else-if="setupGuideLoading" class="muted setup-guide-inline-loading">{{ t('onboardingLoading') }}</p>
-
-        <p v-if="setupGuide" class="setup-guide-tab-blurb muted">{{ t('onboardingTabBlurb') }}</p>
 
         <div v-if="setupGuide" class="setup-guide-optional-wrap setup-guide-tutorial-section">
           <h3 class="setup-guide-h3">{{ t('onboardingTutorialSectionTitle') }}</h3>
@@ -1090,9 +1116,18 @@
                 <div class="setup-wizard-substep-title">1. {{ t('onboardingQwenTtsPkgStepTitle') }}</div>
                 <p class="setup-tts-desc">{{ t('onboardingQwenTtsPkgDesc') }}</p>
                 <p v-if="setupGuide.qwen_tts_installed" class="ok" style="font-size:12px;">✓ {{ t('onboardingQwenTtsPkgInstalled') }}</p>
+                <p v-if="setupGuide.torch_import_ok && setupGuide.torch_load && setupGuide.torch_load.ok" class="muted" style="font-size:11px;line-height:1.45;">
+                  <template v-if="setupGuide.torch_load.built_with_cuda">
+                    {{ t('onboardingTorchMetaCuda').replace('{version}', setupGuide.torch_load.version || '?').replace('{cuda}', setupGuide.torch_load.cuda_built_version || '?') }}<span v-if="setupGuide.torch_cuda_available">{{ t('onboardingTorchMetaGpuOn') }}</span><span v-else>{{ t('onboardingTorchMetaGpuOff') }}</span>
+                  </template>
+                  <template v-else>
+                    {{ t('onboardingTorchMetaCpu').replace('{version}', setupGuide.torch_load.version || '?') }}
+                  </template>
+                </p>
                 <p v-if="setupGuide.torch_installed && !setupGuide.torch_import_ok" class="warn" style="font-size:11px;">{{ t('onboardingTorchBrokenBadge') }} {{ t('onboardingTorchBrokenHint') }}</p>
                 <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && setupGuide.torch_cuda_available" class="muted ok" style="font-size:11px;">{{ t('onboardingTorchCudaActive') }}</p>
-                <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingTorchCudaHint') }}</p>
+                <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && setupGuide.torch_load && setupGuide.torch_load.built_with_cuda && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingTorchCudaRuntimeHint') }}</p>
+                <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && !(setupGuide.torch_load && setupGuide.torch_load.built_with_cuda) && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingTorchCudaHint') }}</p>
                 <p v-if="setupGuide.runtime_python" class="muted" style="font-size:10px;margin:4px 0;">{{ t('onboardingBackendPython') }}<code>{{ setupGuide.runtime_python.executable }}</code></p>
                 <p v-if="setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingDetectedGpu') }}{{ setupGuide.cuda_info.gpu_name }}</p>
                 <p v-else-if="setupGuide.cuda_info && !setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingNoNvidiaGpu') }}</p>
@@ -1165,33 +1200,7 @@
           </div>
         </div>
 
-        <p class="setup-guide-lead">{{ t('onboardingLead') }}</p>
-        <p class="setup-guide-doc-links">
-          <span class="setup-guide-doc-intro">{{ t('onboardingDocLinksIntro') }}</span>
-          <a :href="userDocUrl('GETTING_STARTED')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenGettingStarted') }}</a>
-          <span class="setup-guide-doc-sep">·</span>
-          <a :href="userDocUrl('SETUP_FIRST_RUN')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenSetupFirstRun') }}</a>
-          <span class="setup-guide-doc-sep">·</span>
-          <a :href="userDocUrl('profile_prompts')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenProfilePrompts') }}</a>
-        </p>
-        <p class="setup-guide-doc-links setup-guide-doc-links-dev">
-          <span>{{ t('onboardingDocLinksDevIntro') }}</span>
-          <a :href="userDocUrl('ARCHITECTURE_REFERENCE')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenMinimum') }}</a>
-        </p>
-
-        <div class="setup-guide-section setup-guide-checklist-section">
-          <h3 class="setup-guide-h3">{{ t('onboardingChecklistTitle') }}</h3>
-          <ol class="setup-guide-checklist">
-            <li v-html="t('onboardingCheck1')"></li>
-            <li v-html="t('onboardingCheck2')"></li>
-            <li v-html="t('onboardingCheck3')"></li>
-            <li v-html="t('onboardingCheck4')"></li>
-            <li v-html="t('onboardingCheck5')"></li>
-            <li v-html="t('onboardingCheck6')"></li>
-          </ol>
-        </div>
-
-        <div class="setup-guide-section">
+        <div v-if="setupGuide" class="setup-guide-section">
           <p class="muted setup-guide-lead" v-html="t('onboardingLauncherRedirect')"></p>
         </div>
       </div>

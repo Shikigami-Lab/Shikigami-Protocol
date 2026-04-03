@@ -74,6 +74,10 @@ _WIZARD_ONLY_STDOUT = any(
     )
 )
 
+# 启动器「卸载 torch」子进程若先执行 embedding 预热，会 import transformers → 映射 torch DLL；
+# 随后在同进程内 rmtree user_packages/torch 时 Windows 报 WinError 5（非「主程序未退出」）。
+_SKIP_EMBEDDING_BOOTSTRAP_FOR_UNINSTALL = "--wizard-pip-uninstall" in sys.argv
+
 # 尽早向 Electron 发送进度（模块导入前），避免启动界面长时间停在 0%
 if not _WIZARD_ONLY_STDOUT:
     sys.stdout.write("SPLASH:33:Loading Python modules...\n")
@@ -86,11 +90,12 @@ load_dotenv()  # 加载 .env（GOOGLE_API_KEY 等）到 os.environ
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 # embedding 模块在 import 时会先读 config 设好离线 env，再导出；此处仅做 PreTrainedModel 补丁
-try:
-    from src.memory.embedding import _ensure_pretrained_model_on_transformers
-    _ensure_pretrained_model_on_transformers()
-except Exception:
-    pass
+if not _SKIP_EMBEDDING_BOOTSTRAP_FOR_UNINSTALL:
+    try:
+        from src.memory.embedding import _ensure_pretrained_model_on_transformers
+        _ensure_pretrained_model_on_transformers()
+    except Exception:
+        pass
 
 import uvicorn
 from contextlib import asynccontextmanager
@@ -422,7 +427,13 @@ if __name__ == "__main__":
         config = AppConfig.load()
         from src.api.setup_guide import build_setup_status_dict
 
-        print(_json.dumps(build_setup_status_dict(config), ensure_ascii=False))
+        # Windows 打包 exe 下 stdout 常为系统代码页；写 buffer 保证 UTF-8，与前端读静态资源一致
+        _line = _json.dumps(build_setup_status_dict(config), ensure_ascii=False) + "\n"
+        try:
+            sys.stdout.buffer.write(_line.encode("utf-8"))
+            sys.stdout.buffer.flush()
+        except (AttributeError, OSError, BrokenPipeError, ValueError):
+            print(_line, end="")
         raise SystemExit(0)
     if "--wizard-download" in sys.argv:
         _wi = sys.argv.index("--wizard-download")

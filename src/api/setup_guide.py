@@ -264,12 +264,18 @@ def _torch_load_info() -> Dict[str, Any]:
         "file": "",
         "from_user_site": False,
         "under_purelib": False,
+        "built_with_cuda": False,
+        "cuda_built_version": "",
     }
     try:
         import torch
 
         out["ok"] = True
         out["version"] = str(getattr(torch, "__version__", "") or "")
+        _cv = getattr(torch.version, "cuda", None)
+        if _cv is not None and str(_cv).strip():
+            out["built_with_cuda"] = True
+            out["cuda_built_version"] = str(_cv).strip()
         raw = getattr(torch, "__file__", "") or ""
         if raw:
             ap = os.path.abspath(raw)
@@ -325,7 +331,7 @@ def _qwen_tts_installed() -> bool:
         import qwen_tts  # noqa: F401
         return True
     except ImportError:
-        return _user_pkg_has("qwen_tts")
+        return _user_pkg_has("qwen_tts") or _pip_pkg_artifacts_on_disk("qwen-tts")
     except Exception as e:
         key = "qwen_tts_import"
         if key in _selfcheck_import_warned:
@@ -333,7 +339,7 @@ def _qwen_tts_installed() -> bool:
         else:
             _selfcheck_import_warned.add(key)
             logger.warning("Qwen-tts self-check import failed (often caused by broken torch): %s", e)
-        return _user_pkg_has("qwen_tts")
+        return _user_pkg_has("qwen_tts") or _pip_pkg_artifacts_on_disk("qwen-tts")
 
 
 def _torch_installed() -> bool:
@@ -590,14 +596,10 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
     for b in bundles_raw:
         bid = b.get("id", "")
         path = _bundle_dir(b)
-        bundles_out.append({
+        entry: Dict[str, Any] = {
             "id": bid,
             "category": b.get("category", ""),
             "size_hint": b.get("size_hint", ""),
-            "title_zh": b.get("title_zh", bid),
-            "title_en": b.get("title_en", bid),
-            "description_zh": b.get("description_zh", ""),
-            "description_en": b.get("description_en", ""),
             "memory_local_model_hint": b.get("memory_local_model_hint", ""),
             "local_path": path,
             "installed": _bundle_installed_on_disk(b),
@@ -605,7 +607,12 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
             "repo_id": b.get("repo_id", ""),
             "modelscope_repo_id": b.get("modelscope_repo_id", ""),
             "direct_url": b.get("direct_url", ""),
-        })
+        }
+        # 私库若在 YAML 中仍写 title_*/description_*，仅作无 i18n 键时的回退
+        for _k in ("title_zh", "title_en", "description_zh", "description_en"):
+            if b.get(_k):
+                entry[_k] = b[_k]
+        bundles_out.append(entry)
 
     default_name = config.default_llm
     preset = config.llm_presets.get(default_name)
@@ -1366,6 +1373,24 @@ def _pip_spec_base(spec: str) -> str:
     return s.split("[")[0].strip().lower()
 
 
+def _pip_pkg_artifacts_on_disk(pkg_spec: str) -> bool:
+    """非 frozen 的 venv：在 purelib/platlib/user-site 等根目录查找包目录或 dist-info。
+
+    import 可能因缺依赖失败，但文件仍在；与 ``_user_pkg_has``（仅 frozen）互补。
+    """
+    pb = _pip_spec_base(pkg_spec)
+    if not pb:
+        return False
+    for root in _torch_scan_roots():
+        try:
+            for e in os.listdir(root):
+                if _user_entry_matches_installed_pkg(e, pb):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def _user_entry_matches_installed_pkg(entry: str, pkg_base: str) -> bool:
     """判断 user_packages 下顶层项是否属于包 pkg_base（用下划线规范名，如 qwen_tts、torch）。
 
@@ -1699,8 +1724,30 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
             cmd = [embed_python, "-m", "pip", "install", "--upgrade", "--target", target_dir] + packages
             if index_url:
                 cmd += ["--index-url", index_url]
+                if "download.pytorch.org" in index_url:
+                    cmd += ["--extra-index-url", "https://pypi.org/simple"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-            if result.returncode == 0:
+            ok = result.returncode == 0
+            err_pkg, err_tgt, err_out = packages, install_target, result
+            if ok and (install_target or "").strip() == "torch_cuda":
+                rcmd = [
+                    embed_python,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "--target",
+                    target_dir,
+                    "qwen-tts>=0.0.1",
+                    "soundfile>=0.12.0",
+                ]
+                r2 = subprocess.run(rcmd, capture_output=True, text=True, timeout=1800)
+                if r2.returncode != 0:
+                    ok = False
+                    err_pkg = ["qwen-tts>=0.0.1", "soundfile>=0.12.0"]
+                    err_tgt = "qwen_tts"
+                    err_out = r2
+            if ok:
                 # 安装成功后立即把 user_packages/ 注入当前进程的 sys.path，
                 # 使 _xxx_installed() 检查能在同一 session 里立即返回 True，
                 # 前端才能显示"安装完成"提示。
@@ -1709,37 +1756,57 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
                     sys.path.insert(0, target_dir)
                 importlib.invalidate_caches()
             with _pip_install_lock:
-                if result.returncode == 0:
+                if ok:
                     _pip_install_state["phase"] = "success"
                     _pip_install_state["message"] = "安装完成，重启应用后生效"
                     _pip_install_state["error"] = None
                 else:
-                    raw = result.stderr or result.stdout or ""
+                    raw = err_out.stderr or err_out.stdout or ""
                     _pip_install_state["phase"] = "error"
                     _pip_install_state["message"] = "安装失败"
                     _pip_install_state["error"] = _pip_error_message(
-                        raw, packages, index_url, embed_python, target_dir, install_target
+                        raw, err_pkg, index_url, embed_python, target_dir, err_tgt
                     )
             return
 
         cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + packages
         if index_url:
             cmd += ["--index-url", index_url]
+            if "download.pytorch.org" in index_url:
+                cmd += ["--extra-index-url", "https://pypi.org/simple"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        if result.returncode == 0:
+        ok = result.returncode == 0
+        err_pkg, err_tgt, err_out = packages, install_target, result
+        if ok and (install_target or "").strip() == "torch_cuda":
+            rcmd = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "qwen-tts>=0.0.1",
+                "soundfile>=0.12.0",
+            ]
+            r2 = subprocess.run(rcmd, capture_output=True, text=True, timeout=1800)
+            if r2.returncode != 0:
+                ok = False
+                err_pkg = ["qwen-tts>=0.0.1", "soundfile>=0.12.0"]
+                err_tgt = "qwen_tts"
+                err_out = r2
+        if ok:
             import importlib
             importlib.invalidate_caches()
         with _pip_install_lock:
-            if result.returncode == 0:
+            if ok:
                 _pip_install_state["phase"] = "success"
                 _pip_install_state["message"] = "安装完成"
                 _pip_install_state["error"] = None
             else:
-                raw = result.stderr or result.stdout or ""
+                raw = err_out.stderr or err_out.stdout or ""
                 _pip_install_state["phase"] = "error"
                 _pip_install_state["message"] = "安装失败"
                 _pip_install_state["error"] = _pip_error_message(
-                    raw, packages, index_url, install_target=install_target
+                    raw, err_pkg, index_url, install_target=err_tgt
                 )
     except Exception as e:
         with _pip_install_lock:

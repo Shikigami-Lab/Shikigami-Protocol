@@ -1017,19 +1017,26 @@ const SettingsMixin = {
     },
 
     onboardingBundleTitle(b) {
-      if (!b) return '';
+      if (!b || !b.id) return '';
       void this.locale;
+      const loc = this.locale === 'en' ? 'en' : 'zh';
+      const k = `modelBundle_${b.id}_title`;
+      const L = window.LOCALES && window.LOCALES[loc];
+      if (L && L[k]) return L[k];
       return this.locale === 'en'
-        ? (b.title_en || b.title_zh || '')
-        : (b.title_zh || b.title_en || '');
+        ? (b.title_en || b.title_zh || b.id)
+        : (b.title_zh || b.title_en || b.id);
     },
     onboardingBundleDesc(b) {
-      if (!b) return '';
+      if (!b || !b.id) return '';
       void this.locale;
-      const raw = this.locale === 'en'
+      const loc = this.locale === 'en' ? 'en' : 'zh';
+      const k = `modelBundle_${b.id}_desc`;
+      const L = window.LOCALES && window.LOCALES[loc];
+      if (L && L[k]) return L[k];
+      return this.locale === 'en'
         ? (b.description_en || b.description_zh || '')
         : (b.description_zh || b.description_en || '');
-      return raw;
     },
 
     async loadSetupGuide() {

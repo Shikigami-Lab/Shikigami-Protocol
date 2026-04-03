@@ -491,15 +491,24 @@
             <div class="setup-wizard-substep-title">1. {{ tw('onboardingQwenTtsPkgStepTitle') }}</div>
             <p class="setup-tts-desc">{{ tw('onboardingQwenTtsPkgDesc') }}</p>
             <p v-if="g.qwen_tts_installed" class="ok" style="font-size:12px;">✓ {{ tw('onboardingQwenTtsPkgInstalled') }}</p>
+            <p v-if="g.torch_import_ok && g.torch_load && g.torch_load.ok" class="muted" style="font-size:11px;line-height:1.45;">
+              <template v-if="g.torch_load.built_with_cuda">
+                {{ tw('onboardingTorchMetaCuda').replace('{version}', g.torch_load.version || '?').replace('{cuda}', g.torch_load.cuda_built_version || '?') }}<span v-if="g.torch_cuda_available">{{ tw('onboardingTorchMetaGpuOn') }}</span><span v-else>{{ tw('onboardingTorchMetaGpuOff') }}</span>
+              </template>
+              <template v-else>
+                {{ tw('onboardingTorchMetaCpu').replace('{version}', g.torch_load.version || '?') }}
+              </template>
+            </p>
             <p v-if="g.torch_installed && !g.torch_import_ok" class="warn" style="font-size:11px;">{{ tw('onboardingTorchBrokenBadge') }} {{ tw('onboardingTorchBrokenHint') }}</p>
             <p v-else-if="g.torch_installed && g.torch_import_ok && g.torch_cuda_available" class="muted ok" style="font-size:11px;">{{ tw('onboardingTorchCudaActive') }}</p>
-            <p v-else-if="g.torch_installed && g.torch_import_ok && !g.torch_cuda_available && g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingTorchCudaHint') }}</p>
+            <p v-else-if="g.torch_installed && g.torch_import_ok && g.torch_load && g.torch_load.built_with_cuda && !g.torch_cuda_available && g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingTorchCudaRuntimeHint') }}</p>
+            <p v-else-if="g.torch_installed && g.torch_import_ok && !(g.torch_load && g.torch_load.built_with_cuda) && !g.torch_cuda_available && g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingTorchCudaHint') }}</p>
             <p v-if="g.runtime_python" class="muted" style="font-size:10px;margin:4px 0;">{{ tw('onboardingBackendPython') }}<code>{{ g.runtime_python.executable }}</code></p>
             <p v-if="g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingDetectedGpu') }}{{ g.cuda_info.gpu_name }}</p>
             <p v-else-if="g.cuda_info && !g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingNoNvidiaGpu') }}</p>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center;">
               <button type="button" class="s-btn s-btn-small" :disabled="busy" @click="pipQwen">{{ tw('onboardingQwenTtsPkgInstall') }}</button>
-              <button v-if="g.cuda_info && g.cuda_info.recommended_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipTorchCuda">
+              <button v-if="g.cuda_info && g.cuda_info.recommended_url && !(g.torch_load && g.torch_load.built_with_cuda && g.torch_cuda_available)" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipTorchCuda">
                 {{ tw('onboardingTorchCudaInstall') }} ({{ g.cuda_info.recommended_cu }})
               </button>
               <button v-if="g.torch_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['torch','torchvision','torchaudio'])">
