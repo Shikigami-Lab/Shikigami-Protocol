@@ -1069,6 +1069,16 @@
                 <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">③ {{ t('onboardingTtsGptSoVitsStep3') }}</span><br/>
                   {{ t('onboardingTtsGptSoVitsStep3Hint') }}</p>
               </details>
+              <div class="setup-wizard-substep" style="margin-top:10px;padding-top:10px;">
+                <label class="muted" style="font-size:11px;display:block;margin-bottom:4px;">{{ t('lblGptSovitsDir') }}</label>
+                <input type="text" class="form-input" v-model="onboardingGptsovitsDir" :placeholder="t('phGptSovitsDir')"
+                  style="width:100%;max-width:520px;box-sizing:border-box;font-size:12px;margin-bottom:6px;" />
+                <p class="muted" style="font-size:10px;line-height:1.45;margin:0 0 8px;">{{ t('hintGptSovitsDir') }}</p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                  <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="saveOnboardingGptsovitsDir">{{ t('onboardingGptsovitsSaveDir') }}</button>
+                  <button type="button" class="s-btn s-btn-small" :disabled="setupGuide.tts.gpt_sovits_port_open" @click="launchOnboardingGptsovits">{{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsGptSoVitsRunning') : t('onboardingTtsGptSoVitsLaunch') }}</button>
+                </div>
+              </div>
             </div>
 
             <div class="setup-tts-card" style="margin-top:10px;">
@@ -1096,11 +1106,6 @@
                 <p v-if="setupGuide.tts.kokoro_installed" class="setup-tts-check" style="font-size:12px;">
                   <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'">{{ setupGuide.tts.kokoro_models_ready ? '✓' : '○' }} {{ t('onboardingKokoroModels') }}</span>
                 </p>
-              </div>
-              <div class="setup-wizard-substep">
-                <div class="setup-wizard-substep-title">3. {{ t('onboardingKokoroJaStepTitle') }}（{{ t('onboardingOptional') }}）</div>
-                <p class="muted" style="font-size:11px;line-height:1.5;">{{ t('onboardingKokoroJaHint') }}</p>
-                <p class="muted" style="font-size:11px;margin-top:6px;">{{ t('onboardingTtsKokoroMisakiJa') }} — {{ t('onboardingKokoroJaInstall') }}</p>
               </div>
             </div>
 
@@ -1187,8 +1192,12 @@
                     <span v-if="onboardingSttBundle.repo_id" class="setup-bundle-badge">{{ t('onboardingBtnHfMirror350') }}</span>
                     <span v-if="onboardingSttBundle.modelscope_repo_id" class="setup-bundle-badge">{{ t('onboardingBtnModelScope') }}</span>
                   </p>
+                  <p class="muted" style="font-size:11px;line-height:1.55;margin-top:10px;" v-html="t('setupWizardPickSttModelHint')"></p>
+                  <p v-if="setupGuide.stt_model_path" class="muted" style="font-size:11px;margin-top:6px;">
+                    {{ t('setupWizardSttConfiguredPath') }}: <code style="word-break:break-all;">{{ setupGuide.stt_model_path }}</code>
+                  </p>
+                  <button type="button" class="s-btn s-btn-small s-btn-secondary" style="margin-top:8px;" :disabled="!setupGuide.sherpa_onnx_installed" @click="pickOnboardingSttModelDir">{{ t('setupWizardPickSttModel') }}</button>
                 </template>
-                <p class="muted" style="font-size:11px;margin-top:8px;">{{ t('setupWizardPickSttModel') }}</p>
               </div>
             </div>
           </div>

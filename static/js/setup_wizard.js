@@ -52,6 +52,8 @@
         /** @type {{ type: 'torch-cuda', index_url: string } | null} */
         pendingAfterPipUninstall: null,
         _unsub: null,
+        gptsovitsDir: '',
+        gptsovitsSaveMsg: '',
         /** @type {'zh'|'en'} 与 localStorage locale 一致，供语言按钮高亮 */
         wizardUiLocale: (() => {
           try {
@@ -217,6 +219,9 @@
           if (r.ok) {
             this.g = r.data;
             if (this.g && this.g.download) this.dl = this.g.download;
+            if (this.g && this.g.tts && this.g.tts.gpt_sovits_dir != null) {
+              this.gptsovitsDir = this.g.tts.gpt_sovits_dir;
+            }
           } else {
             this.statusError = r.error || 'status failed';
           }
@@ -246,6 +251,28 @@
       },
       pipQwen() {
         this.pipInstall(['qwen-tts>=0.0.1', 'soundfile>=0.12.0'], 'qwen_tts', '');
+      },
+      async saveGptsovitsDir() {
+        this.gptsovitsSaveMsg = '';
+        this.miscErrorText = '';
+        if (!api || !api.setupWizardSaveGptsovitsDir) {
+          this.miscErrorText = 'Electron API missing';
+          return;
+        }
+        this.busy = true;
+        try {
+          const res = await api.setupWizardSaveGptsovitsDir(this.gptsovitsDir || '');
+          if (res && res.ok) {
+            this.gptsovitsSaveMsg = tw('onboardingGptsovitsSaved');
+            await this.refresh();
+          } else {
+            this.miscErrorText = (res && res.error) || tw('setupWizardPipFailedGeneric');
+          }
+        } catch (e) {
+          this.miscErrorText = String((e && e.message) || e);
+        } finally {
+          this.busy = false;
+        }
       },
       pipTorchCuda() {
         const url = (this.g && this.g.cuda_info && this.g.cuda_info.recommended_url)

@@ -65,7 +65,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return '';
     }
   },
+  /** 与 config/ui_prefs.json 及主窗口默认一致；须在首帧 CSS 前同步读取。 */
+  getSetupWizardThemeBootstrap: () => {
+    try {
+      const v = ipcRenderer.sendSync('setup-wizard:get-theme-bootstrap');
+      return typeof v === 'string' ? v : 'light';
+    } catch (_) {
+      return 'light';
+    }
+  },
   setupWizardGetStatus: () => ipcRenderer.invoke('setup-wizard:get-status'),
+  setupWizardSaveGptsovitsDir: (dir) => ipcRenderer.invoke('setup-wizard:save-gptsovits-dir', dir),
   setupWizardProceed: () => ipcRenderer.invoke('setup-wizard:proceed'),
   setupWizardPickSttModel: () => ipcRenderer.invoke('setup-wizard:pick-stt-model'),
   setupWizardStartOp: (payload) => ipcRenderer.send('setup-wizard:start-op', payload),

@@ -519,7 +519,6 @@ def _tts_status(config) -> Dict[str, Any]:
         "gpt_sovits_script_sh": os.path.isfile("scripts/start_gptsovits.sh"),
         "kokoro_installed": False,
         "kokoro_misaki_zh": False,
-        "kokoro_misaki_ja": False,
         "qwen3_model_ready": False,
         "qwen3_model_path": "",
     }
@@ -543,11 +542,6 @@ def _tts_status(config) -> Dict[str, Any]:
     try:
         from misaki import zh  # noqa: F401
         result["kokoro_misaki_zh"] = True
-    except ImportError:
-        pass
-    try:
-        from misaki import ja  # noqa: F401
-        result["kokoro_misaki_ja"] = True
     except ImportError:
         pass
     # Check if Kokoro model files are present
@@ -1300,10 +1294,28 @@ def run_wizard_download_cli(bundle_id: str, source: str) -> int:
     return 0 if st.get("phase") == "success" else 1
 
 
+def normalize_stt_model_path_for_config(raw: str) -> str:
+    """将用户选择的路径规范为 SenseVoice 模型目录（须含 tokens.txt 与 onnx）。
+
+    若选的是单个模型文件且同目录存在 tokens.txt，则自动改为其父目录。
+    """
+    path = (raw or "").strip()
+    if not path:
+        return ""
+    p = os.path.abspath(os.path.expanduser(path))
+    if os.path.isdir(p):
+        return p
+    if os.path.isfile(p):
+        parent = os.path.dirname(p)
+        if parent and os.path.isfile(os.path.join(parent, "tokens.txt")):
+            return parent
+    return p
+
+
 def wizard_apply_stt_model_cli(model_path: str) -> int:
     from src.api.settings_ext import _load_yaml, _save_yaml
 
-    path = (model_path or "").strip()
+    path = normalize_stt_model_path_for_config(model_path or "")
     y, data = _load_yaml()
     if "stt" not in data:
         data["stt"] = {}
@@ -1963,7 +1975,7 @@ async def apply_stt_model(request: Request, body: ApplySttModelBody) -> Dict[str
     """Write stt.model_path to app.yaml and hot-reload config."""
     from src.api.settings_ext import _load_yaml, _save_yaml
     config = request.app.state.config
-    path = body.model_path.strip()
+    path = normalize_stt_model_path_for_config(body.model_path)
     y, data = _load_yaml()
     if "stt" not in data:
         data["stt"] = {}

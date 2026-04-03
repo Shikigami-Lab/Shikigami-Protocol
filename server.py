@@ -71,6 +71,7 @@ _WIZARD_ONLY_STDOUT = any(
         "--wizard-apply-stt",
         "--wizard-launch-gptsovits",
         "--wizard-pip-uninstall",
+        "--wizard-save-gptsovits-dir",
     )
 )
 
@@ -467,6 +468,27 @@ if __name__ == "__main__":
         raise SystemExit(
             run_wizard_pip_uninstall_cli(_body.get("packages") or [], _body.get("dirs") or [])
         )
+    if "--wizard-save-gptsovits-dir" in sys.argv:
+        import json as _json
+
+        from src.api.settings_ext import _load_yaml, _save_yaml
+
+        _raw = sys.stdin.read() or "{}"
+        try:
+            _body = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            print("SETUP_RESULT:" + _json.dumps({"ok": False, "error": "invalid json stdin"}))
+            raise SystemExit(1)
+        _dir = (_body.get("dir") or "").strip()
+        y, data = _load_yaml()
+        if "tts" not in data or not isinstance(data.get("tts"), dict):
+            data["tts"] = {}
+        if "gpt_sovits" not in data["tts"] or not isinstance(data["tts"].get("gpt_sovits"), dict):
+            data["tts"]["gpt_sovits"] = {}
+        data["tts"]["gpt_sovits"]["dir"] = _dir
+        _save_yaml(y, data)
+        print("SETUP_RESULT:" + _json.dumps({"ok": True}, ensure_ascii=False))
+        raise SystemExit(0)
 
     config = AppConfig.load()
     uvicorn.run(

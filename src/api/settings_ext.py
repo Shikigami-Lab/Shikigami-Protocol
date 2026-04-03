@@ -461,6 +461,28 @@ async def get_tts_config(request: Request):
     }
 
 
+class GptSovitsDirBody(BaseModel):
+    dir: str = ""
+
+
+@router.post("/settings/tts/gpt-sovits-dir")
+async def save_gpt_sovits_dir_only(request: Request, body: GptSovitsDirBody):
+    """仅更新 ``tts.gpt_sovits.dir``（入门页 / 启动器保存安装路径，无需提交整份 TTS 表单）。"""
+    config = request.app.state.config
+    path = (body.dir or "").strip()
+    y, data = _load_yaml()
+    if "tts" not in data or not isinstance(data.get("tts"), dict):
+        data["tts"] = {}
+    if "gpt_sovits" not in data["tts"] or not isinstance(data["tts"].get("gpt_sovits"), dict):
+        data["tts"]["gpt_sovits"] = {}
+    data["tts"]["gpt_sovits"]["dir"] = path
+    _save_yaml(y, data)
+    if "gpt_sovits" not in config.tts_config or not isinstance(config.tts_config.get("gpt_sovits"), dict):
+        config.tts_config["gpt_sovits"] = {}
+    config.tts_config["gpt_sovits"]["dir"] = path
+    return {"ok": True}
+
+
 @router.post("/settings/tts/save")
 async def save_tts_config(request: Request, body: TTSSaveBody):
     config = request.app.state.config

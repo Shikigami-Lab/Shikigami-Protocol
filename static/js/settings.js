@@ -111,6 +111,7 @@ const SettingsMixin = {
       // ── 入门 / 环境自检 ──
       setupGuide: null,
       setupGuideLoading: false,
+      onboardingGptsovitsDir: '',
       setupVerifyResult: null,
       setupVerifyLoading: false,
       setupDownloadPollId: null,
@@ -1048,12 +1049,82 @@ const SettingsMixin = {
           this.setupGuide = data;
           if (data.stt_model_path !== undefined) this.sttModelPath = data.stt_model_path;
           // Sync gptsovits_dir into ttsForm so the inline save button works
-          if (data.tts && data.tts.gpt_sovits_dir != null)
+          if (data.tts && data.tts.gpt_sovits_dir != null) {
             this.ttsForm.gptsovits_dir = data.tts.gpt_sovits_dir;
+            this.onboardingGptsovitsDir = data.tts.gpt_sovits_dir;
+          }
         }
       } catch (_) {}
       finally {
         this.setupGuideLoading = false;
+      }
+    },
+
+    async saveOnboardingGptsovitsDir() {
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsGptSovitsDir(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir: this.onboardingGptsovitsDir || '' }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.ok) {
+          this.showToast(this.t('onboardingGptsovitsSaved'), 'success');
+          await this.loadSetupGuide();
+        } else {
+          this.showToast((j.detail || j.error || res.statusText || 'Save failed'), 'error');
+        }
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
+      }
+    },
+
+    async pickOnboardingSttModelDir() {
+      if (!window.electronAPI || typeof window.electronAPI.setupWizardPickSttModel !== 'function') {
+        this.showToast(this.t('setupWizardPickSttModelNeedElectron'), 'error');
+        return;
+      }
+      let picked;
+      try {
+        picked = await window.electronAPI.setupWizardPickSttModel();
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
+        return;
+      }
+      if (!picked || !picked.path) return;
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/apply-stt-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_path: picked.path }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.ok !== false) {
+          this.showToast(this.t('setupWizardPickSttModelSaved'), 'success');
+          await this.loadSetupGuide();
+        } else {
+          this.showToast((j.error || j.detail || res.statusText || 'Save failed'), 'error');
+        }
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
+      }
+    },
+
+    async launchOnboardingGptsovits() {
+      if (this.setupGuide?.tts?.gpt_sovits_port_open) {
+        return;
+      }
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/launch-gptsovits', { method: 'POST' });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.ok !== false) {
+          this.showToast(this.t('onboardingTtsGptSoVitsLaunch') + ' …', 'success');
+          await this.loadSetupGuide();
+        } else {
+          this.showToast((j.error || j.detail || 'Launch failed'), 'error');
+        }
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
       }
     },
 

@@ -5,6 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Shikigami Protocol — 启动器</title>
   <link rel="icon" href="icon.png" type="image/png" />
+  <!-- 必须在任何主题 CSS 之前设置 data-theme，避免首帧白屏/错色；与 main getWizardResolvedTheme 同源。 -->
+  <script>
+    (function initSetupWizardTheme() {
+      var t = 'light';
+      try {
+        if (window.electronAPI && typeof window.electronAPI.getSetupWizardThemeBootstrap === 'function') {
+          t = String(window.electronAPI.getSetupWizardThemeBootstrap());
+        } else {
+          try {
+            var ls = localStorage.getItem('theme');
+            if (ls === 'velvet_legacy') ls = 'velvet';
+            if (ls === '') t = '';
+            else if (ls != null && ls !== '') t = ls;
+          } catch (e1) { /* keep light */ }
+        }
+        if (t === 'velvet_legacy') t = 'velvet';
+      } catch (e0) {
+        t = 'light';
+      }
+      try {
+        document.documentElement.setAttribute('data-theme', t);
+        localStorage.setItem('theme', t);
+      } catch (e2) { /* ignore */ }
+    })();
+  </script>
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/settings.css" />
   <script src="libs/vue.global.prod.js"></script>
@@ -423,9 +448,19 @@
             <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">③ {{ tw('onboardingTtsGptSoVitsStep3') }}</span><br/>
               {{ tw('onboardingTtsGptSoVitsStep3Hint') }}</p>
           </details>
-          <button type="button" class="s-btn s-btn-small" style="margin-top:8px;" :disabled="busy" @click="startOp({ op: 'launch-gptsovits' })">
-            {{ g.tts.gpt_sovits_port_open ? tw('onboardingTtsGptSoVitsRunning') : tw('onboardingTtsGptSoVitsLaunch') }}
-          </button>
+          <div class="setup-wizard-substep" style="margin-top:10px;padding-top:10px;">
+            <label class="muted" style="font-size:11px;display:block;margin-bottom:4px;">{{ tw('lblGptSovitsDir') }}</label>
+            <input type="text" class="form-input" v-model="gptsovitsDir" :placeholder="tw('phGptSovitsDir')"
+              style="width:100%;max-width:100%;box-sizing:border-box;font-size:12px;margin-bottom:6px;" />
+            <p class="muted" style="font-size:10px;line-height:1.45;margin:0 0 8px;">{{ tw('hintGptSovitsDir') }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="saveGptsovitsDir">{{ tw('onboardingGptsovitsSaveDir') }}</button>
+              <button type="button" class="s-btn s-btn-small" :disabled="busy || g.tts.gpt_sovits_port_open" @click="startOp({ op: 'launch-gptsovits' })">
+                {{ g.tts.gpt_sovits_port_open ? tw('onboardingTtsGptSoVitsRunning') : tw('onboardingTtsGptSoVitsLaunch') }}
+              </button>
+            </div>
+            <p v-if="gptsovitsSaveMsg" class="ok" style="font-size:11px;margin-top:8px;">{{ gptsovitsSaveMsg }}</p>
+          </div>
         </div>
 
         <div class="setup-tts-card" style="margin-top:10px;">
@@ -470,11 +505,6 @@
             <p v-if="g.tts.kokoro_installed" class="setup-tts-check" style="font-size:12px;">
               <span :class="g.tts.kokoro_models_ready ? 'ok' : 'warn'">{{ g.tts.kokoro_models_ready ? '✓' : '○' }} {{ tw('onboardingKokoroModels') }}</span>
             </p>
-          </div>
-          <div class="setup-wizard-substep">
-            <div class="setup-wizard-substep-title">3. {{ tw('onboardingKokoroJaStepTitle') }}（{{ tw('onboardingOptional') }}）</div>
-            <p class="muted" style="font-size:11px;line-height:1.5;">{{ tw('onboardingKokoroJaHint') }}</p>
-            <p class="muted" style="font-size:11px;margin-top:6px;">{{ tw('onboardingTtsKokoroMisakiJa') }} — {{ tw('onboardingKokoroJaInstall') }}</p>
           </div>
         </div>
 
@@ -581,8 +611,12 @@
                 <button v-if="sttBundle.repo_id" type="button" class="s-btn s-btn-small" :disabled="busy" @click="doDownload('sherpa_sense_voice', 'hf')">{{ tw('onboardingBtnHfMirror350') }}</button>
                 <button v-if="sttBundle.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="doDownload('sherpa_sense_voice', 'modelscope')">{{ tw('onboardingBtnModelScope') }}</button>
               </div>
+              <p class="muted" style="font-size:11px;line-height:1.55;margin-top:10px;" v-html="tw('setupWizardPickSttModelHint')"></p>
+              <p v-if="g.stt_model_path" class="muted" style="font-size:11px;margin-top:6px;">
+                {{ tw('setupWizardSttConfiguredPath') }}: <code style="word-break:break-all;">{{ g.stt_model_path }}</code>
+              </p>
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" style="margin-top:8px;" :disabled="busy" @click="pickStt">{{ tw('setupWizardPickSttModel') }}</button>
             </template>
-            <button type="button" class="s-btn s-btn-small s-btn-secondary" style="margin-top:10px;" :disabled="busy" @click="pickStt">{{ tw('setupWizardPickSttModel') }}</button>
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@ port: 7788
 host: "0.0.0.0"
 log_level: "debug"
 default_llm: "Gemini"
-default_tts: "gpt_sovits"
+default_tts: "kokoro"
 max_history_turns: 60
 user_name: "用户"
 
@@ -66,7 +66,7 @@ tts:
     repetition_penalty: 1.05
 
   kokoro:
-    voice: 'zf_xiaobei'
+    voice: 'em_alex'
     lang: zh
     speed: 1.0
     auto_detect_lang: true

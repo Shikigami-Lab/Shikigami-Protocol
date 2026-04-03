@@ -88,6 +88,7 @@ window.API_PATHS = {
   settingsTtsConfig: () => '/settings/tts/config',
   settingsTtsVoices: (lang) => `/settings/tts/voices?language=${encodeURIComponent(lang || '')}`,
   settingsKokoroVoices: () => '/settings/tts/kokoro/voices',
+  settingsTtsGptSovitsDir: () => '/settings/tts/gpt-sovits-dir',
   settingsTtsSave: () => '/settings/tts/save',
   settingsTtsTest: () => '/settings/tts/test',
   settingsSystem: () => '/settings/system',

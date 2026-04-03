@@ -82,6 +82,51 @@ function readServerConfig(appRoot) {
   }
 }
 
+/**
+ * Read HTTP_PROXY / HTTPS_PROXY from project .env (same keys as Settings → System).
+ * Python server loads .env on startup; Electron-spawned launcher children do not unless merged here.
+ */
+function readEnvFileProxy(appRoot) {
+  const envPath = path.join(appRoot, '.env');
+  if (!fs.existsSync(envPath)) return {};
+  const out = {};
+  try {
+    const raw = fs.readFileSync(envPath, 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const eq = t.indexOf('=');
+      if (eq < 1) continue;
+      const key = t.slice(0, eq).trim();
+      const upper = key.toUpperCase();
+      if (upper !== 'HTTP_PROXY' && upper !== 'HTTPS_PROXY') continue;
+      let val = t.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      out[upper] = val;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return out;
+}
+
+/** Environment for setup-wizard subprocesses (status JSON, pip helper, wizard-download, …). */
+function envForWizardChild(appRoot, extra) {
+  const env = {
+    ...process.env,
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUNBUFFERED: '1',
+    ...(extra || {}),
+  };
+  const px = readEnvFileProxy(appRoot);
+  if (px.HTTP_PROXY) env.HTTP_PROXY = px.HTTP_PROXY;
+  if (px.HTTPS_PROXY) env.HTTPS_PROXY = px.HTTPS_PROXY;
+  return env;
+}
+
 function getPythonCmd(appRoot) {
   // --- PyInstaller Mode (Fallback to python if not compiled) ---
   if (app.isPackaged) {
@@ -114,6 +159,17 @@ function readUiPrefs(appRoot) {
   } catch (_) {
     return { show_startup_launcher: true, theme: undefined, locale: undefined };
   }
+}
+
+/** 与主界面 index.html 一致：ui_prefs 无 theme 键或值为 null/undefined 时默认 light；空字符串 = 深紫。 */
+function getWizardResolvedTheme(appRoot) {
+  const prefs = readUiPrefs(appRoot);
+  if (prefs.theme === undefined || prefs.theme === null) {
+    return 'light';
+  }
+  let t = String(prefs.theme);
+  if (t === 'velvet_legacy') return 'velvet';
+  return t;
 }
 
 /** 启动器首屏语言：配置文件 → 系统区域 → 默认 en（与主界面 inferLocaleFromNavigator 非中文即 en 一致） */
@@ -179,7 +235,7 @@ function runWizardStatusJson(appRoot) {
     const args = [...argsBase, '--setup-status-json'];
     const child = spawn(cmd, args, {
       cwd: appRoot,
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      env: envForWizardChild(appRoot),
     });
     let out = '';
     let err = '';
@@ -211,7 +267,7 @@ function spawnWizardServerJsonStdin(appRoot, extraArgs, stdinStr, onEventLine) {
   const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
   const child = spawn(cmd, [...argsBase, ...extraArgs], {
     cwd: appRoot,
-    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    env: envForWizardChild(appRoot),
   });
   if (stdinStr != null && child.stdin) {
     child.stdin.write(stdinStr);
@@ -252,7 +308,7 @@ function spawnWizardPipHelper(appRoot, pipSpec, onEventLine) {
   const payload = JSON.stringify(pipSpec);
   const child = spawn(py, [script, 'pip-install', payload], {
     cwd: appRoot,
-    env: { ...process.env, SHIKIGAMI_APP_ROOT: appRoot, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    env: envForWizardChild(appRoot, { SHIKIGAMI_APP_ROOT: appRoot }),
   });
   attachWizardStdoutParser(child, onEventLine);
   child.stderr.on('data', (d) => process.stderr.write(d));
@@ -276,7 +332,7 @@ function createSetupWizardWindow() {
     return;
   }
   const uiPrefs = readUiPrefs(appRoot);
-  const themeVal = uiPrefs.theme !== undefined && uiPrefs.theme !== null ? String(uiPrefs.theme) : 'light';
+  const themeVal = getWizardResolvedTheme(appRoot);
 
   const W = 920;
   const H = 720;
@@ -291,7 +347,7 @@ function createSetupWizardWindow() {
     x,
     y,
     show: false,
-    backgroundColor: approxWizardBackgroundColor(uiPrefs.theme),
+    backgroundColor: approxWizardBackgroundColor(themeVal),
     icon: getAppIcon(),
     title: 'Shikigami Protocol — 启动器',
     webPreferences: {
@@ -303,16 +359,7 @@ function createSetupWizardWindow() {
   });
   setupWizardWindow.setMenuBarVisibility(false);
   setupWizardWindow.loadFile(htmlPath);
-  setupWizardWindow.once('ready-to-show', async () => {
-    if (!setupWizardWindow || setupWizardWindow.isDestroyed()) return;
-    try {
-      await setupWizardWindow.webContents.executeJavaScript(
-        `document.documentElement.setAttribute('data-theme', ${JSON.stringify(themeVal)});`,
-        true,
-      );
-    } catch (e) {
-      console.warn('[electron] setup wizard theme inject failed:', e.message);
-    }
+  setupWizardWindow.once('ready-to-show', () => {
     if (setupWizardWindow && !setupWizardWindow.isDestroyed()) setupWizardWindow.show();
   });
   setupWizardWindow.on('closed', () => {
@@ -741,6 +788,14 @@ ipcMain.on('setup-wizard:get-locale-bootstrap', (event) => {
   }
 });
 
+ipcMain.on('setup-wizard:get-theme-bootstrap', (event) => {
+  try {
+    event.returnValue = getWizardResolvedTheme(getAppRoot());
+  } catch (_) {
+    event.returnValue = 'light';
+  }
+});
+
 ipcMain.handle('setup-wizard:get-status', async () => {
   const appRoot = getAppRoot();
   try {
@@ -762,14 +817,52 @@ ipcMain.handle('setup-wizard:proceed', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('setup-wizard:pick-stt-model', async () => {
-  if (!setupWizardWindow || setupWizardWindow.isDestroyed()) return { path: '' };
-  const r = await dialog.showOpenDialog(setupWizardWindow, {
-    title: '选择 STT 模型文件',
-    properties: ['openFile'],
+ipcMain.handle('setup-wizard:pick-stt-model', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const parent = win && !win.isDestroyed()
+    ? win
+    : (setupWizardWindow && !setupWizardWindow.isDestroyed() ? setupWizardWindow : BrowserWindow.getFocusedWindow());
+  if (!parent) return { path: '' };
+  const r = await dialog.showOpenDialog(parent, {
+    title: 'Select SenseVoice model folder (tokens.txt + model.onnx) / 选择模型文件夹',
+    properties: ['openDirectory'],
   });
   if (r.canceled || !r.filePaths || !r.filePaths[0]) return { path: '' };
   return { path: r.filePaths[0] };
+});
+
+ipcMain.handle('setup-wizard:save-gptsovits-dir', async (_event, dirStr) => {
+  const appRoot = getAppRoot();
+  const payload = JSON.stringify({ dir: String(dirStr || '') });
+  const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
+  return new Promise((resolve) => {
+    const child = spawn(cmd, [...argsBase, '--wizard-save-gptsovits-dir'], {
+      cwd: appRoot,
+      env: envForWizardChild(appRoot),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (child.stdin) {
+      child.stdin.write(payload, 'utf8');
+      child.stdin.end();
+    }
+    let out = '';
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr.on('data', (d) => { process.stderr.write(d); });
+    child.on('error', () => resolve({ ok: false, error: 'spawn failed' }));
+    child.on('close', () => {
+      const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        const s = lines[i];
+        if (s.startsWith('SETUP_RESULT:')) {
+          try {
+            resolve(JSON.parse(s.slice('SETUP_RESULT:'.length)));
+            return;
+          } catch (_) { /* continue */ }
+        }
+      }
+      resolve({ ok: false, error: 'no SETUP_RESULT' });
+    });
+  });
 });
 
 ipcMain.on('setup-wizard:start-op', (event, payload) => {
@@ -820,7 +913,7 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
     const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
     activeWizardChild = spawn(cmd, [...argsBase, '--wizard-download', bid, src], {
       cwd: appRoot,
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      env: envForWizardChild(appRoot),
     });
     attachWizardStdoutParser(activeWizardChild, onEv);
     activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
@@ -836,7 +929,7 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
     const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
     activeWizardChild = spawn(cmd, [...argsBase, '--wizard-apply-stt', mp], {
       cwd: appRoot,
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      env: envForWizardChild(appRoot),
     });
     activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
     activeWizardChild.on('close', (code) => {
@@ -850,7 +943,7 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
     const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
     activeWizardChild = spawn(cmd, [...argsBase, '--wizard-launch-gptsovits'], {
       cwd: appRoot,
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      env: envForWizardChild(appRoot),
     });
     activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
     activeWizardChild.on('close', (code) => {
