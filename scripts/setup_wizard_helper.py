@@ -94,7 +94,7 @@ def cmd_pip_install(spec: dict) -> int:
     ok = code == 0
     err_tail = "\n".join(tail)[-800:] if not ok else None
     if not ok and not (err_tail and err_tail.strip()):
-        err_tail = f"pip exited with code {code if target != 'qwen_tts' else code2}"
+        err_tail = f"pip exited with code {code}"
     _emit(
         {
             "type": "pip",
