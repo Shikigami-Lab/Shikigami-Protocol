@@ -1,6 +1,6 @@
 {
   "name": "shikigami-protocol",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "author": "Innominat <92572975+fyd126113@users.noreply.github.com>",
   "license": "AGPL-3.0",
   "description": "Local-first AI character companion: emotion/energy/affinity state, layered memory, reflection & proactive speech (ASE). Electron/Vue + FastAPI. AGPL-3.0.",
