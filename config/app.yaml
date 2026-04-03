@@ -1,9 +1,9 @@
 # 公开版用 config：仅保留「Gemini」「ollama_local」两个 LLM 预设，新用户不会看到私有配置里的全部模型
 port: 7788
 host: "0.0.0.0"
-log_level: "error"
+log_level: "debug"
 default_llm: "Gemini"
-default_tts: "edge_tts"
+default_tts: "gpt_sovits"
 max_history_turns: 60
 user_name: "用户"
 
@@ -66,7 +66,7 @@ tts:
     repetition_penalty: 1.05
 
   kokoro:
-    voice: ''
+    voice: 'zf_xiaobei'
     lang: zh
     speed: 1.0
     auto_detect_lang: true

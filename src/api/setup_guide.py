@@ -20,6 +20,9 @@ from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
+# Self-check may run on every /api/setup poll; log import failures at WARNING once per key.
+_selfcheck_import_warned: set[str] = set()
+
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
 _BUNDLES_PATH = os.path.join(get_project_root(), "config", "model_bundles.yaml")
@@ -107,6 +110,179 @@ def _user_pkg_has(pkg_name: str) -> bool:
     return False
 
 
+def _torch_scan_roots() -> List[str]:
+    """Where *this* interpreter installs wheels: purelib/platlib, optional user site, frozen ``user_packages``.
+
+    Avoids ``site.getsitepackages()`` pulling in extra stacked env paths (e.g. conda) that confuse
+    \"on disk\" checks vs the venv you actually ``pip install`` into from a terminal.
+    """
+    import site
+    import sysconfig
+
+    roots: List[str] = []
+    for key in ("purelib", "platlib"):
+        try:
+            p = sysconfig.get_path(key)
+            if p:
+                a = os.path.abspath(p)
+                if os.path.isdir(a):
+                    roots.append(a)
+        except Exception:
+            pass
+    try:
+        if site.ENABLE_USER_SITE:
+            u = site.getusersitepackages()
+            if u:
+                a = os.path.abspath(u)
+                if os.path.isdir(a):
+                    roots.append(a)
+    except Exception:
+        pass
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        up = os.path.join(exe_dir, "user_packages")
+        if os.path.isdir(up):
+            roots.append(os.path.abspath(up))
+    out: List[str] = []
+    seen = set()
+    for r in roots:
+        if r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
+def _purge_stale_torch_modules_if_no_artifacts() -> None:
+    """If torch files are gone from scan roots but this process still has ``torch*`` in ``sys.modules``,
+    drop the cache so /status matches an external ``pip uninstall`` without requiring restart.
+
+    Safe: only purges when `_pip_torch_artifacts_on_disk` is false (no ``torch/`` / ``torch-*.dist-info``
+    under this interpreter's standard roots). Editable installs that keep code only on ``sys.path`` without
+    that layout may need a process restart to resync.
+    """
+    if _pip_torch_artifacts_on_disk():
+        return
+    keys = [k for k in list(sys.modules) if k == "torch" or k.startswith("torch.")]
+    if not keys:
+        return
+    import importlib
+
+    for k in keys:
+        sys.modules.pop(k, None)
+    importlib.invalidate_caches()
+
+
+def _pip_install_clear_stale_errors() -> None:
+    """Drop a stuck ``pip_install.phase == error`` banner when the env no longer matches the failure."""
+
+    def _idle() -> None:
+        _pip_install_state["phase"] = "idle"
+        _pip_install_state["message"] = ""
+        _pip_install_state["error"] = None
+        _pip_install_state["target"] = None
+
+    with _pip_install_lock:
+        st = _pip_install_state
+        if st.get("phase") != "error":
+            return
+        tgt = (st.get("target") or "").strip()
+        if tgt not in ("torch_cuda", "qwen_tts", "uninstall"):
+            return
+        if not _torch_installed():
+            _idle()
+            return
+        if _torch_import_ok():
+            _idle()
+            return
+        if tgt == "torch_cuda" and not _torch_import_ok():
+            _idle()
+            return
+
+
+def _pip_torch_artifacts_on_disk() -> bool:
+    """site-packages / user_packages 是否仍有 torch（import 失败时也视为已安装，便于显示卸载按钮）。
+
+    只匹配顶层 ``torch/`` 或 ``torch-*.dist-info``，避免误报 ``torchgen`` 等。
+    """
+    if getattr(sys, "frozen", False):
+        return _user_pkg_has("torch")
+    for root in _torch_scan_roots():
+        try:
+            for e in os.listdir(root):
+                el = e.lower()
+                if el == "torch":
+                    return True
+                if el.startswith("torch-") and el.endswith(".dist-info"):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _torch_import_ok() -> bool:
+    try:
+        import torch  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _torch_load_info() -> Dict[str, Any]:
+    """Where ``import torch`` resolves in *this* process (helps pip vs runtime mismatches)."""
+    import site
+    import sysconfig
+
+    pure = ""
+    try:
+        pure = os.path.abspath(sysconfig.get_path("purelib") or "")
+    except Exception:
+        pass
+    out: Dict[str, Any] = {
+        "ok": False,
+        "version": "",
+        "file": "",
+        "from_user_site": False,
+        "under_purelib": False,
+    }
+    try:
+        import torch
+
+        out["ok"] = True
+        out["version"] = str(getattr(torch, "__version__", "") or "")
+        raw = getattr(torch, "__file__", "") or ""
+        if raw:
+            ap = os.path.abspath(raw)
+            out["file"] = ap.replace("\\", "/")
+            if pure:
+                try:
+                    out["under_purelib"] = os.path.normcase(ap).startswith(
+                        os.path.normcase(pure + os.sep)
+                    )
+                except Exception:
+                    pass
+            if getattr(sys, "frozen", False) and not out["under_purelib"]:
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+                up = os.path.abspath(os.path.join(exe_dir, "user_packages"))
+                try:
+                    out["under_purelib"] = os.path.normcase(ap).startswith(os.path.normcase(up + os.sep))
+                except Exception:
+                    pass
+        try:
+            if site.ENABLE_USER_SITE and raw:
+                us = site.getusersitepackages()
+                if us:
+                    ap2 = os.path.abspath(raw)
+                    us2 = os.path.abspath(us)
+                    nc_ap = os.path.normcase(ap2)
+                    nc_us = os.path.normcase(us2)
+                    out["from_user_site"] = nc_ap.startswith(nc_us + os.sep) or nc_ap == nc_us
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return out
+
+
 def _chromadb_installed() -> bool:
     try:
         import chromadb  # noqa: F401
@@ -129,6 +305,14 @@ def _qwen_tts_installed() -> bool:
         return True
     except ImportError:
         return _user_pkg_has("qwen_tts")
+    except Exception as e:
+        key = "qwen_tts_import"
+        if key in _selfcheck_import_warned:
+            logger.debug("Qwen-tts self-check import failed (suppressed repeat): %s", e)
+        else:
+            _selfcheck_import_warned.add(key)
+            logger.warning("Qwen-tts self-check import failed (often caused by broken torch): %s", e)
+        return _user_pkg_has("qwen_tts")
 
 
 def _torch_installed() -> bool:
@@ -136,7 +320,17 @@ def _torch_installed() -> bool:
         import torch  # noqa: F401
         return True
     except ImportError:
-        return _user_pkg_has("torch")
+        return _user_pkg_has("torch") or _pip_torch_artifacts_on_disk()
+    except Exception as e:
+        key = "torch_import"
+        if key in _selfcheck_import_warned:
+            logger.debug("Torch self-check import failed (suppressed repeat): %s", e)
+        else:
+            _selfcheck_import_warned.add(key)
+            logger.warning(
+                "Torch self-check import failed (possible mixed/half-uninstalled environment): %s", e
+            )
+        return _user_pkg_has("torch") or _pip_torch_artifacts_on_disk()
 
 
 def _torch_cuda_available() -> bool:
@@ -206,7 +400,10 @@ def _detect_cuda_info() -> Dict[str, Any]:
 
 
 def _ai_memory_installed() -> bool:
-    """全套 AI 记忆依赖是否已安装（chromadb + transformers + sentence_transformers）。"""
+    """全套 AI 记忆依赖是否已安装（chromadb + transformers + sentence_transformers）。
+
+    导入时可能因损坏的 torch（如混装、半卸载）抛出 RuntimeError 等，不可让 /api/setup 整页 500。
+    """
     pkgs = ("chromadb", "transformers", "sentence_transformers")
     for mod in pkgs:
         try:
@@ -214,6 +411,15 @@ def _ai_memory_installed() -> bool:
         except ImportError:
             if not _user_pkg_has(mod):
                 return False
+        except Exception as e:
+            logger.warning(
+                "AI memory dependency self-check: importing %s failed (possibly broken torch or ABI issue); treat as not ready: %s",
+                mod,
+                e,
+            )
+            if _user_pkg_has(mod):
+                continue
+            return False
     return True
 
 
@@ -409,8 +615,13 @@ async def setup_status(request: Request) -> Dict[str, Any]:
     with _download_lock:
         dl = dict(_download_state)
 
+    _purge_stale_torch_modules_if_no_artifacts()
+    _pip_install_clear_stale_errors()
+
     with _pip_install_lock:
         pip_st = dict(_pip_install_state)
+
+    import sysconfig
 
     profile_dir = os.path.join(get_project_root(), "profiles")
     profile_count = 0
@@ -418,6 +629,7 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         profile_count = len([x for x in os.listdir(profile_dir) if x.endswith(".json")])
 
     tts_st = _tts_status(config)
+    torch_load = _torch_load_info()
 
     return {
         "models_root": _models_root(),
@@ -430,6 +642,7 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         "modelscope_installed": _modelscope_installed(),
         "qwen_tts_installed": _qwen_tts_installed(),
         "torch_installed": _torch_installed(),
+        "torch_import_ok": _torch_import_ok(),
         "torch_cuda_available": _torch_cuda_available(),
         "cuda_info": _detect_cuda_info(),
         "profile_count": profile_count,
@@ -451,6 +664,12 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         "embed_installed": embed_installed,
         "tts": tts_st,
         "pip_install": pip_st,
+        "runtime_python": {
+            "executable": sys.executable,
+            "prefix": sys.prefix,
+            "purelib": sysconfig.get_path("purelib"),
+        },
+        "torch_load": torch_load,
     }
 
 
@@ -693,9 +912,62 @@ def _download_worker(bundle_id: str, repo_id: str, local_dir: str) -> None:
             _download_state["message"] = "失败"
 
 
-def _download_worker_modelscope(bundle_id: str, ms_repo_id: str, local_dir: str) -> None:
-    """用 ModelScope SDK 下载模型到 local_dir。"""
+def _parse_size_hint_bytes(size_hint: str) -> int:
+    """将 '~3.4 GB' / '~400 MB' 解析为字节数，解析失败返回 0。"""
+    import re
+    m = re.search(r"([\d.]+)\s*(GB|MB|KB)", size_hint, re.IGNORECASE)
+    if not m:
+        return 0
+    val, unit = float(m.group(1)), m.group(2).upper()
+    mul = {"KB": 1024, "MB": 1024**2, "GB": 1024**3}.get(unit, 1)
+    return int(val * mul)
+
+
+def _dir_size_bytes(path: str) -> int:
+    total = 0
+    try:
+        for dirpath, _, filenames in os.walk(path):
+            for f in filenames:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
+
+
+def _download_worker_modelscope(bundle_id: str, ms_repo_id: str, local_dir: str, size_hint: str = "") -> None:
+    """用 ModelScope SDK 下载模型到 local_dir，后台轮询目录大小更新进度。"""
     global _download_state
+    done_event = threading.Event()
+
+    expected_bytes = _parse_size_hint_bytes(size_hint)
+
+    def _progress_poller():
+        while not done_event.is_set():
+            done_event.wait(timeout=2)
+            if done_event.is_set():
+                break
+            current = _dir_size_bytes(local_dir)
+            with _download_lock:
+                if _download_state["phase"] != "running":
+                    break
+                if expected_bytes > 0:
+                    pct = min(95, int(current * 100 / expected_bytes))
+                    # 只在有实际增长后才离开"正在连接"阶段
+                    if pct > 5:
+                        mb = current // 1024 // 1024
+                        exp_mb = expected_bytes // 1024 // 1024
+                        _download_state["progress_pct"] = pct
+                        _download_state["message"] = f"下载中 {mb}MB / {exp_mb}MB"
+                else:
+                    current_mb = _dir_size_bytes(local_dir) // 1024 // 1024
+                    if current_mb > 0:
+                        _download_state["message"] = f"下载中 {current_mb}MB…"
+
+    poller = threading.Thread(target=_progress_poller, daemon=True)
+
     try:
         os.makedirs(local_dir, exist_ok=True)
         from modelscope.hub.snapshot_download import snapshot_download as ms_snapshot_download
@@ -704,7 +976,7 @@ def _download_worker_modelscope(bundle_id: str, ms_repo_id: str, local_dir: str)
             _download_state["message"] = "正在连接 ModelScope…"
             _download_state["progress_pct"] = 5
 
-        # modelscope snapshot_download: model_id + local_dir (no cache_dir param)
+        poller.start()
         ms_snapshot_download(ms_repo_id, local_dir=local_dir)
 
         with _download_lock:
@@ -718,6 +990,8 @@ def _download_worker_modelscope(bundle_id: str, ms_repo_id: str, local_dir: str)
             _download_state["phase"] = "error"
             _download_state["error"] = str(e)
             _download_state["message"] = "失败"
+    finally:
+        done_event.set()
 
 
 class DownloadBody(BaseModel):
@@ -736,6 +1010,7 @@ async def start_download(body: DownloadBody) -> Dict[str, Any]:
     direct_url = (b.get("direct_url") or "").strip()
     repo_id = (b.get("repo_id") or "").strip()
     ms_repo_id = (b.get("modelscope_repo_id") or "").strip()
+    size_hint = (b.get("size_hint") or "").strip()
 
     source = body.source or "auto"
 
@@ -783,7 +1058,7 @@ async def start_download(body: DownloadBody) -> Dict[str, Any]:
         else:
             thread = threading.Thread(
                 target=_download_worker_modelscope,
-                args=(body.bundle, ms_repo_id, local_dir),
+                args=(body.bundle, ms_repo_id, local_dir, size_hint),
                 daemon=True,
             )
             source_used = "modelscope"
@@ -817,7 +1092,7 @@ async def start_download(body: DownloadBody) -> Dict[str, Any]:
                 )
             thread = threading.Thread(
                 target=_download_worker_modelscope,
-                args=(body.bundle, ms_repo_id, local_dir),
+                args=(body.bundle, ms_repo_id, local_dir, size_hint),
                 daemon=True,
             )
             source_used = "modelscope"
@@ -859,6 +1134,272 @@ class PipUninstallBody(BaseModel):
     dirs: List[str] = []  # 额外要删除的目录（相对于项目根，如 models/all-MiniLM-L6-v2）
 
 
+def _pip_spec_base(spec: str) -> str:
+    """去掉版本约束与 extras，得到 pip 包名片段（小写）。"""
+    s = (spec or "").strip().split(";")[0].strip()
+    for op in (">=", "==", "<=", "!=", "~=", ">", "<"):
+        if op in s:
+            s = s.split(op)[0].strip()
+            break
+    return s.split("[")[0].strip().lower()
+
+
+def _user_entry_matches_installed_pkg(entry: str, pkg_base: str) -> bool:
+    """判断 user_packages 下顶层项是否属于包 pkg_base（用下划线规范名，如 qwen_tts、torch）。
+
+    避免 torch 误匹配 torchgen：torchgen 不等于 torch，也不以 torch- 开头。
+    """
+    pb = pkg_base.lower().replace("-", "_")
+    el = entry.lower()
+    if el == pb:
+        return True
+    pb_hy = pb.replace("_", "-")
+    if el == pb_hy:
+        return True
+    if el.endswith(".dist-info"):
+        stem = el[: -len(".dist-info")]
+        if stem.startswith(pb + "-") or stem.startswith(pb_hy + "-"):
+            return True
+        stem_us = stem.replace("-", "_")
+        if stem_us.startswith(pb + "-"):
+            return True
+    return False
+
+
+def _torch_win_access_denied_hint(exc: BaseException, *path_parts: str) -> str:
+    """Append when torch DLLs are locked by the running server (common WinError 5 on c10.dll)."""
+    if not sys.platform.startswith("win"):
+        return ""
+    if getattr(exc, "winerror", None) != 5:
+        return ""
+    blob = " ".join(path_parts) + " " + str(exc)
+    low = blob.lower()
+    if "torch" not in low:
+        return ""
+    if ".dll" not in low and ".pyd" not in low:
+        return ""
+    return (
+        " | EN: PyTorch .dll/.pyd may be mapped by this process; Windows cannot remove them while in use. "
+        "Fully quit the app (Electron and related python.exe), then retry uninstall or delete "
+        ".venv\\Lib\\site-packages\\torch (and torchvision, torchaudio). "
+        "ZH：PyTorch 原生库可能已被本进程加载，运行中无法删除；请完全退出应用后重试卸载，或手动删除上述目录。"
+    )
+
+
+def _path_make_writable(path: str) -> None:
+    try:
+        import stat
+
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
+    except OSError:
+        pass
+
+
+def _tree_make_writable(root: str) -> None:
+    if not os.path.isdir(root):
+        _path_make_writable(root)
+        return
+    for dirpath, _dirnames, filenames in os.walk(root, topdown=False):
+        for fn in filenames:
+            _path_make_writable(os.path.join(dirpath, fn))
+        _path_make_writable(dirpath)
+    _path_make_writable(root)
+
+
+def _unlink_best_effort(path: str) -> Optional[str]:
+    import gc
+
+    if not os.path.lexists(path):
+        return None
+    for attempt in range(3):
+        try:
+            _path_make_writable(path)
+            os.remove(path)
+            return None
+        except OSError as e:
+            if attempt < 2 and getattr(e, "winerror", None) == 5:
+                gc.collect()
+                time.sleep(0.25)
+                continue
+            return str(e) + _torch_win_access_denied_hint(e, path)
+    return "unlink failed"
+
+
+def _rmtree_best_effort(path: str) -> Optional[str]:
+    """Windows: clearance of read-only bits + retries for transient WinError 5 on ``__pycache__`` / DLL paths."""
+    import gc
+    import shutil
+
+    if not os.path.lexists(path):
+        return None
+    if not os.path.isdir(path):
+        return _unlink_best_effort(path)
+    for attempt in range(3):
+        try:
+            _tree_make_writable(path)
+            if sys.version_info >= (3, 12):
+
+                def _onexc(func, p, exc):
+                    _path_make_writable(p)
+                    func(p)
+
+                shutil.rmtree(path, onexc=_onexc)
+            else:
+
+                def _onerror(func, p, exc_info):
+                    _path_make_writable(p)
+                    func(p)
+
+                shutil.rmtree(path, onerror=_onerror)
+            return None
+        except OSError as e:
+            if attempt < 2 and getattr(e, "winerror", None) == 5:
+                gc.collect()
+                time.sleep(0.25)
+                continue
+            return str(e) + _torch_win_access_denied_hint(e, path)
+    return "rmtree failed"
+
+
+def _remove_frozen_target_packages(target_dir: str, package_specs: List[str]) -> List[str]:
+    """Frozen 安装使用 pip install --target；pip uninstall --target 通常无效，直接按目录删除。"""
+    errors: list = []
+    if not os.path.isdir(target_dir):
+        return errors
+    bases = {_pip_spec_base(p).replace("-", "_") for p in package_specs if (p or "").strip()}
+    try:
+        entries = os.listdir(target_dir)
+    except OSError as e:
+        return [str(e)]
+    to_remove: List[str] = []
+    for e in entries:
+        for pb in bases:
+            if _user_entry_matches_installed_pkg(e, pb):
+                to_remove.append(os.path.join(target_dir, e))
+                break
+    for full in to_remove:
+        if os.path.isdir(full):
+            err = _rmtree_best_effort(full)
+            if err:
+                errors.append(f"{os.path.basename(full)}: {err}")
+        else:
+            err = _unlink_best_effort(full)
+            if err:
+                errors.append(f"{os.path.basename(full)}: {err}")
+    return errors
+
+
+def _remove_source_site_packages_top_level(package_specs: List[str]) -> List[str]:
+    """Remove package files directly from this interpreter's site-packages roots.
+
+    Purpose:
+    - When a previous uninstall/upgrade got interrupted, ``pip uninstall`` may say "not installed"
+      even though the package still exists as importable files (missing/broken dist-info).
+    - In that case, filesystem deletion is the most reliable way to make /api/setup/status update.
+
+    Safety:
+    - We only delete the exact top-level package dir name (e.g. ``torch/``)
+      and matching ``<name>-*.dist-info`` entries.
+    """
+    errors: List[str] = []
+    roots = _torch_scan_roots()
+    if not roots:
+        return errors
+
+    bases = []
+    for spec in package_specs:
+        pb = _pip_spec_base(spec).lower()
+        if not pb:
+            continue
+        safe = pb.replace("-", "_")
+        bases.append((safe, safe.replace("_", "-")))
+
+    to_remove: List[str] = []
+    for root in roots:
+        try:
+            entries = os.listdir(root)
+        except OSError:
+            continue
+        for e in entries:
+            el = e.lower()
+            for safe_us, safe_dash in bases:
+                # top-level package directory (torch/, torchvision/, torchaudio/)
+                if el == safe_us:
+                    to_remove.append(os.path.join(root, e))
+                    break
+                # dist-info entries (torch-2.x.y+cpu.dist-info)
+                if el.endswith(".dist-info") and (
+                    el.startswith(safe_us + "-") or el.startswith(safe_dash + "-")
+                ):
+                    to_remove.append(os.path.join(root, e))
+                    break
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    uniq: List[str] = []
+    for p in to_remove:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+
+    for full in uniq:
+        if os.path.isdir(full):
+            err = _rmtree_best_effort(full)
+            if err:
+                errors.append(f"{os.path.basename(full)}: {err}")
+        else:
+            err = _unlink_best_effort(full)
+            if err:
+                errors.append(f"{os.path.basename(full)}: {err}")
+
+    return errors
+
+
+def _clear_sys_modules_for_packages(package_specs: List[str]) -> None:
+    """卸载后清掉已加载模块，否则同进程内 import 仍成功，自检一直显示已安装。"""
+    import importlib
+
+    roots = {_pip_spec_base(p).replace("-", "_") for p in package_specs if (p or "").strip()}
+    to_del = [
+        k
+        for k in list(sys.modules)
+        if k.split(".")[0] in roots
+    ]
+    for k in to_del:
+        try:
+            del sys.modules[k]
+        except KeyError:
+            pass
+    importlib.invalidate_caches()
+
+
+def _frozen_pkg_files_still_present(target_dir: str, pkg_spec: str) -> bool:
+    if not os.path.isdir(target_dir):
+        return False
+    pb = _pip_spec_base(pkg_spec).replace("-", "_")
+    try:
+        for e in os.listdir(target_dir):
+            if _user_entry_matches_installed_pkg(e, pb):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _pip_error_message(output: str, packages: List[str], index_url: str,
+                       python_exe: str = "", target_dir: str = "") -> str:
+    """Convert raw pip error output into a user-friendly message."""
+    if "WinError 5" in output or "Access is denied" in output or "access is denied" in output:
+        return (
+            "WINERROR5: Torch-related files are in use and cannot be replaced at runtime.\n"
+            "Recommended steps: (1) Open Settings → First steps; under Qwen3‑TTS step 1, click "
+            "\"Uninstall torch / torchvision / torchaudio\" (works for both packaged builds and source/.venv). "
+            "(2) Completely quit the app. (3) Restart and immediately install the CUDA PyTorch build or "
+            "Qwen3‑TTS dependencies (before torch gets loaded again)."
+        )
+    return output[-800:]
+
+
 def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
     global _pip_install_state
     try:
@@ -880,14 +1421,14 @@ def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
                 with _pip_install_lock:
                     _pip_install_state["phase"] = "error"
                     _pip_install_state["message"] = "安装失败"
-                    _pip_install_state["error"] = "找不到 Python 解释器"
+                    _pip_install_state["error"] = "Python interpreter not found"
                 return
             target_dir = os.path.join(exe_dir, "user_packages")
             os.makedirs(target_dir, exist_ok=True)
-            cmd = [embed_python, "-m", "pip", "install", "--target", target_dir] + packages
+            cmd = [embed_python, "-m", "pip", "install", "--upgrade", "--target", target_dir] + packages
             if index_url:
                 cmd += ["--index-url", index_url]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
             if result.returncode == 0:
                 # 安装成功后立即把 user_packages/ 注入当前进程的 sys.path，
                 # 使 _xxx_installed() 检查能在同一 session 里立即返回 True，
@@ -902,15 +1443,16 @@ def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
                     _pip_install_state["message"] = "安装完成，重启应用后生效"
                     _pip_install_state["error"] = None
                 else:
+                    raw = result.stderr or result.stdout or ""
                     _pip_install_state["phase"] = "error"
                     _pip_install_state["message"] = "安装失败"
-                    _pip_install_state["error"] = (result.stderr or result.stdout or "")[-800:]
+                    _pip_install_state["error"] = _pip_error_message(raw, packages, index_url, embed_python, target_dir)
             return
 
-        cmd = [sys.executable, "-m", "pip", "install"] + packages
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + packages
         if index_url:
             cmd += ["--index-url", index_url]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         if result.returncode == 0:
             import importlib
             importlib.invalidate_caches()
@@ -920,9 +1462,10 @@ def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
                 _pip_install_state["message"] = "安装完成"
                 _pip_install_state["error"] = None
             else:
+                raw = result.stderr or result.stdout or ""
                 _pip_install_state["phase"] = "error"
                 _pip_install_state["message"] = "安装失败"
-                _pip_install_state["error"] = (result.stderr or result.stdout or "")[-800:]
+                _pip_install_state["error"] = _pip_error_message(raw, packages, index_url)
     except Exception as e:
         with _pip_install_lock:
             _pip_install_state["phase"] = "error"
@@ -934,7 +1477,7 @@ def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
 async def pip_install(body: PipInstallBody) -> Dict[str, Any]:
     with _pip_install_lock:
         if _pip_install_state["phase"] == "running":
-            return JSONResponse(status_code=409, content={"ok": False, "error": "已有安装任务进行中"})
+            return JSONResponse(status_code=409, content={"ok": False, "error": "An installation task is already running"})
         _pip_install_state["phase"] = "running"
         _pip_install_state["target"] = body.target or ""
         _pip_install_state["message"] = "启动…"
@@ -952,43 +1495,60 @@ async def pip_install_status() -> Dict[str, Any]:
 
 @router.post("/pip-uninstall")
 async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
-    """卸载 pip 包并可选删除模型目录。同步执行（卸载通常很快）。"""
+    """Uninstall pip packages and optionally remove model dirs (synchronous).
+
+    - **Source / .venv**: remove matching site-packages trees first (covers broken dist-info), then
+      ``python -m pip uninstall -y``. If WinError 5 persists, torch native DLLs are likely still
+      mapped—fully quit the app and uninstall again (or delete/recreate the venv).
+    - **Frozen (packaged exe)**: wheels are installed with ``pip install --target user_packages``.
+      A plain ``pip uninstall`` often does not touch that directory or has no uninstall record there,
+      so we remove matching top-level folders / ``*.dist-info`` under ``user_packages`` first, then
+      run pip as a best-effort cleanup. Also clears ``sys.modules`` so the UI does not still see imports.
+    """
+    import gc
     import shutil as _shutil
     from src.utils.paths import get_project_root
 
     errors: list = []
+    names = [_pip_spec_base(p) for p in (body.packages or []) if (p or "").strip()]
 
-    # 1. pip uninstall
-    if body.packages:
+    # 1. pip / user_packages 卸载
+    if names:
         if getattr(sys, "frozen", False):
-            exe_dir = os.path.dirname(sys.executable)
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            target_dir = os.path.join(exe_dir, "user_packages")
+            _clear_sys_modules_for_packages(body.packages)
+            gc.collect()
+            fs_err = _remove_frozen_target_packages(target_dir, body.packages)
+            errors.extend(fs_err)
             embed_python = os.path.join(exe_dir, "python_embed", "python.exe")
             if not os.path.isfile(embed_python):
                 embed_python = _shutil.which("python3") or _shutil.which("python") or ""
+            # 对 embed 环境再跑一次 pip uninstall（对非 target 安装可能有效；失败可忽略）
             if embed_python:
-                target_dir = os.path.join(exe_dir, "user_packages")
-                cmd = [embed_python, "-m", "pip", "uninstall", "-y",
-                       "--target", target_dir] + list(body.packages)
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                # pip uninstall --target 不被支持时降级（直接删包目录里的文件夹）
-                if result.returncode != 0 and os.path.isdir(target_dir):
-                    for pkg in body.packages:
-                        pkg_base = pkg.split("[")[0].replace("-", "_").lower()
-                        for entry in os.listdir(target_dir):
-                            if entry.lower().replace("-", "_").startswith(pkg_base):
-                                full = os.path.join(target_dir, entry)
-                                try:
-                                    if os.path.isdir(full):
-                                        _shutil.rmtree(full)
-                                    else:
-                                        os.remove(full)
-                                except Exception as e:
-                                    errors.append(str(e))
+                cmd = [embed_python, "-m", "pip", "uninstall", "-y"] + names
+                subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            _clear_sys_modules_for_packages(body.packages)
+            for spec in body.packages:
+                if _frozen_pkg_files_still_present(target_dir, spec):
+                    errors.append(
+                        f"Residual detected: {_pip_spec_base(spec)} (directory {target_dir}). "
+                        "If files are locked, fully quit the app and uninstall again, "
+                        "or manually delete the corresponding folder."
+                    )
         else:
-            cmd = [sys.executable, "-m", "pip", "uninstall", "-y"] + list(body.packages)
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            # For source/.venv, pip uninstall can fail or "skip not installed" when dist-info is missing.
+            # Remove matching files first so /api/setup/status reflects the real disk state.
+            _clear_sys_modules_for_packages(body.packages)
+            gc.collect()
+            fs_err = _remove_source_site_packages_top_level(body.packages)
+            errors.extend(fs_err)
+            cmd = [sys.executable, "-m", "pip", "uninstall", "-y"] + names
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            _clear_sys_modules_for_packages(body.packages)
             if result.returncode != 0:
-                errors.append((result.stderr or result.stdout or "")[-400:])
+                tail = (result.stderr or result.stdout or "")[-500:]
+                errors.append(tail or "pip uninstall failed")
 
     # 2. 删除模型目录
     root = get_project_root()
@@ -996,13 +1556,13 @@ async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
         abs_dir = os.path.normpath(os.path.join(root, rel_dir))
         # 安全校验：只允许删 models/ 子目录
         if not abs_dir.startswith(os.path.join(root, "models")):
-            errors.append(f"拒绝删除非 models/ 目录: {rel_dir}")
+            errors.append(f"Refused to delete non-models directory: {rel_dir}")
             continue
         if os.path.isdir(abs_dir):
             try:
                 _shutil.rmtree(abs_dir)
             except Exception as e:
-                errors.append(f"删除 {rel_dir} 失败: {e}")
+                errors.append(f"Failed to delete {rel_dir}: {e}")
 
     import importlib
     importlib.invalidate_caches()

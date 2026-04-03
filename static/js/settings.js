@@ -1058,6 +1058,8 @@ const SettingsMixin = {
     async pipUninstall(packages, dirs, confirmKey) {
       const msg = this.t(confirmKey || 'confirmUninstallPackage');
       if (!window.confirm(msg)) return;
+      if (!this.setupGuide) this.setupGuide = {};
+      this.setupGuide.pip_install = { phase: 'running', message: this.t('uninstalling'), error: null, target: 'uninstall' };
       try {
         const res = await fetch(getBaseUrl() + '/api/setup/pip-uninstall', {
           method: 'POST',
@@ -1066,12 +1068,16 @@ const SettingsMixin = {
         });
         const d = await res.json();
         if (d.ok) {
+          this.setupGuide.pip_install = { phase: 'success', message: this.t('uninstallDone'), error: null, target: 'uninstall' };
           this.showToast(this.t('uninstallDone'), 'success');
         } else {
-          this.showToast((d.errors || []).join('; ') || this.t('uninstallFailed'), 'error');
+          const errMsg = (d.errors || []).join('; ') || this.t('uninstallFailed');
+          this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: errMsg, target: 'uninstall' };
+          this.showToast(errMsg, 'error');
         }
         await this.loadSetupGuide();
       } catch (e) {
+        this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: e.message, target: 'uninstall' };
         this.showToast(this.t('uninstallFailed') + ': ' + e.message, 'error');
       }
     },
@@ -1104,6 +1110,31 @@ const SettingsMixin = {
         if (!this.setupGuide) this.setupGuide = {};
         this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
       }
+    },
+
+    async uninstallThenInstallTorchCuda() {
+      if (!window.confirm(this.t('confirmUninstallTorchForCuda'))) return;
+      if (!this.setupGuide) this.setupGuide = {};
+      // Step 1: uninstall
+      this.setupGuide.pip_install = { phase: 'running', message: this.t('uninstalling') + ' torch…', error: null, target: 'torch_cuda' };
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/pip-uninstall', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages: ['torch', 'torchvision', 'torchaudio'], dirs: [] }),
+        });
+        const d = await res.json();
+        if (!d.ok) {
+          const errMsg = (d.errors || []).join('; ') || this.t('uninstallFailed');
+          this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: errMsg, target: 'torch_cuda' };
+          return;
+        }
+      } catch (e) {
+        this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: e.message, target: 'torch_cuda' };
+        return;
+      }
+      // Step 2: install CUDA build
+      await this.installTorchCuda();
     },
 
     async installTorchCuda() {

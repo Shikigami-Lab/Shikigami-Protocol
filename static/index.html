@@ -1168,7 +1168,7 @@
             <p class="setup-tts-desc">{{ t('onboardingTtsKokoro') }}</p>
             <div class="setup-tts-checks">
               <span :class="setupGuide.tts.kokoro_installed ? 'ok' : 'warn'">
-                {{ setupGuide.tts.kokoro_installed ? '✓' : '○' }} {{ t('onboardingTtsKokoroPkg') }}
+                {{ setupGuide.tts.kokoro_installed ? '✓' : '○' }} {{ setupGuide.tts.kokoro_installed ? t('onboardingTtsKokoroPkg') : t('onboardingTtsKokoroPkgMissing') }}
               </span>
               <span :class="setupGuide.tts.kokoro_misaki_zh ? 'ok' : 'muted'">
                 {{ setupGuide.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiZh') }}
@@ -1177,55 +1177,76 @@
                 {{ setupGuide.tts.kokoro_misaki_ja ? '✓' : '–' }} {{ t('onboardingTtsKokoroMisakiJa') }}
               </span>
             </div>
-            <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-              <button v-if="!setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-secondary"
-                      :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                      :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'kokoro' ? t('onboardingOtherInstalling') : ''"
-                      @click="installKokoro()">
-                {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro' ? t('onboardingKokoroInstalling') : t('onboardingKokoroInstall') }}
-              </button>
-              <button v-if="setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
-                      @click="pipUninstall(['kokoro-onnx', 'misaki'], [])">{{ t('btnUninstall') }}</button>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'kokoro'" class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
+            <!-- 1. 安装运行依赖 -->
+            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
+              <div style="font-size:12px; font-weight:600; margin-bottom:6px; color:var(--text-primary);">
+                1. {{ t('onboardingKokoroPkgStepTitle') }}
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                <span v-if="setupGuide.tts.kokoro_installed" class="ok" style="font-size:12px;">✓ {{ t('onboardingTtsKokoroPkg') }}</span>
+                <button v-else type="button" class="s-btn s-btn-secondary"
+                        :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
+                        :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'kokoro' ? t('onboardingOtherInstalling') : ''"
+                        @click="installKokoro()">
+                  {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro' ? t('onboardingKokoroInstalling') : t('onboardingKokoroInstall') }}
+                </button>
+                <button v-if="setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
+                        @click="pipUninstall(['kokoro-onnx', 'misaki'], [])">{{ t('btnUninstall') }}</button>
+                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'kokoro'" class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
+              </div>
             </div>
-            <!-- misaki[ja] optional install (requires CMake + MSVC on Windows) -->
-            <div v-if="setupGuide.tts.kokoro_installed && !setupGuide.tts.kokoro_misaki_ja" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border-color);">
-              <p style="font-size:11px;color:var(--text-secondary);margin:0 0 6px;">{{ t('onboardingKokoroJaHint') }}</p>
-              <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
-                      :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                      @click="installKokoroJa()">
-                {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro_ja' ? t('onboardingKokoroInstalling') : t('onboardingKokoroJaInstall') }}
-              </button>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro_ja'" class="warn" style="font-size:11px;margin-left:6px;">{{ setupGuide.pip_install.error }}</span>
+
+            <!-- 2. 下载模型文件 -->
+            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
+              <div style="font-size:12px; font-weight:600; margin-bottom:6px; color:var(--text-primary);">
+                2. {{ t('onboardingKokoroModelStepTitle') }}
+              </div>
+              <div v-if="!setupGuide.tts.kokoro_installed" class="muted" style="font-size:12px;">
+                ⚠️ {{ t('onboardingKokoroNeedPkgFirst') }}
+              </div>
+              <div v-else>
+                <div style="margin-bottom:8px;">
+                  <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'" style="font-size:12px;">
+                    {{ setupGuide.tts.kokoro_models_ready ? '✓' : '○' }} {{ t('onboardingKokoroModels') }}
+                  </span>
+                </div>
+                <div v-if="!setupGuide.tts.kokoro_models_ready" style="font-size:12px;line-height:1.8;color:var(--text-secondary);">
+                  <div>{{ t('onboardingKokoroModelsHint') }}</div>
+                  <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
+                    <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
+                            @click="openUrl('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx')">
+                      ↓ kokoro-v1.0.onnx
+                    </button>
+                    <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
+                            @click="openUrl('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin')">
+                      ↓ voices-v1.0.bin
+                    </button>
+                  </div>
+                  <div style="margin-top:4px;" v-html="t('onboardingKokoroModelsSaveTo')"></div>
+                </div>
+              </div>
             </div>
-            <!-- Model files status + download -->
-            <div v-if="setupGuide.tts.kokoro_installed" style="margin-top:10px;">
-              <div style="font-size:12px;margin-bottom:6px;">
-                <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'">
-                  {{ setupGuide.tts.kokoro_models_ready ? '✓' : '○' }} {{ t('onboardingKokoroModels') }}
+
+            <!-- 3. 可选：日语支持 -->
+            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
+              <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:var(--text-primary);">
+                3. {{ t('onboardingKokoroJaStepTitle') }}
+                <span class="muted" style="font-weight:normal;"> — {{ t('onboardingOptional') }}</span>
+              </div>
+              <div style="margin-bottom:6px;">
+                <span :class="setupGuide.tts.kokoro_misaki_ja ? 'ok' : 'muted'" style="font-size:12px;">
+                  {{ setupGuide.tts.kokoro_misaki_ja ? '✓' : '–' }} {{ t('onboardingTtsKokoroMisakiJa') }}
                 </span>
               </div>
-              <div v-if="!setupGuide.tts.kokoro_models_ready">
-                <details>
-                  <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);user-select:none;">
-                    {{ t('onboardingKokoroModelsHowTo') }}
-                  </summary>
-                  <div style="margin-top:8px;font-size:12px;line-height:1.8;color:var(--text-secondary);">
-                    <div>{{ t('onboardingKokoroModelsHint') }}</div>
-                    <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
-                      <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
-                              @click="openUrl('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx')">
-                        ↓ kokoro-v1.0.onnx
-                      </button>
-                      <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
-                              @click="openUrl('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin')">
-                        ↓ voices-v1.0.bin
-                      </button>
-                    </div>
-                    <div style="margin-top:4px;" v-html="t('onboardingKokoroModelsSaveTo')"></div>
-                  </div>
-                </details>
+              <div v-if="!setupGuide.tts.kokoro_misaki_ja">
+                <p style="font-size:11px;color:var(--text-secondary);margin:0 0 6px;">{{ t('onboardingKokoroJaHint') }}</p>
+                <button v-if="setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
+                        :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
+                        @click="installKokoroJa()">
+                  {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro_ja' ? t('onboardingKokoroInstalling') : t('onboardingKokoroJaInstall') }}
+                </button>
+                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro_ja'" class="warn" style="font-size:11px;margin-left:6px;">{{ setupGuide.pip_install.error }}</span>
               </div>
             </div>
           </div>
@@ -1247,16 +1268,29 @@
               </div>
               <p class="setup-tts-desc" style="margin-bottom:8px;">
                 {{ t('onboardingQwenTtsPkgDesc') }}
-                <span v-if="setupGuide.torch_installed && setupGuide.torch_cuda_available" class="ok" style="margin-left:6px;">(torch + CUDA ✓)</span>
-                <span v-else-if="setupGuide.torch_installed && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="warn" style="margin-left:6px;">(torch ✓ · CUDA ✗)</span>
-                <span v-else-if="setupGuide.torch_installed" class="ok" style="margin-left:6px;">(torch ✓)</span>
+                <span v-if="setupGuide.torch_installed && setupGuide.torch_import_ok && setupGuide.torch_cuda_available" class="ok" style="margin-left:6px;">(torch + CUDA ✓)</span>
+                <span v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="warn" style="margin-left:6px;">(torch ✓ · CUDA ✗)</span>
+                <span v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok" class="ok" style="margin-left:6px;">(torch ✓)</span>
+                <span v-else-if="setupGuide.torch_installed && !setupGuide.torch_import_ok" class="warn" style="margin-left:6px;">{{ t('onboardingTorchBrokenBadge') }}</span>
                 <span v-else class="muted" style="margin-left:6px;">(torch ?)</span>
               </p>
+              <p v-if="setupGuide.runtime_python" class="muted" style="margin:0 0 4px;font-size:11px;line-height:1.45;word-break:break-all;">
+                {{ t('onboardingBackendPython') }}<code style="font-size:10px;">{{ setupGuide.runtime_python.executable }}</code>
+              </p>
+              <p v-if="setupGuide.torch_load && setupGuide.torch_load.ok && setupGuide.torch_load.file" class="muted" style="margin:0 0 4px;font-size:11px;line-height:1.45;word-break:break-all;">
+                {{ t('onboardingTorchLoadedFrom') }}<code style="font-size:10px;">{{ setupGuide.torch_load.file }}</code><span v-if="setupGuide.torch_load.version" class="muted"> (v{{ setupGuide.torch_load.version }})</span>
+              </p>
+              <p v-if="setupGuide.torch_load && setupGuide.torch_load.from_user_site" class="warn" style="margin:0 0 8px;font-size:11px;line-height:1.45;">{{ t('onboardingTorchUserSiteHint') }}</p>
+              <p v-else-if="setupGuide.torch_load && setupGuide.torch_load.ok && !setupGuide.torch_load.under_purelib" class="warn" style="margin:0 0 8px;font-size:11px;line-height:1.45;">{{ t('onboardingTorchOffPurelibHint') }}</p>
+              <p v-if="setupGuide.torch_installed && !setupGuide.torch_import_ok" class="muted" style="margin:0 0 8px;font-size:12px;line-height:1.5;">
+                {{ t('onboardingTorchBrokenHint') }}
+              </p>
 
-              <!-- 检测到 NVIDIA 显卡但 torch 无 CUDA：提示升级 -->
-              <div v-if="setupGuide.torch_installed && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name"
+              <!-- 有 NVIDIA 且（无 CUDA 或 torch 无法 import）：提供 CUDA 版安装 / 一键换装。torch_import_ok===false 兼容损坏环境；undefined 兼容旧后端 -->
+              <div v-if="setupGuide.cuda_info && setupGuide.cuda_info.gpu_name && setupGuide.cuda_info.recommended_url && (!setupGuide.torch_cuda_available || setupGuide.torch_import_ok === false)"
                    style="margin-bottom:8px;padding:6px 10px;background:var(--warn-bg,rgba(255,180,0,.1));border-radius:6px;font-size:12px;">
-                {{ t('onboardingTorchCudaHint') }}
+                <template v-if="setupGuide.torch_import_ok === false">{{ t('onboardingTorchNoImportCudaHint') }}</template>
+                <template v-else>{{ t('onboardingTorchCudaHint') }}</template>
                 <div v-if="setupGuide.cuda_info && setupGuide.cuda_info.gpu_name"
                      style="margin-top:4px;opacity:.8;">
                   {{ t('onboardingDetectedGpu') }}{{ setupGuide.cuda_info.gpu_name }}
@@ -1266,16 +1300,28 @@
                 <div v-else style="margin-top:4px;opacity:.7;">{{ t('onboardingNoNvidiaGpu') }}</div>
                 <div v-if="setupGuide.cuda_info && setupGuide.cuda_info.recommended_url"
                      style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                  <!-- 主按钮：卸载旧版后安装 CUDA 版（一键流程） -->
                   <button type="button" class="s-btn s-btn-secondary"
                           :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                          @click="installTorchCuda()">
-                    {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'torch_cuda' ? t('onboardingKokoroInstalling') : (t('onboardingTorchCudaInstall') + ' (' + setupGuide.cuda_info.recommended_cu + ')') }}
+                          @click="uninstallThenInstallTorchCuda()">
+                    {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'torch_cuda'
+                        ? setupGuide.pip_install.message
+                        : (t('onboardingTorchCudaInstall') + ' (' + setupGuide.cuda_info.recommended_cu + ')') }}
                   </button>
                   <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'torch_cuda'"
-                        class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                        class="warn" style="font-size:11px;white-space:pre-wrap;">{{ setupGuide.pip_install.error }}</span>
                   <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'torch_cuda'"
                         class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
                 </div>
+              </div>
+
+              <!-- 任意已检测到 torch（含损坏/仅磁盘残留）：始终提供卸载，避免 WinError5 提示「点卸载」却找不到按钮 -->
+              <div v-if="setupGuide.torch_installed"
+                   style="margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                <button type="button" class="s-btn s-btn-danger" style="font-size:12px;"
+                        :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
+                        @click="pipUninstall(['torch', 'torchvision', 'torchaudio'], [])">{{ t('btnUninstall') }} torch / torchvision / torchaudio</button>
+                <span class="muted" style="font-size:11px;">{{ t('onboardingTorchUninstallAlwaysHint') }}</span>
               </div>
 
               <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
@@ -1960,7 +2006,8 @@
                   <span v-else class="warn">○ {{ t('ttsStatusNotRunning') }}</span>
                 </template>
                 <template v-else-if="ttsForm.engine === 'kokoro'">
-                  <span v-if="setupGuide.tts.kokoro_installed" class="ok">✓ {{ t('ttsStatusInstalled') }}</span>
+                  <span v-if="setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready" class="ok">✓ {{ t('ttsStatusInstalled') }}</span>
+                  <span v-else-if="setupGuide.tts.kokoro_installed && !setupGuide.tts.kokoro_models_ready" class="warn">○ {{ t('onboardingKokoroModels') }}</span>
                   <span v-else class="warn">○ {{ t('ttsStatusNotInstalled') }}</span>
                 </template>
                 <template v-else-if="ttsForm.engine === 'qwen3_tts'">
@@ -3296,8 +3343,8 @@
                     <span v-else-if="ttsForm.engine === 'gpt_sovits'" :class="setupGuide.tts.gpt_sovits_port_open ? 'ok' : 'warn'">
                       {{ setupGuide.tts.gpt_sovits_port_open ? ' ✓' : ' ○' }}
                     </span>
-                    <span v-else-if="ttsForm.engine === 'kokoro'" :class="setupGuide.tts.kokoro_installed ? 'ok' : 'warn'">
-                      {{ setupGuide.tts.kokoro_installed ? ' ✓' : ' ○' }}
+                    <span v-else-if="ttsForm.engine === 'kokoro'" :class="(setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? 'ok' : 'warn'">
+                      {{ (setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? ' ✓' : ' ○' }}
                     </span>
                     <span v-else-if="ttsForm.engine === 'qwen3_tts'" :class="setupGuide.tts.qwen3_model_ready ? 'ok' : 'warn'">
                       {{ setupGuide.tts.qwen3_model_ready ? ' ✓' : ' ○' }}
