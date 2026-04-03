@@ -998,6 +998,7 @@
               </span>
             </div>
             <p class="setup-tts-desc">{{ t('onboardingModelScopeDesc') }}</p>
+            <p class="muted" style="margin-top:8px;font-size:11px;line-height:1.45;">{{ t('onboardingModelScopeTorchHint') }}</p>
             <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
               <button v-if="!setupGuide.modelscope_installed" type="button" class="s-btn s-btn-secondary"
                       :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
@@ -1008,7 +1009,7 @@
               <button v-if="setupGuide.modelscope_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
                       @click="pipUninstall(['modelscope'], [])">{{ t('btnUninstall') }}</button>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'modelscope' && !setupGuide.modelscope_installed"
-                    class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                    class="warn" style="font-size:11px;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'modelscope' && !setupGuide.modelscope_installed"
                     class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
             </div>
@@ -1038,7 +1039,7 @@
               <button v-if="setupGuide.ai_memory_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
                       @click="pipUninstall(['chromadb', 'transformers', 'sentence-transformers', 'rank-bm25'], [])">{{ t('btnUninstall') }}</button>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'ai_memory' && !setupGuide.ai_memory_installed"
-                    class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                    class="warn" style="font-size:11px;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'ai_memory' && !setupGuide.ai_memory_installed"
                     class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
             </div>
@@ -1192,7 +1193,7 @@
                 </button>
                 <button v-if="setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
                         @click="pipUninstall(['kokoro-onnx', 'misaki'], [])">{{ t('btnUninstall') }}</button>
-                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
                 <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'kokoro'" class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
               </div>
             </div>
@@ -1246,7 +1247,7 @@
                         @click="installKokoroJa()">
                   {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro_ja' ? t('onboardingKokoroInstalling') : t('onboardingKokoroJaInstall') }}
                 </button>
-                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro_ja'" class="warn" style="font-size:11px;margin-left:6px;">{{ setupGuide.pip_install.error }}</span>
+                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro_ja'" class="warn" style="font-size:11px;margin-left:6px;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
               </div>
             </div>
           </div>
@@ -1309,7 +1310,7 @@
                         : (t('onboardingTorchCudaInstall') + ' (' + setupGuide.cuda_info.recommended_cu + ')') }}
                   </button>
                   <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'torch_cuda'"
-                        class="warn" style="font-size:11px;white-space:pre-wrap;">{{ setupGuide.pip_install.error }}</span>
+                        class="warn" style="font-size:11px;white-space:pre-wrap;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
                   <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'torch_cuda'"
                         class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
                 </div>
@@ -1337,7 +1338,7 @@
                   {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'qwen_tts' ? t('onboardingKokoroInstalling') : t('onboardingQwenTtsPkgInstall') }}
                 </button>
                 <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'qwen_tts' && !setupGuide.qwen_tts_installed"
-                      class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                      class="warn" style="font-size:11px;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
                 <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'qwen_tts' && !setupGuide.qwen_tts_installed"
                       class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
               </div>
@@ -1409,7 +1410,7 @@
                         @click="installSherpaOnnx()">
                   {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'sherpa_onnx' ? t('onboardingKokoroInstalling') : t('onboardingSttInstallSherpa') }}
                 </button>
-                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'sherpa_onnx' && !setupGuide.sherpa_onnx_installed" class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'sherpa_onnx' && !setupGuide.sherpa_onnx_installed" class="warn" style="font-size:11px;">{{ formatPipError(setupGuide.pip_install.error) }}</span>
               </div>
             </div>
 

@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from fastapi import APIRouter, Request
@@ -1166,24 +1166,59 @@ def _user_entry_matches_installed_pkg(entry: str, pkg_base: str) -> bool:
     return False
 
 
-def _torch_win_access_denied_hint(exc: BaseException, *path_parts: str) -> str:
-    """Append when torch DLLs are locked by the running server (common WinError 5 on c10.dll)."""
+def _maybe_torch_dll_winerror5_payload(exc: BaseException, path: str) -> Optional[Dict[str, str]]:
+    """If WinError 5 on torch .dll/.pyd, return an i18n key for the frontend (see i18n.js setupPip*)."""
     if not sys.platform.startswith("win"):
-        return ""
+        return None
     if getattr(exc, "winerror", None) != 5:
-        return ""
-    blob = " ".join(path_parts) + " " + str(exc)
-    low = blob.lower()
-    if "torch" not in low:
-        return ""
-    if ".dll" not in low and ".pyd" not in low:
-        return ""
-    return (
-        " | EN: PyTorch .dll/.pyd may be mapped by this process; Windows cannot remove them while in use. "
-        "Fully quit the app (Electron and related python.exe), then retry uninstall or delete "
-        ".venv\\Lib\\site-packages\\torch (and torchvision, torchaudio). "
-        "ZH：PyTorch 原生库可能已被本进程加载，运行中无法删除；请完全退出应用后重试卸载，或手动删除上述目录。"
+        return None
+    blob = f"{path} {exc}".lower()
+    if "torch" not in blob:
+        return None
+    if ".dll" not in blob and ".pyd" not in blob:
+        return None
+    key = (
+        "setupPipTorchDllLockedPacked"
+        if "user_packages" in blob
+        else "setupPipTorchDllLockedVenv"
     )
+    return {"key": key, "detail": str(exc)}
+
+
+def _append_fs_removal_error(errors: list, top_name: str, err: Union[str, Dict[str, Any], None]) -> None:
+    if not err:
+        return
+    if isinstance(err, dict):
+        row = dict(err)
+        row["prefix"] = top_name
+        errors.append(row)
+    else:
+        errors.append(f"{top_name}: {err}")
+
+
+def _pip_uninstall_fs_error_covers_pkg(fs_errors: list, pkg_base: str) -> bool:
+    """True if fs removal already reported WinError / access denied for this package (avoid duplicate residual lines)."""
+    pb = (pkg_base or "").lower()
+    if not pb:
+        return False
+    for e in fs_errors:
+        if isinstance(e, dict):
+            pref = (e.get("prefix") or "").lower()
+            if pref != pb:
+                continue
+            k = str(e.get("key") or "")
+            if k.startswith("setupPipTorchDllLocked"):
+                return True
+            det = str(e.get("detail") or "").lower()
+            if "winerror 5" in det or "access is denied" in det:
+                return True
+        elif isinstance(e, str):
+            el = e.lower()
+            if not el.startswith(pb + ":"):
+                continue
+            if "winerror 5" in el or "access is denied" in el:
+                return True
+    return False
 
 
 def _path_make_writable(path: str) -> None:
@@ -1206,7 +1241,7 @@ def _tree_make_writable(root: str) -> None:
     _path_make_writable(root)
 
 
-def _unlink_best_effort(path: str) -> Optional[str]:
+def _unlink_best_effort(path: str) -> Union[None, str, Dict[str, Any]]:
     import gc
 
     if not os.path.lexists(path):
@@ -1221,11 +1256,14 @@ def _unlink_best_effort(path: str) -> Optional[str]:
                 gc.collect()
                 time.sleep(0.25)
                 continue
-            return str(e) + _torch_win_access_denied_hint(e, path)
+            pl = _maybe_torch_dll_winerror5_payload(e, path)
+            if pl is not None:
+                return pl
+            return str(e)
     return "unlink failed"
 
 
-def _rmtree_best_effort(path: str) -> Optional[str]:
+def _rmtree_best_effort(path: str) -> Union[None, str, Dict[str, Any]]:
     """Windows: clearance of read-only bits + retries for transient WinError 5 on ``__pycache__`` / DLL paths."""
     import gc
     import shutil
@@ -1257,11 +1295,14 @@ def _rmtree_best_effort(path: str) -> Optional[str]:
                 gc.collect()
                 time.sleep(0.25)
                 continue
-            return str(e) + _torch_win_access_denied_hint(e, path)
+            pl = _maybe_torch_dll_winerror5_payload(e, f"{path} {e}")
+            if pl is not None:
+                return pl
+            return str(e)
     return "rmtree failed"
 
 
-def _remove_frozen_target_packages(target_dir: str, package_specs: List[str]) -> List[str]:
+def _remove_frozen_target_packages(target_dir: str, package_specs: List[str]) -> List[Any]:
     """Frozen 安装使用 pip install --target；pip uninstall --target 通常无效，直接按目录删除。"""
     errors: list = []
     if not os.path.isdir(target_dir):
@@ -1278,18 +1319,15 @@ def _remove_frozen_target_packages(target_dir: str, package_specs: List[str]) ->
                 to_remove.append(os.path.join(target_dir, e))
                 break
     for full in to_remove:
+        top = os.path.basename(full)
         if os.path.isdir(full):
-            err = _rmtree_best_effort(full)
-            if err:
-                errors.append(f"{os.path.basename(full)}: {err}")
+            _append_fs_removal_error(errors, top, _rmtree_best_effort(full))
         else:
-            err = _unlink_best_effort(full)
-            if err:
-                errors.append(f"{os.path.basename(full)}: {err}")
+            _append_fs_removal_error(errors, top, _unlink_best_effort(full))
     return errors
 
 
-def _remove_source_site_packages_top_level(package_specs: List[str]) -> List[str]:
+def _remove_source_site_packages_top_level(package_specs: List[str]) -> List[Any]:
     """Remove package files directly from this interpreter's site-packages roots.
 
     Purpose:
@@ -1301,7 +1339,7 @@ def _remove_source_site_packages_top_level(package_specs: List[str]) -> List[str
     - We only delete the exact top-level package dir name (e.g. ``torch/``)
       and matching ``<name>-*.dist-info`` entries.
     """
-    errors: List[str] = []
+    errors: List[Any] = []
     roots = _torch_scan_roots()
     if not roots:
         return errors
@@ -1343,14 +1381,11 @@ def _remove_source_site_packages_top_level(package_specs: List[str]) -> List[str
             uniq.append(p)
 
     for full in uniq:
+        top = os.path.basename(full)
         if os.path.isdir(full):
-            err = _rmtree_best_effort(full)
-            if err:
-                errors.append(f"{os.path.basename(full)}: {err}")
+            _append_fs_removal_error(errors, top, _rmtree_best_effort(full))
         else:
-            err = _unlink_best_effort(full)
-            if err:
-                errors.append(f"{os.path.basename(full)}: {err}")
+            _append_fs_removal_error(errors, top, _unlink_best_effort(full))
 
     return errors
 
@@ -1386,21 +1421,35 @@ def _frozen_pkg_files_still_present(target_dir: str, pkg_spec: str) -> bool:
     return False
 
 
-def _pip_error_message(output: str, packages: List[str], index_url: str,
-                       python_exe: str = "", target_dir: str = "") -> str:
-    """Convert raw pip error output into a user-friendly message."""
-    if "WinError 5" in output or "Access is denied" in output or "access is denied" in output:
-        return (
-            "WINERROR5: Torch-related files are in use and cannot be replaced at runtime.\n"
-            "Recommended steps: (1) Open Settings → First steps; under Qwen3‑TTS step 1, click "
-            "\"Uninstall torch / torchvision / torchaudio\" (works for both packaged builds and source/.venv). "
-            "(2) Completely quit the app. (3) Restart and immediately install the CUDA PyTorch build or "
-            "Qwen3‑TTS dependencies (before torch gets loaded again)."
-        )
+def _pip_error_message(
+    output: str,
+    packages: List[str],
+    index_url: str,
+    python_exe: str = "",
+    target_dir: str = "",
+    install_target: str = "",
+) -> Union[str, Dict[str, Any]]:
+    """Map pip stderr to an i18n key (frontend) plus optional raw tail for support.
+
+    ModelScope triggers the same WinError5 path as Qwen when pip upgrades torch: the *parent*
+    server process may already have torch DLLs mapped from ``user_packages``/site-packages while
+    the pip *subprocess* tries to replace those files.
+    """
+    low_out = (output or "").lower()
+    if "winerror 5" in low_out or "access is denied" in low_out:
+        tgt = (install_target or "").strip().lower()
+        tail = (output or "").strip()
+        if len(tail) > 1200:
+            tail = tail[-1200:]
+        if tgt == "modelscope":
+            return {"key": "setupPipWinerror5Modelscope", "detail": tail}
+        if tgt in ("qwen_tts", "torch_cuda"):
+            return {"key": "setupPipWinerror5QwenTorch", "detail": tail}
+        return {"key": "setupPipWinerror5Generic", "detail": tail}
     return output[-800:]
 
 
-def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
+def _pip_install_worker(packages: List[str], index_url: str = "", install_target: str = "") -> None:
     global _pip_install_state
     try:
         with _pip_install_lock:
@@ -1446,7 +1495,9 @@ def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
                     raw = result.stderr or result.stdout or ""
                     _pip_install_state["phase"] = "error"
                     _pip_install_state["message"] = "安装失败"
-                    _pip_install_state["error"] = _pip_error_message(raw, packages, index_url, embed_python, target_dir)
+                    _pip_install_state["error"] = _pip_error_message(
+                        raw, packages, index_url, embed_python, target_dir, install_target
+                    )
             return
 
         cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + packages
@@ -1465,7 +1516,9 @@ def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
                 raw = result.stderr or result.stdout or ""
                 _pip_install_state["phase"] = "error"
                 _pip_install_state["message"] = "安装失败"
-                _pip_install_state["error"] = _pip_error_message(raw, packages, index_url)
+                _pip_install_state["error"] = _pip_error_message(
+                    raw, packages, index_url, install_target=install_target
+                )
     except Exception as e:
         with _pip_install_lock:
             _pip_install_state["phase"] = "error"
@@ -1482,7 +1535,11 @@ async def pip_install(body: PipInstallBody) -> Dict[str, Any]:
         _pip_install_state["target"] = body.target or ""
         _pip_install_state["message"] = "启动…"
         _pip_install_state["error"] = None
-    thread = threading.Thread(target=_pip_install_worker, args=(list(body.packages), body.index_url or ""), daemon=True)
+    thread = threading.Thread(
+        target=_pip_install_worker,
+        args=(list(body.packages), body.index_url or "", body.target or ""),
+        daemon=True,
+    )
     thread.start()
     return {"ok": True}
 
@@ -1531,10 +1588,11 @@ async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
             _clear_sys_modules_for_packages(body.packages)
             for spec in body.packages:
                 if _frozen_pkg_files_still_present(target_dir, spec):
+                    pb = _pip_spec_base(spec)
+                    if _pip_uninstall_fs_error_covers_pkg(fs_err, pb):
+                        continue
                     errors.append(
-                        f"Residual detected: {_pip_spec_base(spec)} (directory {target_dir}). "
-                        "If files are locked, fully quit the app and uninstall again, "
-                        "or manually delete the corresponding folder."
+                        {"key": "setupPipUninstallResidual", "pkg": pb, "dir": target_dir}
                     )
         else:
             # For source/.venv, pip uninstall can fail or "skip not installed" when dist-info is missing.

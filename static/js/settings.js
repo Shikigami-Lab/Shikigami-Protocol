@@ -930,6 +930,27 @@ const SettingsMixin = {
       setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 3500);
     },
 
+    /** Render pip install/uninstall API errors: strings pass through; `{ key, detail?, pkg?, dir?, prefix? }` uses i18n. */
+    formatPipError(err) {
+      if (err == null || err === '') return '';
+      if (typeof err === 'string') return err;
+      if (typeof err === 'object' && typeof err.key === 'string') {
+        let msg = this.t(err.key);
+        if (err.pkg != null) msg = msg.replace(/\{pkg\}/g, String(err.pkg));
+        if (err.dir != null) msg = msg.replace(/\{dir\}/g, String(err.dir));
+        if (err.prefix != null && err.detail != null)
+          msg = msg + '\n' + String(err.prefix) + ': ' + String(err.detail);
+        else if (err.detail) msg = msg + '\n' + String(err.detail);
+        return msg;
+      }
+      return String(err);
+    },
+
+    formatPipErrorsList(errors) {
+      if (!errors || !errors.length) return '';
+      return errors.map((e) => this.formatPipError(e)).filter(Boolean).join('\n\n');
+    },
+
     /* ─────────────── Engine Health ─────────────── */
 
     async loadEngineWarnings() {
@@ -1071,7 +1092,7 @@ const SettingsMixin = {
           this.setupGuide.pip_install = { phase: 'success', message: this.t('uninstallDone'), error: null, target: 'uninstall' };
           this.showToast(this.t('uninstallDone'), 'success');
         } else {
-          const errMsg = (d.errors || []).join('; ') || this.t('uninstallFailed');
+          const errMsg = this.formatPipErrorsList(d.errors) || this.t('uninstallFailed');
           this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: errMsg, target: 'uninstall' };
           this.showToast(errMsg, 'error');
         }
@@ -1125,7 +1146,7 @@ const SettingsMixin = {
         });
         const d = await res.json();
         if (!d.ok) {
-          const errMsg = (d.errors || []).join('; ') || this.t('uninstallFailed');
+          const errMsg = this.formatPipErrorsList(d.errors) || this.t('uninstallFailed');
           this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: errMsg, target: 'torch_cuda' };
           return;
         }
