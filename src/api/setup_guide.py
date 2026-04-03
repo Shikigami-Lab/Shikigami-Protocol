@@ -16,12 +16,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.llm.registry import get_provider
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
-_BUNDLES_PATH = "config/model_bundles.yaml"
+_BUNDLES_PATH = os.path.join(get_project_root(), "config", "model_bundles.yaml")
 _download_lock = threading.Lock()
 _download_state: Dict[str, Any] = {
     "phase": "idle",
@@ -136,6 +137,72 @@ def _torch_installed() -> bool:
         return True
     except ImportError:
         return _user_pkg_has("torch")
+
+
+def _torch_cuda_available() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
+def _detect_cuda_info() -> Dict[str, Any]:
+    """检测 NVIDIA GPU 及驱动支持的最高 CUDA 版本，返回推荐的 PyTorch wheel index-url。
+
+    Returns:
+        {
+            "gpu_name": str,          # e.g. "NVIDIA GeForce RTX 5080" or ""
+            "driver_cuda": str,       # driver max CUDA version, e.g. "12.8" or ""
+            "recommended_cu": str,    # e.g. "cu128", "cu124", "cu118", or ""
+            "recommended_url": str,   # PyTorch whl index URL or ""
+        }
+    """
+    result: Dict[str, Any] = {"gpu_name": "", "driver_cuda": "", "recommended_cu": "", "recommended_url": ""}
+    try:
+        import subprocess as _sp
+        out = _sp.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return result
+        result["gpu_name"] = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
+
+        # nvidia-smi also prints CUDA version in the header when run without args
+        out2 = _sp.run(["nvidia-smi"], capture_output=True, text=True, timeout=5)
+        # Header line: "CUDA Version: 12.8"
+        for line in out2.stdout.splitlines():
+            if "CUDA Version:" in line:
+                parts = line.split("CUDA Version:")
+                if len(parts) > 1:
+                    result["driver_cuda"] = parts[1].strip().split()[0]
+                break
+    except Exception:
+        return result
+
+    driver_cuda = result["driver_cuda"]
+    if not driver_cuda:
+        return result
+
+    try:
+        major, minor = (int(x) for x in driver_cuda.split(".")[:2])
+        version_int = major * 10 + minor  # e.g. 12.8 → 128
+    except Exception:
+        return result
+
+    if version_int >= 128:
+        cu, url = "cu128", "https://download.pytorch.org/whl/cu128"
+    elif version_int >= 124:
+        cu, url = "cu124", "https://download.pytorch.org/whl/cu124"
+    elif version_int >= 118:
+        cu, url = "cu118", "https://download.pytorch.org/whl/cu118"
+    else:
+        cu, url = "cu118", "https://download.pytorch.org/whl/cu118"
+
+    result["recommended_cu"] = cu
+    result["recommended_url"] = url
+    return result
 
 
 def _ai_memory_installed() -> bool:
@@ -345,7 +412,7 @@ async def setup_status(request: Request) -> Dict[str, Any]:
     with _pip_install_lock:
         pip_st = dict(_pip_install_state)
 
-    profile_dir = "profiles"
+    profile_dir = os.path.join(get_project_root(), "profiles")
     profile_count = 0
     if os.path.isdir(profile_dir):
         profile_count = len([x for x in os.listdir(profile_dir) if x.endswith(".json")])
@@ -363,6 +430,8 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         "modelscope_installed": _modelscope_installed(),
         "qwen_tts_installed": _qwen_tts_installed(),
         "torch_installed": _torch_installed(),
+        "torch_cuda_available": _torch_cuda_available(),
+        "cuda_info": _detect_cuda_info(),
         "profile_count": profile_count,
         "default_llm": default_name,
         "llm_preset_configured": cfg_ok,
@@ -777,14 +846,20 @@ async def download_status() -> Dict[str, Any]:
         return dict(_download_state)
 
 
-# ─── Pip install ─────────────────────────────────────────────────────────────
+# ─── Pip install / uninstall ─────────────────────────────────────────────────
 
 class PipInstallBody(BaseModel):
     packages: List[str]
     target: str = ""   # 前端传入，用于区分哪个按钮触发了安装
+    index_url: str = ""  # 可选，如 https://download.pytorch.org/whl/cu124
 
 
-def _pip_install_worker(packages: List[str]) -> None:
+class PipUninstallBody(BaseModel):
+    packages: List[str]   # pip 包名列表
+    dirs: List[str] = []  # 额外要删除的目录（相对于项目根，如 models/all-MiniLM-L6-v2）
+
+
+def _pip_install_worker(packages: List[str], index_url: str = "") -> None:
     global _pip_install_state
     try:
         with _pip_install_lock:
@@ -809,10 +884,10 @@ def _pip_install_worker(packages: List[str]) -> None:
                 return
             target_dir = os.path.join(exe_dir, "user_packages")
             os.makedirs(target_dir, exist_ok=True)
-            result = subprocess.run(
-                [embed_python, "-m", "pip", "install", "--target", target_dir] + packages,
-                capture_output=True, text=True, timeout=600,
-            )
+            cmd = [embed_python, "-m", "pip", "install", "--target", target_dir] + packages
+            if index_url:
+                cmd += ["--index-url", index_url]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if result.returncode == 0:
                 # 安装成功后立即把 user_packages/ 注入当前进程的 sys.path，
                 # 使 _xxx_installed() 检查能在同一 session 里立即返回 True，
@@ -832,10 +907,10 @@ def _pip_install_worker(packages: List[str]) -> None:
                     _pip_install_state["error"] = (result.stderr or result.stdout or "")[-800:]
             return
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install"] + packages,
-            capture_output=True, text=True, timeout=300
-        )
+        cmd = [sys.executable, "-m", "pip", "install"] + packages
+        if index_url:
+            cmd += ["--index-url", index_url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
             import importlib
             importlib.invalidate_caches()
@@ -864,7 +939,7 @@ async def pip_install(body: PipInstallBody) -> Dict[str, Any]:
         _pip_install_state["target"] = body.target or ""
         _pip_install_state["message"] = "启动…"
         _pip_install_state["error"] = None
-    thread = threading.Thread(target=_pip_install_worker, args=(list(body.packages),), daemon=True)
+    thread = threading.Thread(target=_pip_install_worker, args=(list(body.packages), body.index_url or ""), daemon=True)
     thread.start()
     return {"ok": True}
 
@@ -873,6 +948,68 @@ async def pip_install(body: PipInstallBody) -> Dict[str, Any]:
 async def pip_install_status() -> Dict[str, Any]:
     with _pip_install_lock:
         return dict(_pip_install_state)
+
+
+@router.post("/pip-uninstall")
+async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
+    """卸载 pip 包并可选删除模型目录。同步执行（卸载通常很快）。"""
+    import shutil as _shutil
+    from src.utils.paths import get_project_root
+
+    errors: list = []
+
+    # 1. pip uninstall
+    if body.packages:
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(sys.executable)
+            embed_python = os.path.join(exe_dir, "python_embed", "python.exe")
+            if not os.path.isfile(embed_python):
+                embed_python = _shutil.which("python3") or _shutil.which("python") or ""
+            if embed_python:
+                target_dir = os.path.join(exe_dir, "user_packages")
+                cmd = [embed_python, "-m", "pip", "uninstall", "-y",
+                       "--target", target_dir] + list(body.packages)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                # pip uninstall --target 不被支持时降级（直接删包目录里的文件夹）
+                if result.returncode != 0 and os.path.isdir(target_dir):
+                    for pkg in body.packages:
+                        pkg_base = pkg.split("[")[0].replace("-", "_").lower()
+                        for entry in os.listdir(target_dir):
+                            if entry.lower().replace("-", "_").startswith(pkg_base):
+                                full = os.path.join(target_dir, entry)
+                                try:
+                                    if os.path.isdir(full):
+                                        _shutil.rmtree(full)
+                                    else:
+                                        os.remove(full)
+                                except Exception as e:
+                                    errors.append(str(e))
+        else:
+            cmd = [sys.executable, "-m", "pip", "uninstall", "-y"] + list(body.packages)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                errors.append((result.stderr or result.stdout or "")[-400:])
+
+    # 2. 删除模型目录
+    root = get_project_root()
+    for rel_dir in (body.dirs or []):
+        abs_dir = os.path.normpath(os.path.join(root, rel_dir))
+        # 安全校验：只允许删 models/ 子目录
+        if not abs_dir.startswith(os.path.join(root, "models")):
+            errors.append(f"拒绝删除非 models/ 目录: {rel_dir}")
+            continue
+        if os.path.isdir(abs_dir):
+            try:
+                _shutil.rmtree(abs_dir)
+            except Exception as e:
+                errors.append(f"删除 {rel_dir} 失败: {e}")
+
+    import importlib
+    importlib.invalidate_caches()
+
+    if errors:
+        return {"ok": False, "errors": errors}
+    return {"ok": True}
 
 
 # ─── Launch GPT-SoVITS ───────────────────────────────────────────────────────

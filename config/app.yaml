@@ -30,7 +30,7 @@ llm_presets:
 
 tts:
   edge_tts:
-    voice: "zh-CN-XiaoyiNeural"
+    voice: "en-US-AriaNeural"
     rate: +0%
   gpt_sovits:
     host: "127.0.0.1"
@@ -106,9 +106,9 @@ secondary_models:
 memory:
   enabled: true
   vector_enabled: true
-  extraction_frequency: 1
+  extraction_frequency: 5
   extraction_weight_threshold: 0.5
-  max_facts_in_prompt: 30
+  max_facts_in_prompt: 20
   day_summary_enabled: true
   day_summary_keep_days: 7
   day_summary_max_messages: 300

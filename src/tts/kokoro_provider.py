@@ -23,6 +23,7 @@ import os
 from typing import Any, Optional
 
 from src.tts.base import TTSProvider
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ _kokoro_instance: Optional[Any] = None
 _kokoro_import_warned = False
 
 # Model file search order: project models/ dir, then project root, then cwd
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PROJECT_ROOT = get_project_root()
 _MODEL_SEARCH_DIRS = [
     os.path.join(_PROJECT_ROOT, "models"),
     _PROJECT_ROOT,

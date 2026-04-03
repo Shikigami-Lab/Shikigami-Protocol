@@ -9,12 +9,10 @@ from src.tts.registry import get_tts_provider
 from src.tts.text_preprocessor import preprocess_for_tts
 from src.tts.instruct_builder import build_instruct
 from src.utils.debug_logger import log_tts_request, log_tts_response, log_error
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# 项目根目录（server.py 所在目录），用于解析参考音频等相对路径
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _resolve_ref_audio_path(path: str) -> str:
@@ -24,7 +22,7 @@ def _resolve_ref_audio_path(path: str) -> str:
     path = path.strip()
     if os.path.isabs(path):
         return path
-    return os.path.normpath(os.path.join(_PROJECT_ROOT, path))
+    return os.path.normpath(os.path.join(get_project_root(), path))
 
 
 def _build_tts_config(websocket: WebSocket, profile_id_override: Optional[str] = None) -> dict:

@@ -524,7 +524,8 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
     try:
         import json as _json
         import os as _os
-        _epath = _os.path.join("profiles", session.profile_id, "emotion_state.json")
+        from src.utils.paths import get_project_root as _get_root
+        _epath = _os.path.join(_get_root(), "profiles", session.profile_id, "emotion_state.json")
         if _os.path.exists(_epath):
             with open(_epath, encoding="utf-8") as _f:
                 emotion_context = _json.load(_f)

@@ -1055,6 +1055,27 @@ const SettingsMixin = {
       }, 800);
     },
 
+    async pipUninstall(packages, dirs, confirmKey) {
+      const msg = this.t(confirmKey || 'confirmUninstallPackage');
+      if (!window.confirm(msg)) return;
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/pip-uninstall', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages, dirs: dirs || [] }),
+        });
+        const d = await res.json();
+        if (d.ok) {
+          this.showToast(this.t('uninstallDone'), 'success');
+        } else {
+          this.showToast((d.errors || []).join('; ') || this.t('uninstallFailed'), 'error');
+        }
+        await this.loadSetupGuide();
+      } catch (e) {
+        this.showToast(this.t('uninstallFailed') + ': ' + e.message, 'error');
+      }
+    },
+
     async installModelScope() {
       try {
         const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
@@ -1082,6 +1103,42 @@ const SettingsMixin = {
       } catch (e) {
         if (!this.setupGuide) this.setupGuide = {};
         this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
+      }
+    },
+
+    async installTorchCuda() {
+      const indexUrl = (this.setupGuide.cuda_info && this.setupGuide.cuda_info.recommended_url)
+        || 'https://download.pytorch.org/whl/cu124';
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            packages: ['torch', 'torchvision', 'torchaudio'],
+            index_url: indexUrl,
+            target: 'torch_cuda',
+          }),
+        });
+        const d = await res.json();
+        if (!d.ok) {
+          if (!this.setupGuide) this.setupGuide = {};
+          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败', target: 'torch_cuda' };
+          return;
+        }
+        if (!this.setupGuide) this.setupGuide = {};
+        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null, target: 'torch_cuda' };
+        const poll = setInterval(async () => {
+          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
+          if (!s) return;
+          this.setupGuide.pip_install = s;
+          if (s.phase !== 'running' && s.phase !== 'idle') {
+            clearInterval(poll);
+            await this.loadSetupGuide();
+          }
+        }, 2000);
+      } catch (e) {
+        if (!this.setupGuide) this.setupGuide = {};
+        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message, target: 'torch_cuda' };
       }
     },
 
@@ -1144,7 +1201,7 @@ const SettingsMixin = {
         const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['kokoro-onnx', 'misaki[zh]', 'misaki[ja]'], target: 'kokoro' }),
+          body: JSON.stringify({ packages: ['kokoro-onnx', 'misaki[zh]'], target: 'kokoro' }),
         });
         const d = await res.json();
         if (!d.ok) {
@@ -1170,6 +1227,36 @@ const SettingsMixin = {
         this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
       }
     },
+    async installKokoroJa() {
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages: ['misaki[ja]'], target: 'kokoro_ja' }),
+        });
+        const d = await res.json();
+        if (!d.ok) {
+          if (!this.setupGuide) this.setupGuide = {};
+          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败', target: 'kokoro_ja' };
+          return;
+        }
+        if (!this.setupGuide) this.setupGuide = {};
+        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null, target: 'kokoro_ja' };
+        const poll = setInterval(async () => {
+          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
+          if (!s) return;
+          this.setupGuide.pip_install = s;
+          if (s.phase !== 'running' && s.phase !== 'idle') {
+            clearInterval(poll);
+            this.loadSetupGuide();
+          }
+        }, 2000);
+      } catch (e) {
+        if (!this.setupGuide) this.setupGuide = {};
+        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message, target: 'kokoro_ja' };
+      }
+    },
+
     async selectSTTModel(path) {
       try {
         const res = await fetch(getBaseUrl() + '/api/setup/apply-stt-model', {

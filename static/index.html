@@ -8,7 +8,7 @@
   <link rel="icon" href="icon.png" type="image/png" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='25' x='16' text-anchor='middle' font-size='22' font-family='KaiTi, STKaiti, Kaiti SC, 楷体, serif'>式</text></svg>" type="image/svg+xml" />
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
-  <script>(function(){var t=localStorage.getItem('theme')||'';if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
+  <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/settings.css" />
 
@@ -509,7 +509,7 @@
 
       <!-- Empty state -->
       <div v-if="!hasMessages" class="empty-state">
-        <template v-if="!currentSessionId">
+        <template v-if="!currentSessionId && !currentGroupId">
           <div class="empty-icon">🪄</div>
           <div class="empty-hint">{{ t('emptyStateNoProfile') }}</div>
           <button class="s-btn s-btn-primary" @click="openSettings(); activeTab = 'profiles'">
@@ -1005,6 +1005,8 @@
                       @click="installModelScope()">
                 {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'modelscope' ? t('onboardingKokoroInstalling') : t('onboardingModelScopeInstall') }}
               </button>
+              <button v-if="setupGuide.modelscope_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
+                      @click="pipUninstall(['modelscope'], [])">{{ t('btnUninstall') }}</button>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'modelscope' && !setupGuide.modelscope_installed"
                     class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'modelscope' && !setupGuide.modelscope_installed"
@@ -1033,6 +1035,8 @@
                       @click="installAiMemory()">
                 {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'ai_memory' ? t('onboardingKokoroInstalling') : t('onboardingAiMemoryInstall') }}
               </button>
+              <button v-if="setupGuide.ai_memory_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
+                      @click="pipUninstall(['chromadb', 'transformers', 'sentence-transformers', 'rank-bm25'], [])">{{ t('btnUninstall') }}</button>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'ai_memory' && !setupGuide.ai_memory_installed"
                     class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
               <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'ai_memory' && !setupGuide.ai_memory_installed"
@@ -1071,6 +1075,7 @@
                     <button v-if="b.repo_id" type="button" class="s-btn s-btn-small" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'hf')">{{ t('onboardingBtnHfMirror') }}</button>
                     <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'modelscope')">{{ t('onboardingBtnModelScope') }}</button>
                     <button v-if="b.direct_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'direct')">{{ t('onboardingBtnGitHubDirect') }}</button>
+                    <button v-if="b.installed" type="button" class="s-btn s-btn-small s-btn-danger" @click="pipUninstall([], [b.local_path], 'confirmUninstallModel')">{{ t('btnUninstall') }}</button>
                   </div>
                 </div>
               </div>
@@ -1168,19 +1173,31 @@
               <span :class="setupGuide.tts.kokoro_misaki_zh ? 'ok' : 'muted'">
                 {{ setupGuide.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiZh') }}
               </span>
-              <span :class="setupGuide.tts.kokoro_misaki_ja ? 'ok' : 'muted'">
-                {{ setupGuide.tts.kokoro_misaki_ja ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiJa') }}
+              <span :class="setupGuide.tts.kokoro_misaki_ja ? 'ok' : 'muted'" style="opacity:0.65;">
+                {{ setupGuide.tts.kokoro_misaki_ja ? '✓' : '–' }} {{ t('onboardingTtsKokoroMisakiJa') }}
               </span>
             </div>
-            <div v-if="!setupGuide.tts.kokoro_installed" style="margin-top:8px;">
-              <button type="button" class="s-btn s-btn-secondary"
+            <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <button v-if="!setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-secondary"
                       :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
                       :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'kokoro' ? t('onboardingOtherInstalling') : ''"
                       @click="installKokoro()">
                 {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro' ? t('onboardingKokoroInstalling') : t('onboardingKokoroInstall') }}
               </button>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;margin-left:6px;">{{ setupGuide.pip_install.error }}</span>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'kokoro'" class="ok" style="font-size:11px;margin-left:6px;">{{ t('onboardingKokoroInstallDone') }}</span>
+              <button v-if="setupGuide.tts.kokoro_installed" type="button" class="s-btn s-btn-danger" style="font-size:12px;"
+                      @click="pipUninstall(['kokoro-onnx', 'misaki'], [])">{{ t('btnUninstall') }}</button>
+              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'kokoro'" class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
+            </div>
+            <!-- misaki[ja] optional install (requires CMake + MSVC on Windows) -->
+            <div v-if="setupGuide.tts.kokoro_installed && !setupGuide.tts.kokoro_misaki_ja" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border-color);">
+              <p style="font-size:11px;color:var(--text-secondary);margin:0 0 6px;">{{ t('onboardingKokoroJaHint') }}</p>
+              <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
+                      :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
+                      @click="installKokoroJa()">
+                {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro_ja' ? t('onboardingKokoroInstalling') : t('onboardingKokoroJaInstall') }}
+              </button>
+              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro_ja'" class="warn" style="font-size:11px;margin-left:6px;">{{ setupGuide.pip_install.error }}</span>
             </div>
             <!-- Model files status + download -->
             <div v-if="setupGuide.tts.kokoro_installed" style="margin-top:10px;">
@@ -1230,14 +1247,43 @@
               </div>
               <p class="setup-tts-desc" style="margin-bottom:8px;">
                 {{ t('onboardingQwenTtsPkgDesc') }}
-                <span v-if="setupGuide.torch_installed" class="ok" style="margin-left:6px;">(torch ✓)</span>
+                <span v-if="setupGuide.torch_installed && setupGuide.torch_cuda_available" class="ok" style="margin-left:6px;">(torch + CUDA ✓)</span>
+                <span v-else-if="setupGuide.torch_installed && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="warn" style="margin-left:6px;">(torch ✓ · CUDA ✗)</span>
+                <span v-else-if="setupGuide.torch_installed" class="ok" style="margin-left:6px;">(torch ✓)</span>
                 <span v-else class="muted" style="margin-left:6px;">(torch ?)</span>
               </p>
-              
+
+              <!-- 检测到 NVIDIA 显卡但 torch 无 CUDA：提示升级 -->
+              <div v-if="setupGuide.torch_installed && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name"
+                   style="margin-bottom:8px;padding:6px 10px;background:var(--warn-bg,rgba(255,180,0,.1));border-radius:6px;font-size:12px;">
+                {{ t('onboardingTorchCudaHint') }}
+                <div v-if="setupGuide.cuda_info && setupGuide.cuda_info.gpu_name"
+                     style="margin-top:4px;opacity:.8;">
+                  {{ t('onboardingDetectedGpu') }}{{ setupGuide.cuda_info.gpu_name }}
+                  · CUDA driver {{ setupGuide.cuda_info.driver_cuda }}
+                  → {{ setupGuide.cuda_info.recommended_cu }}
+                </div>
+                <div v-else style="margin-top:4px;opacity:.7;">{{ t('onboardingNoNvidiaGpu') }}</div>
+                <div v-if="setupGuide.cuda_info && setupGuide.cuda_info.recommended_url"
+                     style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                  <button type="button" class="s-btn s-btn-secondary"
+                          :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
+                          @click="installTorchCuda()">
+                    {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'torch_cuda' ? t('onboardingKokoroInstalling') : (t('onboardingTorchCudaInstall') + ' (' + setupGuide.cuda_info.recommended_cu + ')') }}
+                  </button>
+                  <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'torch_cuda'"
+                        class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
+                  <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'torch_cuda'"
+                        class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
+                </div>
+              </div>
+
               <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                <span v-if="setupGuide.qwen_tts_installed" class="ok" style="font-size:12px;">
-                  ✓ {{ t('onboardingQwenTtsPkgInstalled') }}
-                </span>
+                <template v-if="setupGuide.qwen_tts_installed">
+                  <span class="ok" style="font-size:12px;">✓ {{ t('onboardingQwenTtsPkgInstalled') }}</span>
+                  <button type="button" class="s-btn s-btn-danger" style="font-size:12px;"
+                          @click="pipUninstall(['qwen-tts', 'soundfile'], [])">{{ t('btnUninstall') }}</button>
+                </template>
                 <button v-else type="button" class="s-btn s-btn-secondary"
                         :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
                         :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'qwen_tts' ? t('onboardingOtherInstalling') : ''"
@@ -1277,6 +1323,7 @@
                       <button v-if="b.repo_id" type="button" class="s-btn s-btn-small" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'hf')">{{ t('onboardingBtnHfMirror') }}</button>
                       <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'modelscope')">{{ t('onboardingBtnModelScope') }}</button>
                       <button v-if="b.direct_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'direct')">{{ t('onboardingBtnGitHub') }}</button>
+                      <button v-if="b.installed" type="button" class="s-btn s-btn-small s-btn-danger" @click="pipUninstall([], [b.local_path], 'confirmUninstallModel')">{{ t('btnUninstall') }}</button>
                     </div>
                   </div>
                 </div>
@@ -1305,9 +1352,11 @@
                 1. {{ t('onboardingSttDepsStepTitle') }}
               </div>
               <div class="setup-tts-check" style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
-                <span v-if="setupGuide.sherpa_onnx_installed" class="ok">
-                  ✓ sherpa-onnx {{ t('onboardingInstalled') }}
-                </span>
+                <template v-if="setupGuide.sherpa_onnx_installed">
+                  <span class="ok">✓ sherpa-onnx {{ t('onboardingInstalled') }}</span>
+                  <button type="button" class="s-btn s-btn-danger" style="font-size:12px;width:fit-content;"
+                          @click="pipUninstall(['sherpa-onnx', 'soundfile'], [])">{{ t('btnUninstall') }}</button>
+                </template>
                 <button v-else type="button" class="s-btn s-btn-secondary" style="width: fit-content;"
                         :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
                         :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'sherpa_onnx' ? t('onboardingOtherInstalling') : ''"
@@ -5148,7 +5197,7 @@
             <div class="param-row" style="margin-top:14px;">
               <span class="param-label">{{ t('lblProfileMaxHistoryTurns') }}</span>
               <input type="number" class="seg-num-input" min="1" max="200"
-                     v-model="memoryProfileForm.max_history_turns" placeholder="20" style="width:64px;" />
+                     v-model="memoryProfileForm.max_history_turns" :placeholder="memoryGlobalForm.max_history_turns ?? 20" style="width:64px;" />
             </div>
             <div class="form-hint">{{ t('hintProfileMaxHistoryTurns') }}</div>
             <div class="settings-param-block" style="margin-top:14px;" :class="{ disabled: !memoryProfileEffectiveEnabled }">
@@ -5175,7 +5224,7 @@
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblProfileRecentFactQuota') }}</span>
                 <input type="number" class="seg-num-input" min="0" max="20"
-                       v-model="memoryProfileForm.recent_fact_quota" placeholder="3" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
+                       v-model="memoryProfileForm.recent_fact_quota" :placeholder="memoryGlobalForm.recent_fact_quota ?? 3" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
               </div>
               <div class="form-hint">{{ t('hintProfileRecentFactQuota') }}</div>
 

@@ -27,14 +27,16 @@ from pydantic import BaseModel, Field
 from src.config.emotion_keys import emotion_keys_csv_for_wizard
 from src.llm.registry import get_provider
 from src.lorebooks.entry_utils import normalize_lorebook_entry_for_storage
+from src.utils.paths import get_project_root
 
 _STATIC_AVATARS_DIR = "static/avatars"
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_YAML_PATH = "config/app.yaml"
-_PROFILES_DIR = "profiles"
+_YAML_PATH = os.path.join(get_project_root(), "config", "app.yaml")
+_ENV_FILE_PATH = os.path.join(get_project_root(), ".env")
+_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 @router.get("/settings/emotion_keys")
@@ -66,7 +68,7 @@ def _save_yaml(y, data):
         y.dump(data, f)
 
 
-_ENV_FILE = ".env"
+_ENV_FILE = _ENV_FILE_PATH
 
 
 def _env_key_name(preset_name: str) -> str:
@@ -115,7 +117,7 @@ async def get_llm_presets(request: Request):
             "base_url":               p.get("base_url", ""),
             "model":                  p.get("model", ""),
             "has_key":                bool(p.get("api_key", "")),
-            "temperature":            p.get("temperature", 0.9),
+            "temperature":            p.get("temperature", 1.0),
             "top_p":                  p.get("top_p", 0.95),
             "presence_penalty":       p.get("presence_penalty", 0.0),
             "frequency_penalty":      p.get("frequency_penalty", 0.0),
@@ -133,7 +135,7 @@ class LLMPresetBody(BaseModel):
     api_key: Optional[str] = None          # None = keep existing; "" = clear
     base_url: str = ""
     model: str = ""
-    temperature: float = 0.9
+    temperature: float = 1.0
     top_p: float = 0.95
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
@@ -348,7 +350,7 @@ _KOKORO_VOICE_GROUPS = {
     "Other":          ["ff_siwis","ef_dora","em_alex","em_santa","hf_alpha","hf_beta","hm_omega","hm_psi","if_sara","im_nicola","pf_dora","pm_alex","pm_santa"],
 }
 
-_KOKORO_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_KOKORO_PROJECT_ROOT = get_project_root()
 _KOKORO_VOICES_CANDIDATES = ["voices-v1.0.bin", "voices-v0_19.bin"]
 
 
@@ -581,7 +583,23 @@ async def test_tts_config(request: Request):
             return {"ok": False, "error": f"Unknown TTS type: {tts_type}"}
 
         provider = get_tts_provider(tts_cfg)
-        test_text = "你好，这是一条语音测试。"
+
+        # Pick test text that matches the voice language to avoid synthesis failure
+        _lang = None
+        if tts_type == "edge_tts":
+            _voice = tts_cfg.get("voice", "")
+            _lang = _voice.split("-")[0].lower() if _voice else "zh"
+        elif tts_type == "kokoro":
+            _lang = tts_cfg.get("lang", "zh")
+        elif tts_type == "qwen3_tts":
+            _lang = config.tts_config.get("qwen3_tts", {}).get("lang", "zh")
+        if _lang and _lang.startswith("ja"):
+            test_text = "こんにちは、音声テストです。"
+        elif _lang and not _lang.startswith("zh"):
+            test_text = "Hello, this is a voice test."
+        else:
+            test_text = "你好，这是一条语音测试。"
+
         audio_bytes = await provider.synthesize(test_text)
         if not audio_bytes:
             raise RuntimeError("empty audio returned from provider")
@@ -920,8 +938,9 @@ def _generate_voice_design_sync(
         import torch
         import soundfile as sf
         from qwen_tts import Qwen3TTSModel
-        from src.tts.qwen3_tts_provider import _resolve_model_path
+        from src.tts.qwen3_tts_provider import _resolve_model_path, _safe_device
 
+        device = _safe_device(device)
         dtype = torch.bfloat16
         if dtype_name and "float32" in dtype_name.lower():
             dtype = torch.float32

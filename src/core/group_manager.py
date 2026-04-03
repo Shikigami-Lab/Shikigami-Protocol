@@ -9,6 +9,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from src.utils.paths import get_project_root
+
 logger = logging.getLogger(__name__)
 
 _GROUPS_DIR = "groups"
@@ -19,16 +21,12 @@ def _groups_root(project_root: str) -> str:
     return os.path.join(project_root, _GROUPS_DIR)
 
 
-def _project_root() -> str:
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
 class GroupManager:
     """群组 CRUD 与群会话 store 访问。"""
 
     def __init__(self, config: Any = None):
         self.config = config
-        self._root = _project_root()
+        self._root = get_project_root()
         self._groups_dir = _groups_root(self._root)
         self._store_cache: Dict[str, Any] = {}  # group_id -> ConversationStore
 

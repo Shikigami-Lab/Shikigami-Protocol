@@ -108,7 +108,8 @@ async def weather_fetcher_loop(app):
                 for session in sm.list_sessions():
                     try:
                         import json as _json
-                        profile_path = os.path.join("profiles", f"{session.profile_id}.json")
+                        from src.utils.paths import get_project_root
+                        profile_path = os.path.join(get_project_root(), "profiles", f"{session.profile_id}.json")
                         if not os.path.exists(profile_path):
                             continue
                         with open(profile_path, encoding="utf-8") as f:

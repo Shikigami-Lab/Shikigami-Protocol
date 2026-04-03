@@ -11,6 +11,7 @@ import os
 
 from src.prompt.base import ReflectionBuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class TrendContextReflectionSegment(PromptSegment):
             return SegmentResult(fired=False)
 
         # 通过 profile_id 找 storage_root
-        storage_root = os.path.join("profiles", profile_id)
+        storage_root = os.path.join(get_project_root(), "profiles", profile_id)
         if not os.path.isdir(storage_root):
             return SegmentResult(fired=False)
 

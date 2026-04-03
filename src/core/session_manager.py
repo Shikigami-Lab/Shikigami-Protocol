@@ -94,7 +94,7 @@ class SessionManager:
             profile_id = old_session.get("profile_id", "")
             if not profile_id:
                 continue
-            dst_dir = os.path.join("profiles", profile_id)
+            dst_dir = os.path.join(get_project_root(), "profiles", profile_id)
             dst = os.path.join(dst_dir, "chat_records.json")
             os.makedirs(dst_dir, exist_ok=True)
 

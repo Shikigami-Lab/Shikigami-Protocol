@@ -32,11 +32,12 @@ from fastapi import Request
 from src.config.prompt_loader import get_locale
 
 from src.lorebooks.store import new_lorebook_id, save_lorebook_document
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PROFILES_DIR = "profiles"
+PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 AVATARS_DIR  = "static/avatars"
 
 

@@ -23,10 +23,11 @@ from typing import Any, Dict, List, Optional
 
 from src.config.prompt_loader import get_prompt, get_locale
 from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response, log_error
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
-_PROFILES_DIR = "profiles"
+_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 _CHANGELOG_FILE = "persona_changelog.json"
 MAX_CHANGELOG_ENTRIES = 20  # 最多保留最近 N 条演化记录
 

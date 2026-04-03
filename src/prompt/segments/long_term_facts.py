@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def _relative_time(ts: float) -> str:
 
 def _get_current_emotion(profile_id: str) -> str:
     """从 emotion_state.json 读取当前主情绪（英文）。"""
-    path = os.path.join("profiles", profile_id, "emotion_state.json")
+    path = os.path.join(get_project_root(), "profiles", profile_id, "emotion_state.json")
     try:
         with open(path, encoding="utf-8") as f:
             state = json.load(f)

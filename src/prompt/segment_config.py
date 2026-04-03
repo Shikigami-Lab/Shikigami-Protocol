@@ -7,9 +7,11 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.utils.paths import get_project_root
+
 logger = logging.getLogger(__name__)
 
-_PROFILES_DIR = "profiles"
+_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 @dataclass

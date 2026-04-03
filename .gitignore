@@ -56,6 +56,8 @@ release/
 out/
 
 # ── 可能含本机路径或会话 id 的运行时配置 ─────────────────────────────────────
+config/app.yaml
+!config/app.yaml.example
 config/sessions_meta.json
 config/ui_prefs.json
 

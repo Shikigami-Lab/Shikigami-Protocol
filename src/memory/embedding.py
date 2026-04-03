@@ -130,8 +130,19 @@ class EmbeddingProvider:
                     return SentenceTransformer(model_path_or_name, device="cpu", **kwargs)
                 raise
 
-        # 若是本地目录路径（如 ./models/all-MiniLM-L6-v2），直接加载，不连 Hugging Face
-        path = os.path.abspath(model_name.strip()) if isinstance(model_name, str) else ""
+        # 若是本地目录路径（如 models/all-MiniLM-L6-v2 或绝对路径），直接加载，不连 Hugging Face
+        # 先按绝对路径尝试，再按相对于项目根拼接（兼容 PyInstaller exe 工作目录不固定的情况）
+        raw_name = model_name.strip() if isinstance(model_name, str) else ""
+        path = ""
+        if raw_name:
+            abs_candidate = os.path.abspath(raw_name)
+            if os.path.isdir(abs_candidate):
+                path = abs_candidate
+            else:
+                from src.utils.paths import get_project_root as _gpr
+                root_candidate = os.path.join(_gpr(), raw_name)
+                if os.path.isdir(root_candidate):
+                    path = root_candidate
         if path and os.path.isdir(path):
             try:
                 self._local_model = _load_st(path, device)

@@ -34,10 +34,11 @@ from src.utils.debug_logger import (
     log_memory_extract,
     log_summary_generate,
 )
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
-_PROFILES_DIR = "profiles"
+_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 def _load_persona_evolved_config(profile_id: str) -> Optional[Dict]:

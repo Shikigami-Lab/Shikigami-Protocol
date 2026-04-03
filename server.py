@@ -59,6 +59,9 @@ if getattr(sys, 'frozen', False):
 
 from src.utils.paths import get_project_root, get_resource_path
 
+# 固定工作目录为项目根，确保所有相对路径（profiles/, groups/, lorebooks/ 等）在打包 exe 下也能正确解析
+os.chdir(get_project_root())
+
 # 尽早向 Electron 发送进度（模块导入前），避免启动界面长时间停在 0%
 sys.stdout.write("SPLASH:33:Loading Python modules...\n")
 sys.stdout.flush()

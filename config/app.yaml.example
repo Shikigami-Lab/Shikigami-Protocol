@@ -25,7 +25,7 @@ llm_presets:
     base_url: https://generativelanguage.googleapis.com/v1beta/openai/
     model: gemini-3-flash-preview
     temperature: 1.0
-    top_p: 0.5
+    top_p: 0.95
     unsupported_params:
       - presence_penalty
       - frequency_penalty
@@ -35,8 +35,8 @@ llm_presets:
     api_key: ''
     base_url: http://localhost:11434/v1
     model: qwen2.5:14b
-    temperature: 0.7
-    top_p: 0.7
+    temperature: 1.0
+    top_p: 0.95
     presence_penalty: 0.05
     frequency_penalty: 0.05
 
@@ -126,15 +126,15 @@ secondary_models:
 memory:
   enabled: true
   vector_enabled: false # Set to true if chromadb is installed
-  extraction_frequency: 1
+  extraction_frequency: 7
   extraction_weight_threshold: 0.5
-  max_facts_in_prompt: 30
+  max_facts_in_prompt: 20
   day_summary_enabled: true
   day_summary_keep_days: 7
   day_summary_max_messages: 300
   day_summary_max_conv_chars: 12000
-  recent_fact_quota: 10
-  semantic_fact_quota: 20
+  recent_fact_quota: 5
+  semantic_fact_quota: 15
   recent_days: 3
   semantic_distance: 0.45
   vector_dedup_distance_threshold: 0.15
@@ -164,8 +164,8 @@ memory:
 reflection:
   enabled: false
   interval_seconds: 180
-  interval_min_seconds: 20
-  interval_max_seconds: 1800
+  interval_min_seconds: 120
+  interval_max_seconds: 3600
   retry_seconds: 60
   recent_turns: 10
   state_ttl_seconds: 600

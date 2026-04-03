@@ -4,9 +4,11 @@ import logging
 import os
 from typing import Any, Dict
 
+from src.utils.paths import get_project_root
+
 logger = logging.getLogger(__name__)
 
-PROFILES_DIR = "profiles"
+PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 def _load_profile_card(profile_id: str) -> Dict[str, Any]:
