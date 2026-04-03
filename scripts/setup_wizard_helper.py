@@ -92,58 +92,6 @@ def cmd_pip_install(spec: dict) -> int:
         _emit({"type": "pip", "phase": "error", "target": target, "error": str(exc)[:500]})
         return 1
     ok = code == 0
-    if ok and target == "torch_cuda":
-        if mode == "frozen":
-            target_dir = os.path.join(root, "user_packages")
-            os.makedirs(target_dir, exist_ok=True)
-            rcmd = [
-                py,
-                "-m",
-                "pip",
-                "install",
-                "--upgrade",
-                "--target",
-                target_dir,
-                "qwen-tts>=0.0.1",
-                "soundfile>=0.12.0",
-            ]
-        else:
-            rcmd = [
-                py,
-                "-m",
-                "pip",
-                "install",
-                "--upgrade",
-                "qwen-tts>=0.0.1",
-                "soundfile>=0.12.0",
-            ]
-        _emit({"type": "pip", "phase": "running", "target": "qwen_tts", "message": "pip install qwen-tts (repair)…"})
-        try:
-            proc2 = subprocess.Popen(
-                rcmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=root,
-                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
-            )
-            tail = []
-            if proc2.stdout:
-                for line in proc2.stdout:
-                    line = line.rstrip()
-                    tail = (tail + [line])[-40:]
-                    _emit({"type": "pip", "phase": "running", "target": "qwen_tts", "message": line[-240:]})
-            code2 = proc2.wait(timeout=3600)
-        except Exception as exc:
-            ok = False
-            tail = [str(exc)]
-            code2 = 1
-        else:
-            ok = code2 == 0
-        if not ok:
-            target = "qwen_tts"
     err_tail = "\n".join(tail)[-800:] if not ok else None
     if not ok and not (err_tail and err_tail.strip()):
         err_tail = f"pip exited with code {code if target != 'qwen_tts' else code2}"
@@ -159,6 +107,110 @@ def cmd_pip_install(spec: dict) -> int:
     return 0 if ok else 1
 
 
+def cmd_pip_uninstall(spec: dict) -> int:
+    """Uninstall packages without importing any project code (avoids DLL lock on Windows)."""
+    root = _app_root()
+    packages = spec.get("packages") or []
+    if not packages:
+        _emit({"type": "pip", "phase": "error", "error": "no packages"})
+        return 1
+
+    py, mode = _pip_python(root)
+    names = [p.split("[")[0].replace("-", "_") for p in packages]
+    errors: list = []
+
+    _emit({"type": "pip", "phase": "running", "message": "pip uninstall…"})
+
+    if mode == "frozen":
+        # In frozen layout packages live in user_packages/ — pip uninstall doesn't know about
+        # --target dirs, so remove the directories/dist-info directly first.
+        target_dir = os.path.join(root, "user_packages")
+        if os.path.isdir(target_dir):
+            for entry in os.listdir(target_dir):
+                el = entry.lower().replace("-", "_")
+                for nb in names:
+                    nb_low = nb.lower()
+                    if el == nb_low or el.startswith(nb_low + "-") or el.startswith(nb_low + "_") or el.startswith(nb_low + "."):
+                        full = os.path.join(target_dir, entry)
+                        try:
+                            import shutil
+                            if os.path.isdir(full):
+                                shutil.rmtree(full)
+                            else:
+                                os.remove(full)
+                            _emit({"type": "pip", "phase": "running", "message": f"removed {entry}"})
+                        except Exception as exc:
+                            errors.append(str(exc))
+        # Also run pip uninstall as best-effort cleanup of any metadata
+        cmd = [py, "-m", "pip", "uninstall", "-y"] + names
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=root)
+        except Exception:
+            pass
+    else:
+        # Source / venv layout: remove top-level site-packages dirs first (handles broken dist-info)
+        try:
+            import importlib.util as _ilu
+            sp = None
+            for p in packages:
+                spec_obj = _ilu.find_spec(p.split("[")[0].replace("-", "_"))
+                if spec_obj and spec_obj.origin:
+                    candidate = os.path.dirname(spec_obj.origin)
+                    # go up to site-packages
+                    sp = os.path.dirname(candidate)
+                    break
+            if sp and os.path.isdir(sp):
+                import shutil
+                for entry in os.listdir(sp):
+                    el = entry.lower().replace("-", "_")
+                    for nb in names:
+                        nb_low = nb.lower()
+                        if el == nb_low or el.startswith(nb_low + "-") or el.startswith(nb_low + "_") or el.startswith(nb_low + "."):
+                            full = os.path.join(sp, entry)
+                            try:
+                                if os.path.isdir(full):
+                                    shutil.rmtree(full)
+                                else:
+                                    os.remove(full)
+                                _emit({"type": "pip", "phase": "running", "message": f"removed {entry}"})
+                            except Exception as exc:
+                                errors.append(str(exc))
+        except Exception:
+            pass
+        cmd = [py, "-m", "pip", "uninstall", "-y"] + names
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=root,
+                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            )
+            if proc.stdout:
+                for line in proc.stdout:
+                    _emit({"type": "pip", "phase": "running", "message": line.rstrip()[-240:]})
+            code = proc.wait(timeout=300)
+            if code != 0:
+                errors.append(f"pip uninstall exited with code {code}")
+        except Exception as exc:
+            errors.append(str(exc))
+
+    ok = len(errors) == 0
+    result = {"ok": ok, "errors": errors}
+    sys.stdout.write("SETUP_RESULT:" + json.dumps(result, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+    _emit({
+        "type": "pip",
+        "phase": "success" if ok else "error",
+        "message": "完成" if ok else "失败",
+        "error": "\n".join(errors)[:800] if errors else None,
+    })
+    return 0 if ok else 1
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         return 1
@@ -171,6 +223,14 @@ def main() -> int:
             _emit({"type": "pip", "phase": "error", "error": "invalid json"})
             return 1
         return cmd_pip_install(spec)
+    if op == "pip-uninstall":
+        raw = sys.argv[2] if len(sys.argv) > 2 else "{}"
+        try:
+            spec = json.loads(raw)
+        except json.JSONDecodeError:
+            _emit({"type": "pip", "phase": "error", "error": "invalid json"})
+            return 1
+        return cmd_pip_uninstall(spec)
     return 1
 
 

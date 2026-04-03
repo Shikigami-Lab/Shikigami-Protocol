@@ -293,7 +293,7 @@
   <div id="wiz" class="setup-wizard-page">
     <h2 class="setup-guide-h3">{{ tw('setupWizardTitle') }}</h2>
     <p class="setup-guide-lead muted">{{ tw('setupWizardIntro') }}</p>
-    <p class="setup-guide-lead muted" style="margin-top:8px;">{{ tw('onboardingLead') }}</p>
+    <p class="setup-guide-lead muted" style="margin-top:8px;" v-html="tw('onboardingLead')"></p>
     <p v-if="statusError" class="setup-wizard-status-err">{{ statusError }}</p>
 
     <div v-if="statusLoading && !g" class="setup-wizard-loading-panel">
@@ -640,8 +640,8 @@
             <button type="button" class="s-btn s-btn-small" :class="{ 's-btn-primary': wizardUiLocale === 'en' }" @click="setWizardLocale('en')" :disabled="busy">English</button>
           </div>
           <div class="setup-wizard-footer-actions-right">
-            <span v-if="statusLoading && g" class="muted setup-wizard-footer-loading">{{ tw('onboardingLoading') }}</span>
-            <button type="button" class="s-btn s-btn-secondary" @click="refresh" :disabled="statusLoading || busy">{{ tw('onboardingRefresh') }}</button>
+            <span v-if="(statusLoading && g) || statusRefreshing" class="muted setup-wizard-footer-loading">{{ tw('onboardingLoading') }}</span>
+            <button type="button" class="s-btn s-btn-secondary" @click="refresh()" :disabled="statusLoading || statusRefreshing || busy">{{ tw('onboardingRefresh') }}</button>
             <button type="button" class="s-btn s-btn-primary" @click="proceed" :disabled="statusLoading || !g || busy">{{ tw('setupWizardLaunch') }}</button>
           </div>
         </div>

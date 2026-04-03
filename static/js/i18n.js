@@ -247,7 +247,10 @@ window.LOCALES = {
     setupWizardPipFailedGeneric: 'pip 安装失败，请查看下方详细日志或弹窗中的完整输出。',
     setupWizardDownloadFailedGeneric: '模型下载失败，请检查网络、镜像与磁盘空间。',
     setupWizardUninstallFailedGeneric: '卸载过程中出现错误，详见下方说明。',
+    setupWizardAbortBusyConfirm: '当前有操作正在进行（下载或安装），强行启动会中断它。确定要继续启动？',
     setupWizardNeedModelscopeFirst: '使用 ModelScope 源下载前，请先在本页上方安装「ModelScope 组件」，安装完成并刷新状态后再点下载。',
+    setupWizardHelperMissing:
+      '未找到启动器辅助脚本 setup_wizard_helper.py。打包版应在安装目录的 resources/scripts 下；源码运行应在项目根目录的 scripts 下。常见原因：安装包不完整、文件被杀软隔离、或手动删减了 resources。可尝试重新安装，或从仓库恢复 scripts/setup_wizard_helper.py。',
     setupWizardErrorBannerTitle: '最近一次操作出错（可滚动查看全文；关闭本窗口前可复制保存）',
     setupWizardAiMemoryDepsShort: 'chromadb、transformers、sentence-transformers、rank-bm25（体积较大，安装需数分钟）',
     setupWizardBootSplash: '正在加载启动器…',
@@ -1762,7 +1765,10 @@ window.LOCALES = {
     setupWizardPipFailedGeneric: 'pip install failed. See the log below or the alert for full output.',
     setupWizardDownloadFailedGeneric: 'Model download failed. Check network, mirror settings, and disk space.',
     setupWizardUninstallFailedGeneric: 'Uninstall reported errors — see details below.',
+    setupWizardAbortBusyConfirm: 'An operation is in progress (download or install). Launching now will cancel it. Continue anyway?',
     setupWizardNeedModelscopeFirst: 'Install the ModelScope component above first, refresh status, then download using the ModelScope source.',
+    setupWizardHelperMissing:
+      'Launcher helper script setup_wizard_helper.py was not found. In release builds it should live under resources/scripts next to app.asar; from source it should be at scripts/ in the project root. Common causes: incomplete install, antivirus quarantine, or a trimmed resources folder. Reinstall or restore scripts/setup_wizard_helper.py from the repo.',
     setupWizardErrorBannerTitle: 'Last operation failed (scroll to read; copy before closing if needed)',
     setupWizardAiMemoryDepsShort: 'chromadb, transformers, sentence-transformers, rank-bm25 (large download; install may take several minutes)',
     setupWizardBootSplash: 'Loading launcher…',

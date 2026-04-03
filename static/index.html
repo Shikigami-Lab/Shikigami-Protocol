@@ -922,7 +922,7 @@
 
         <p class="setup-guide-tab-blurb muted">{{ t('onboardingTabBlurb') }}</p>
 
-        <p class="setup-guide-lead">{{ t('onboardingLead') }}</p>
+        <p class="setup-guide-lead" v-html="t('onboardingLead')"></p>
         <p class="setup-guide-doc-links">
           <span class="setup-guide-doc-intro">{{ t('onboardingDocLinksIntro') }}</span>
           <a :href="userDocUrl('GETTING_STARTED')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenGettingStarted') }}</a>

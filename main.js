@@ -213,9 +213,32 @@ function getServerEntryForWizardCli(appRoot) {
   return { cmd: py, argsBase: [path.join(appRoot, 'server.py')] };
 }
 
-function getSetupHelperScriptPath() {
-  const root = app.isPackaged ? process.resourcesPath : __dirname;
-  return path.join(root, 'scripts', 'setup_wizard_helper.py');
+/** 返回首个存在的 setup_wizard_helper.py 绝对路径；均不存在时返回 null。 */
+function resolveSetupHelperScriptPath() {
+  const rel = path.join('scripts', 'setup_wizard_helper.py');
+  const candidates = [];
+  if (app.isPackaged) {
+    candidates.push(path.join(process.resourcesPath, rel));
+    try {
+      const ap = app.getAppPath();
+      if (ap && typeof ap === 'string' && ap.endsWith('.asar')) {
+        candidates.push(path.join(path.dirname(ap), rel));
+      }
+    } catch (_) { /* ignore */ }
+  } else {
+    candidates.push(path.join(__dirname, rel));
+  }
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+/** 用于错误提示：期望的主查找路径（首个候选）。 */
+function primarySetupHelperScriptPath() {
+  const rel = path.join('scripts', 'setup_wizard_helper.py');
+  if (app.isPackaged) return path.join(process.resourcesPath, rel);
+  return path.join(__dirname, rel);
 }
 
 function getPipRunnerPython(appRoot) {
@@ -280,8 +303,14 @@ function spawnWizardServerJsonStdin(appRoot, extraArgs, stdinStr, onEventLine) {
 
 function attachWizardStdoutParser(child, onEventLine) {
   if (!child || !child.stdout) return;
+  // Line-buffer: Node stdout data events don't guarantee one line per chunk.
+  // A SETUP_EVENT/SETUP_RESULT split across two chunks would silently fail to parse.
+  let lineBuf = '';
   child.stdout.on('data', (buf) => {
-    buf.toString().split('\n').forEach((line) => {
+    lineBuf += buf.toString();
+    const lines = lineBuf.split('\n');
+    lineBuf = lines.pop(); // keep the potentially incomplete last fragment
+    lines.forEach((line) => {
       const s = line.trim();
       if (s.startsWith('SETUP_EVENT:')) {
         try {
@@ -296,17 +325,37 @@ function attachWizardStdoutParser(child, onEventLine) {
       }
     });
   });
+  child.stdout.on('end', () => {
+    // Flush any remaining buffered content when the stream closes
+    if (lineBuf.trim()) {
+      const s = lineBuf.trim();
+      if (s.startsWith('SETUP_EVENT:')) {
+        try { const j = JSON.parse(s.slice('SETUP_EVENT:'.length)); if (typeof onEventLine === 'function') onEventLine(j); } catch (_) {}
+      } else if (s.startsWith('SETUP_RESULT:')) {
+        try { const j = JSON.parse(s.slice('SETUP_RESULT:'.length)); if (typeof onEventLine === 'function') onEventLine({ type: 'setup_result', result: j }); } catch (_) {}
+      }
+      lineBuf = '';
+    }
+  });
 }
 
 function spawnWizardPipHelper(appRoot, pipSpec, onEventLine) {
-  const script = getSetupHelperScriptPath();
-  if (!fs.existsSync(script)) {
-    if (typeof onEventLine === 'function') onEventLine({ type: 'pip', phase: 'error', error: 'helper script missing' });
+  const script = resolveSetupHelperScriptPath();
+  if (!script) {
+    const expected = primarySetupHelperScriptPath();
+    if (typeof onEventLine === 'function') {
+      onEventLine({
+        type: 'pip',
+        phase: 'error',
+        error: { key: 'setupWizardHelperMissing', detail: expected },
+      });
+    }
     return null;
   }
   const py = getPipRunnerPython(appRoot);
+  const op = pipSpec.op || 'pip-install';
   const payload = JSON.stringify(pipSpec);
-  const child = spawn(py, [script, 'pip-install', payload], {
+  const child = spawn(py, [script, op, payload], {
     cwd: appRoot,
     env: envForWizardChild(appRoot, { SHIKIGAMI_APP_ROOT: appRoot }),
   });
@@ -879,27 +928,34 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
 
   if (op === 'pip-install') {
     activeWizardChild = spawnWizardPipHelper(appRoot, {
+      op: 'pip-install',
       packages: payload.packages || [],
       target: payload.target || '',
       index_url: payload.index_url || '',
     }, onEv);
     if (activeWizardChild) {
-      activeWizardChild.on('close', (code) => {
+      const thisChild = activeWizardChild;
+      thisChild.on('close', (code) => {
+        if (activeWizardChild !== thisChild) return;
         activeWizardChild = null;
         forwardWizardEvent(wc, { type: 'child_done', op: 'pip-install', exitCode: code });
       });
+    } else {
+      forwardWizardEvent(wc, { type: 'child_done', op: 'pip-install', exitCode: 1 });
     }
     return;
   }
 
   if (op === 'pip-uninstall') {
-    const body = JSON.stringify({
+    activeWizardChild = spawnWizardPipHelper(appRoot, {
+      op: 'pip-uninstall',
       packages: payload.packages || [],
       dirs: payload.dirs || [],
-    });
-    activeWizardChild = spawnWizardServerJsonStdin(appRoot, ['--wizard-pip-uninstall'], body, onEv);
+    }, onEv);
     if (activeWizardChild) {
-      activeWizardChild.on('close', (code) => {
+      const thisChild = activeWizardChild;
+      thisChild.on('close', (code) => {
+        if (activeWizardChild !== thisChild) return;
         activeWizardChild = null;
         forwardWizardEvent(wc, { type: 'child_done', op: 'pip-uninstall', exitCode: code });
       });
@@ -917,7 +973,9 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
     });
     attachWizardStdoutParser(activeWizardChild, onEv);
     activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
+    const dlChild = activeWizardChild;
     activeWizardChild.on('close', (code) => {
+      if (activeWizardChild !== dlChild) return;
       activeWizardChild = null;
       forwardWizardEvent(wc, { type: 'child_done', op: 'download', exitCode: code });
     });
@@ -932,7 +990,9 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
       env: envForWizardChild(appRoot),
     });
     activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
+    const sttChild = activeWizardChild;
     activeWizardChild.on('close', (code) => {
+      if (activeWizardChild !== sttChild) return;
       activeWizardChild = null;
       forwardWizardEvent(wc, { type: 'child_done', op: 'apply-stt', exitCode: code });
     });
@@ -946,7 +1006,9 @@ ipcMain.on('setup-wizard:start-op', (event, payload) => {
       env: envForWizardChild(appRoot),
     });
     activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
+    const gptChild = activeWizardChild;
     activeWizardChild.on('close', (code) => {
+      if (activeWizardChild !== gptChild) return;
       activeWizardChild = null;
       forwardWizardEvent(wc, { type: 'child_done', op: 'launch-gptsovits', exitCode: code });
     });
