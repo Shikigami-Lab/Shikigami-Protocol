@@ -22,6 +22,7 @@ const {
   nativeImage,
   screen,
   shell,
+  dialog,
 } = require('electron');
 const { spawn, exec } = require('child_process');
 const path = require('path');
@@ -47,6 +48,7 @@ const POLL_INTERVAL  = 500;      // ms between readiness checks
 const POLL_MAX_TRIES = 60;       // 30 s total wait
 
 let mainWindow       = null;
+let setupWizardWindow = null;
 let splashWindow     = null;
 let tray             = null;
 let serverProcess    = null;
@@ -94,6 +96,236 @@ function getPythonCmd(appRoot) {
     : path.join(appRoot, '.venv', 'bin', 'python');
   if (fs.existsSync(venvPython)) return venvPython;
   return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+function readUiPrefs(appRoot) {
+  try {
+    const p = path.join(appRoot, 'config', 'ui_prefs.json');
+    if (!fs.existsSync(p)) {
+      return { show_startup_launcher: true, theme: undefined, locale: undefined };
+    }
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const loc = j.locale;
+    return {
+      show_startup_launcher: j.show_startup_launcher !== false,
+      theme: Object.prototype.hasOwnProperty.call(j, 'theme') ? j.theme : undefined,
+      locale: loc === 'zh' || loc === 'en' ? loc : undefined,
+    };
+  } catch (_) {
+    return { show_startup_launcher: true, theme: undefined, locale: undefined };
+  }
+}
+
+/** 启动器首屏语言：配置文件 → 系统区域 → 默认 en（与主界面 inferLocaleFromNavigator 非中文即 en 一致） */
+function getWizardInitialLocale(appRoot) {
+  const prefs = readUiPrefs(appRoot);
+  if (prefs.locale === 'zh' || prefs.locale === 'en') return prefs.locale;
+  try {
+    const al = String(app.getLocale() || '').toLowerCase();
+    if (al.startsWith('zh')) return 'zh';
+    return 'en';
+  } catch (_) {
+    return 'en';
+  }
+}
+
+/** 与 data-theme 大致匹配的窗口底色，减少闪屏（启动器在注入主题前） */
+function approxWizardBackgroundColor(theme) {
+  const t = theme === undefined || theme === null ? 'light' : String(theme);
+  if (t === 'light') return '#f0eee8';
+  if (t === 'cursor') return '#1c1c1c';
+  if (t === 'midnight') return '#0b0f19';
+  if (t === 'nord') return '#2e3440';
+  if (t === 'matcha') return '#0d1f18';
+  if (t === 'velvet') return '#08080e';
+  if (t === 'warm') return '#1c1710';
+  if (t === 'rose') return '#1a0a0f';
+  if (t === 'synthwave') return '#0f0612';
+  if (t === 'ink') return '#0c0c0c';
+  if (t === '') return '#0d0d1a';
+  return '#0d0d1a';
+}
+
+function isServerBinary(cmd) {
+  const b = path.basename(cmd || '').toLowerCase();
+  return b === 'server.exe' || b === 'server';
+}
+
+function getServerEntryForWizardCli(appRoot) {
+  const py = getPythonCmd(appRoot);
+  if (isServerBinary(py)) return { cmd: py, argsBase: [] };
+  return { cmd: py, argsBase: [path.join(appRoot, 'server.py')] };
+}
+
+function getSetupHelperScriptPath() {
+  const root = app.isPackaged ? process.resourcesPath : __dirname;
+  return path.join(root, 'scripts', 'setup_wizard_helper.py');
+}
+
+function getPipRunnerPython(appRoot) {
+  if (app.isPackaged && process.platform === 'win32') {
+    const embed = path.join(appRoot, 'python_embed', 'python.exe');
+    if (fs.existsSync(embed)) return embed;
+  }
+  const win = process.platform === 'win32';
+  const venvPy = path.join(appRoot, '.venv', win ? 'Scripts' : 'bin', win ? 'python.exe' : 'python');
+  if (fs.existsSync(venvPy)) return venvPy;
+  return win ? 'python' : 'python3';
+}
+
+function runWizardStatusJson(appRoot) {
+  return new Promise((resolve, reject) => {
+    const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
+    const args = [...argsBase, '--setup-status-json'];
+    const child = spawn(cmd, args, {
+      cwd: appRoot,
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => reject(e));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(err.trim() || `status subprocess exited ${code}`));
+        return;
+      }
+      const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      let payload = null;
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        if (lines[i].startsWith('{')) {
+          try {
+            payload = JSON.parse(lines[i]);
+            break;
+          } catch (_) { /* continue */ }
+        }
+      }
+      if (payload) resolve(payload);
+      else reject(new Error('invalid JSON from --setup-status-json'));
+    });
+  });
+}
+
+function spawnWizardServerJsonStdin(appRoot, extraArgs, stdinStr, onEventLine) {
+  const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
+  const child = spawn(cmd, [...argsBase, ...extraArgs], {
+    cwd: appRoot,
+    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+  });
+  if (stdinStr != null && child.stdin) {
+    child.stdin.write(stdinStr);
+    child.stdin.end();
+  }
+  attachWizardStdoutParser(child, onEventLine);
+  child.stderr.on('data', (d) => process.stderr.write(d));
+  return child;
+}
+
+function attachWizardStdoutParser(child, onEventLine) {
+  if (!child || !child.stdout) return;
+  child.stdout.on('data', (buf) => {
+    buf.toString().split('\n').forEach((line) => {
+      const s = line.trim();
+      if (s.startsWith('SETUP_EVENT:')) {
+        try {
+          const j = JSON.parse(s.slice('SETUP_EVENT:'.length));
+          if (typeof onEventLine === 'function') onEventLine(j);
+        } catch (_) { /* ignore */ }
+      } else if (s.startsWith('SETUP_RESULT:')) {
+        try {
+          const j = JSON.parse(s.slice('SETUP_RESULT:'.length));
+          if (typeof onEventLine === 'function') onEventLine({ type: 'setup_result', result: j });
+        } catch (_) { /* ignore */ }
+      }
+    });
+  });
+}
+
+function spawnWizardPipHelper(appRoot, pipSpec, onEventLine) {
+  const script = getSetupHelperScriptPath();
+  if (!fs.existsSync(script)) {
+    if (typeof onEventLine === 'function') onEventLine({ type: 'pip', phase: 'error', error: 'helper script missing' });
+    return null;
+  }
+  const py = getPipRunnerPython(appRoot);
+  const payload = JSON.stringify(pipSpec);
+  const child = spawn(py, [script, 'pip-install', payload], {
+    cwd: appRoot,
+    env: { ...process.env, SHIKIGAMI_APP_ROOT: appRoot, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+  });
+  attachWizardStdoutParser(child, onEventLine);
+  child.stderr.on('data', (d) => process.stderr.write(d));
+  return child;
+}
+
+let wizardUserLaunched = false;
+/** @type {null | (() => void)} */
+let wizardFlowResolve = null;
+let activeWizardChild = null;
+
+function forwardWizardEvent(wc, obj) {
+  if (wc && !wc.isDestroyed()) wc.send('setup-wizard:event', obj);
+}
+
+function createSetupWizardWindow() {
+  const appRoot = getAppRoot();
+  const htmlPath = path.join(appRoot, 'static', 'setup_wizard.html');
+  if (!fs.existsSync(htmlPath)) {
+    console.warn('[electron] setup_wizard.html missing, skipping launcher');
+    return;
+  }
+  const uiPrefs = readUiPrefs(appRoot);
+  const themeVal = uiPrefs.theme !== undefined && uiPrefs.theme !== null ? String(uiPrefs.theme) : 'light';
+
+  const W = 920;
+  const H = 720;
+  const primary = screen.getPrimaryDisplay();
+  const { width: workW, height: workH } = primary.workAreaSize;
+  const x = Math.floor((workW - W) / 2) + primary.workArea.x;
+  const y = Math.floor((workH - H) / 2) + primary.workArea.y;
+
+  setupWizardWindow = new BrowserWindow({
+    width: W,
+    height: H,
+    x,
+    y,
+    show: false,
+    backgroundColor: approxWizardBackgroundColor(uiPrefs.theme),
+    icon: getAppIcon(),
+    title: 'Shikigami Protocol — 启动器',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  setupWizardWindow.setMenuBarVisibility(false);
+  setupWizardWindow.loadFile(htmlPath);
+  setupWizardWindow.once('ready-to-show', async () => {
+    if (!setupWizardWindow || setupWizardWindow.isDestroyed()) return;
+    try {
+      await setupWizardWindow.webContents.executeJavaScript(
+        `document.documentElement.setAttribute('data-theme', ${JSON.stringify(themeVal)});`,
+        true,
+      );
+    } catch (e) {
+      console.warn('[electron] setup wizard theme inject failed:', e.message);
+    }
+    if (setupWizardWindow && !setupWizardWindow.isDestroyed()) setupWizardWindow.show();
+  });
+  setupWizardWindow.on('closed', () => {
+    setupWizardWindow = null;
+    if (activeWizardChild && !activeWizardChild.killed) {
+      try { activeWizardChild.kill(); } catch (_) {}
+      activeWizardChild = null;
+    }
+    if (!wizardUserLaunched && !isQuitting) {
+      isQuitting = true;
+      app.quit();
+    }
+  });
 }
 
 // ─────────────────── Port cleanup ───────────────────
@@ -499,6 +731,135 @@ ipcMain.handle('install-update', () => {
   autoUpdater.quitAndInstall();
 });
 
+// ─────────────────── Setup wizard (pre-server) ───────────────────
+
+ipcMain.on('setup-wizard:get-locale-bootstrap', (event) => {
+  try {
+    event.returnValue = getWizardInitialLocale(getAppRoot());
+  } catch (_) {
+    event.returnValue = 'en';
+  }
+});
+
+ipcMain.handle('setup-wizard:get-status', async () => {
+  const appRoot = getAppRoot();
+  try {
+    const data = await runWizardStatusJson(appRoot);
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
+});
+
+ipcMain.handle('setup-wizard:proceed', async () => {
+  wizardUserLaunched = true;
+  if (typeof wizardFlowResolve === 'function') {
+    const fn = wizardFlowResolve;
+    wizardFlowResolve = null;
+    fn();
+  }
+  if (setupWizardWindow && !setupWizardWindow.isDestroyed()) setupWizardWindow.close();
+  return { ok: true };
+});
+
+ipcMain.handle('setup-wizard:pick-stt-model', async () => {
+  if (!setupWizardWindow || setupWizardWindow.isDestroyed()) return { path: '' };
+  const r = await dialog.showOpenDialog(setupWizardWindow, {
+    title: '选择 STT 模型文件',
+    properties: ['openFile'],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { path: '' };
+  return { path: r.filePaths[0] };
+});
+
+ipcMain.on('setup-wizard:start-op', (event, payload) => {
+  const wc = event.sender;
+  const appRoot = getAppRoot();
+  const onEv = (j) => forwardWizardEvent(wc, j);
+
+  if (activeWizardChild && !activeWizardChild.killed) {
+    try { activeWizardChild.kill(); } catch (_) {}
+    activeWizardChild = null;
+  }
+
+  const op = (payload && payload.op) || '';
+
+  if (op === 'pip-install') {
+    activeWizardChild = spawnWizardPipHelper(appRoot, {
+      packages: payload.packages || [],
+      target: payload.target || '',
+      index_url: payload.index_url || '',
+    }, onEv);
+    if (activeWizardChild) {
+      activeWizardChild.on('close', (code) => {
+        activeWizardChild = null;
+        forwardWizardEvent(wc, { type: 'child_done', op: 'pip-install', exitCode: code });
+      });
+    }
+    return;
+  }
+
+  if (op === 'pip-uninstall') {
+    const body = JSON.stringify({
+      packages: payload.packages || [],
+      dirs: payload.dirs || [],
+    });
+    activeWizardChild = spawnWizardServerJsonStdin(appRoot, ['--wizard-pip-uninstall'], body, onEv);
+    if (activeWizardChild) {
+      activeWizardChild.on('close', (code) => {
+        activeWizardChild = null;
+        forwardWizardEvent(wc, { type: 'child_done', op: 'pip-uninstall', exitCode: code });
+      });
+    }
+    return;
+  }
+
+  if (op === 'download') {
+    const bid = payload.bundle_id || '';
+    const src = payload.source || 'auto';
+    const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
+    activeWizardChild = spawn(cmd, [...argsBase, '--wizard-download', bid, src], {
+      cwd: appRoot,
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    });
+    attachWizardStdoutParser(activeWizardChild, onEv);
+    activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
+    activeWizardChild.on('close', (code) => {
+      activeWizardChild = null;
+      forwardWizardEvent(wc, { type: 'child_done', op: 'download', exitCode: code });
+    });
+    return;
+  }
+
+  if (op === 'apply-stt') {
+    const mp = (payload.model_path || '').trim();
+    const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
+    activeWizardChild = spawn(cmd, [...argsBase, '--wizard-apply-stt', mp], {
+      cwd: appRoot,
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    });
+    activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
+    activeWizardChild.on('close', (code) => {
+      activeWizardChild = null;
+      forwardWizardEvent(wc, { type: 'child_done', op: 'apply-stt', exitCode: code });
+    });
+    return;
+  }
+
+  if (op === 'launch-gptsovits') {
+    const { cmd, argsBase } = getServerEntryForWizardCli(appRoot);
+    activeWizardChild = spawn(cmd, [...argsBase, '--wizard-launch-gptsovits'], {
+      cwd: appRoot,
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    });
+    activeWizardChild.stderr.on('data', (d) => process.stderr.write(d));
+    activeWizardChild.on('close', (code) => {
+      activeWizardChild = null;
+      forwardWizardEvent(wc, { type: 'child_done', op: 'launch-gptsovits', exitCode: code });
+    });
+  }
+});
+
 // ─────────────────── App lifecycle ───────────────────
 
 // Disable Electron's HTTP disk cache so local static file changes always load fresh.
@@ -532,6 +893,22 @@ app.whenReady().then(async () => {
   const clientHost = (SERVER_HOST === '0.0.0.0' || SERVER_HOST === '::') ? '127.0.0.1' : SERVER_HOST;
   SERVER_URL  = `http://${clientHost}:${SERVER_PORT}`;
   console.log(`[electron] server URL: ${SERVER_URL}`);
+
+  const uiPrefs = readUiPrefs(appRoot);
+  const wizardHtml = path.join(appRoot, 'static', 'setup_wizard.html');
+  const wantWizard = uiPrefs.show_startup_launcher !== false && fs.existsSync(wizardHtml);
+
+  if (wantWizard) {
+    wizardUserLaunched = false;
+    await new Promise((resolve) => {
+      wizardFlowResolve = resolve;
+      createSetupWizardWindow();
+    });
+    wizardFlowResolve = null;
+  } else {
+    wizardUserLaunched = true;
+  }
+
   setSplashProgress(10, 'Config loaded');
 
   // 3. Kill any stale process still holding the port
@@ -542,8 +919,6 @@ app.whenReady().then(async () => {
   createSplashWindow();
 
   // 5. Start server and wait for it
-  // Clear stale startup_progress.json from last run before polling begins,
-  // otherwise the interval will immediately read pct=100 and show a full bar.
   try { fs.writeFileSync(path.join(appRoot, 'startup_progress.json'), '{"pct":0,"msg":""}', 'utf8'); } catch (_) {}
   startServer();
   setSplashProgress(30, 'Waiting for service to be ready...');
@@ -555,7 +930,6 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('[electron]', e.message);
     closeSplashWindow();
-    // Open window anyway — frontend will show connection error
   }
 
   createWindow();
@@ -581,7 +955,6 @@ app.whenReady().then(async () => {
       sendUpdate('error', { message: e.message });
     });
 
-    // Silent check 5 s after launch so the window is already visible
     setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 5000);
   }
 
@@ -589,8 +962,12 @@ app.whenReady().then(async () => {
     if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
   });
 
-  // When user tries to open a second instance, focus the existing window instead.
   app.on('second-instance', () => {
+    if (setupWizardWindow && !setupWizardWindow.isDestroyed()) {
+      setupWizardWindow.show();
+      setupWizardWindow.focus();
+      return;
+    }
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();

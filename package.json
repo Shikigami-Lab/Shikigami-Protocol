@@ -41,6 +41,7 @@
           "assets/**",
           "scripts/start_gptsovits.bat",
           "scripts/start_gptsovits.sh",
+          "scripts/setup_wizard_helper.py",
           "profiles/*.json",
           "profiles/example*/**",
           "docs/*.md",

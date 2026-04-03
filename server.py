@@ -62,9 +62,22 @@ from src.utils.paths import get_project_root, get_resource_path
 # 固定工作目录为项目根，确保所有相对路径（profiles/, groups/, lorebooks/ 等）在打包 exe 下也能正确解析
 os.chdir(get_project_root())
 
+# 启动器子进程只输出 JSON / SETUP_EVENT，禁止混入 SPLASH 行（否则 Electron 无法 parse JSON）
+_WIZARD_ONLY_STDOUT = any(
+    x in sys.argv
+    for x in (
+        "--setup-status-json",
+        "--wizard-download",
+        "--wizard-apply-stt",
+        "--wizard-launch-gptsovits",
+        "--wizard-pip-uninstall",
+    )
+)
+
 # 尽早向 Electron 发送进度（模块导入前），避免启动界面长时间停在 0%
-sys.stdout.write("SPLASH:33:Loading Python modules...\n")
-sys.stdout.flush()
+if not _WIZARD_ONLY_STDOUT:
+    sys.stdout.write("SPLASH:33:Loading Python modules...\n")
+    sys.stdout.flush()
 
 from dotenv import load_dotenv
 load_dotenv()  # 加载 .env（GOOGLE_API_KEY 等）到 os.environ
@@ -402,6 +415,48 @@ if os.path.exists(static_dir):
 
 
 if __name__ == "__main__":
+    # ── Electron 启动器：在常驻服务启动前跑一次性子任务（与主进程隔离，减轻 Windows 文件锁问题）
+    if "--setup-status-json" in sys.argv:
+        import json as _json
+
+        config = AppConfig.load()
+        from src.api.setup_guide import build_setup_status_dict
+
+        print(_json.dumps(build_setup_status_dict(config), ensure_ascii=False))
+        raise SystemExit(0)
+    if "--wizard-download" in sys.argv:
+        _wi = sys.argv.index("--wizard-download")
+        _bid = sys.argv[_wi + 1] if len(sys.argv) > _wi + 1 else ""
+        _src = sys.argv[_wi + 2] if len(sys.argv) > _wi + 2 else "auto"
+        from src.api.setup_guide import run_wizard_download_cli
+
+        raise SystemExit(run_wizard_download_cli(_bid, _src))
+    if "--wizard-apply-stt" in sys.argv:
+        _wi = sys.argv.index("--wizard-apply-stt")
+        _mp = sys.argv[_wi + 1] if len(sys.argv) > _wi + 1 else ""
+        from src.api.setup_guide import wizard_apply_stt_model_cli
+
+        raise SystemExit(wizard_apply_stt_model_cli(_mp))
+    if "--wizard-launch-gptsovits" in sys.argv:
+        config = AppConfig.load()
+        from src.api.setup_guide import wizard_launch_gptsovits_cli
+
+        raise SystemExit(wizard_launch_gptsovits_cli(config))
+    if "--wizard-pip-uninstall" in sys.argv:
+        import json as _json
+
+        from src.api.setup_guide import run_wizard_pip_uninstall_cli
+
+        _raw = sys.stdin.read() or "{}"
+        try:
+            _body = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            print("SETUP_RESULT:" + _json.dumps({"ok": False, "errors": ["invalid json stdin"]}))
+            raise SystemExit(1)
+        raise SystemExit(
+            run_wizard_pip_uninstall_cli(_body.get("packages") or [], _body.get("dirs") or [])
+        )
+
     config = AppConfig.load()
     uvicorn.run(
         app,

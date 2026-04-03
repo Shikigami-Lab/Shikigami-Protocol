@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 import yaml
 from fastapi import APIRouter, Request
@@ -66,7 +69,25 @@ def _load_bundle_list() -> List[Dict[str, Any]]:
 
 def _bundle_dir(bundle: Dict[str, Any]) -> str:
     sub = (bundle.get("local_subdir") or bundle.get("id") or "model").strip().replace("..", "_")
-    return os.path.join(_models_root(), sub)
+    root = os.path.abspath(_models_root())
+    if sub in (".", ""):
+        return root
+    return os.path.join(root, sub)
+
+
+def _bundle_installed_on_disk(bundle: Dict[str, Any]) -> bool:
+    """Per-bundle ready state: optional single-file check, else directory heuristic."""
+    icf = (bundle.get("install_check_file") or "").strip().replace("\\", "/")
+    if icf:
+        # reject path traversal
+        if icf.startswith("/") or ".." in icf.split("/"):
+            return False
+        fp = os.path.join(_models_root(), *icf.split("/"))
+        try:
+            return os.path.isfile(fp) and os.path.getsize(fp) > 0
+        except OSError:
+            return False
+    return _dir_looks_downloaded(_bundle_dir(bundle))
 
 
 def _dir_looks_downloaded(path: str) -> bool:
@@ -556,9 +577,10 @@ def _tts_status(config) -> Dict[str, Any]:
     return result
 
 
-@router.get("/status")
-async def setup_status(request: Request) -> Dict[str, Any]:
-    config = request.app.state.config
+def build_setup_status_dict(config: Any) -> Dict[str, Any]:
+    """与 GET /api/setup/status 相同载荷；供 Electron 启动器子进程（--setup-status-json）使用。"""
+    import sysconfig
+
     mem = config.get_memory_config()
     emb = mem.get("embedding") or {}
     stt_cfg = getattr(config, "stt", None) or {}
@@ -578,9 +600,8 @@ async def setup_status(request: Request) -> Dict[str, Any]:
             "description_en": b.get("description_en", ""),
             "memory_local_model_hint": b.get("memory_local_model_hint", ""),
             "local_path": path,
-            "installed": _dir_looks_downloaded(path),
+            "installed": _bundle_installed_on_disk(b),
             "recommended": b.get("recommended", False),
-            # 下载来源字段，前端用来决定显示哪些按钮
             "repo_id": b.get("repo_id", ""),
             "modelscope_repo_id": b.get("modelscope_repo_id", ""),
             "direct_url": b.get("direct_url", ""),
@@ -594,7 +615,6 @@ async def setup_status(request: Request) -> Dict[str, Any]:
     lp = local_model if os.path.isabs(local_model) else os.path.join(os.getcwd(), local_model.replace("/", os.sep))
     local_on_disk = bool(os.path.isfile(lp)) or (_dir_looks_downloaded(lp) if os.path.isdir(lp) else False)
 
-    # 所有已知嵌入模型目录逐一探测（不只是 config 里指定的那一个）
     _known_embed_dirs = [
         ("bge_small_zh",   "models/bge-small-zh-v1.5"),
         ("minilm_en",      "models/all-MiniLM-L6-v2"),
@@ -604,7 +624,6 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         fp = os.path.join(os.getcwd(), rel)
         embed_installed[eid] = _dir_looks_downloaded(fp)
 
-    # STT：检查引擎就绪状态
     _stt_cfg_dict = stt_cfg if isinstance(stt_cfg, dict) else {}
     stt_ok, stt_reason = _stt_ready(_stt_cfg_dict)
     sv_cfg_path = (_stt_cfg_dict.get("model_path") or "").strip()
@@ -620,8 +639,6 @@ async def setup_status(request: Request) -> Dict[str, Any]:
 
     with _pip_install_lock:
         pip_st = dict(_pip_install_state)
-
-    import sysconfig
 
     profile_dir = os.path.join(get_project_root(), "profiles")
     profile_count = 0
@@ -671,6 +688,11 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         },
         "torch_load": torch_load,
     }
+
+
+@router.get("/status")
+async def setup_status(request: Request) -> Dict[str, Any]:
+    return build_setup_status_dict(request.app.state.config)
 
 
 @router.post("/verify")
@@ -753,8 +775,23 @@ def _github_mirror_urls(url: str) -> list:
     return mirrors
 
 
+def _direct_url_archive_suffix(u: str) -> str:
+    path = urlparse(u.split("?")[0]).path.lower()
+    if path.endswith(".tar.bz2"):
+        return ".tar.bz2"
+    if path.endswith(".tar.gz"):
+        return ".tar.gz"
+    if path.endswith(".zip"):
+        return ".zip"
+    if path.endswith(".onnx"):
+        return ".onnx"
+    if path.endswith(".bin"):
+        return ".bin"
+    return ".bin"
+
+
 def _download_worker_direct(bundle_id: str, url: str, local_dir: str) -> None:
-    """直链下载（支持 .tar.bz2 / .tar.gz / .zip）并解压到 local_dir。
+    """直链下载：压缩包解压到 local_dir；.onnx / .bin 等单文件写入该目录。
     若主 URL 失败，自动尝试 GitHub 镜像代理。"""
     global _download_state
     import urllib.request
@@ -762,11 +799,9 @@ def _download_worker_direct(bundle_id: str, url: str, local_dir: str) -> None:
     import zipfile
     import tempfile
 
+    tmp_path = ""
     try:
         os.makedirs(local_dir, exist_ok=True)
-        suffix = ".tar.bz2" if url.endswith(".tar.bz2") else \
-                 ".tar.gz"  if url.endswith(".tar.gz")  else \
-                 ".zip"     if url.endswith(".zip")      else ".bin"
 
         candidates = _github_mirror_urls(url)
         actual_url = None
@@ -798,13 +833,14 @@ def _download_worker_direct(bundle_id: str, url: str, local_dir: str) -> None:
         if actual_url is None:
             raise RuntimeError(f"所有下载源均不可用: {last_err}")
 
+        suffix = _direct_url_archive_suffix(actual_url)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         tmp.close()
         tmp_path = tmp.name
 
         # 流式下载，每 512KB 更新一次进度
         req = urllib.request.Request(actual_url, headers={"User-Agent": "shikigami/1.0"})
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=600) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
             chunk = 512 * 1024
@@ -821,28 +857,46 @@ def _download_worker_direct(bundle_id: str, url: str, local_dir: str) -> None:
                             _download_state["progress_pct"] = pct
                             _download_state["message"] = f"下载中 {downloaded // 1024 // 1024}MB / {total // 1024 // 1024}MB"
 
-        with _download_lock:
-            _download_state["message"] = "解压中…"
-            _download_state["progress_pct"] = 92
+        bundles = _load_bundle_list()
+        b = next((x for x in bundles if x.get("id") == bundle_id), None) or {}
+        save_as = (b.get("direct_save_as") or "").strip()
+        base_name = save_as or os.path.basename(urlparse(actual_url.split("?")[0]).path) or "download.bin"
 
-        parent = os.path.dirname(local_dir)
-        if suffix in (".tar.bz2", ".tar.gz"):
-            with tarfile.open(tmp_path, "r:*") as tf:
-                # 去掉顶层目录，直接解压到 local_dir
-                members = tf.getmembers()
-                top = members[0].name.split("/")[0] if members else ""
-                for m in members:
-                    parts = m.name.split("/", 1)
-                    rel = parts[1] if len(parts) > 1 and parts[0] == top else m.name
-                    if not rel:
-                        continue
-                    m.name = rel
-                    tf.extract(m, local_dir)
-        elif suffix == ".zip":
-            with zipfile.ZipFile(tmp_path, "r") as zf:
-                zf.extractall(local_dir)
+        if suffix in (".tar.bz2", ".tar.gz", ".zip"):
+            with _download_lock:
+                _download_state["message"] = "解压中…"
+                _download_state["progress_pct"] = 92
+            if suffix in (".tar.bz2", ".tar.gz"):
+                with tarfile.open(tmp_path, "r:*") as tf:
+                    members = tf.getmembers()
+                    top = members[0].name.split("/")[0] if members else ""
+                    for m in members:
+                        parts = m.name.split("/", 1)
+                        rel = parts[1] if len(parts) > 1 and parts[0] == top else m.name
+                        if not rel:
+                            continue
+                        m.name = rel
+                        tf.extract(m, local_dir)
+            else:
+                with zipfile.ZipFile(tmp_path, "r") as zf:
+                    zf.extractall(local_dir)
+            os.unlink(tmp_path)
+            tmp_path = ""
+        else:
+            with _download_lock:
+                _download_state["message"] = "保存文件…"
+                _download_state["progress_pct"] = 95
+            os.makedirs(local_dir, exist_ok=True)
+            dest = os.path.join(local_dir, base_name)
+            try:
+                if os.path.isfile(dest):
+                    os.unlink(dest)
+                shutil.move(tmp_path, dest)
+            except OSError:
+                shutil.copy2(tmp_path, dest)
+                os.unlink(tmp_path)
+            tmp_path = ""
 
-        os.unlink(tmp_path)
         with _download_lock:
             _download_state["phase"] = "success"
             _download_state["progress_pct"] = 100
@@ -850,10 +904,11 @@ def _download_worker_direct(bundle_id: str, url: str, local_dir: str) -> None:
             _download_state["error"] = None
     except Exception as e:
         logger.exception("[setup] direct download failed bundle=%s", bundle_id)
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
         with _download_lock:
             _download_state["phase"] = "error"
             _download_state["error"] = str(e)
@@ -1119,6 +1174,173 @@ async def start_download(body: DownloadBody) -> Dict[str, Any]:
 async def download_status() -> Dict[str, Any]:
     with _download_lock:
         return dict(_download_state)
+
+
+def _emit_setup_event(obj: Dict[str, Any]) -> None:
+    sys.stdout.write("SETUP_EVENT:" + json.dumps(obj, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def run_wizard_download_cli(bundle_id: str, source: str) -> int:
+    """阻塞下载并向前端打印 SETUP_EVENT（供 Electron 启动器子进程）。"""
+    bundles = _load_bundle_list()
+    b = next((x for x in bundles if x.get("id") == bundle_id), None)
+    if not b:
+        _emit_setup_event({"type": "download", "phase": "error", "error": "unknown bundle", "bundle_id": bundle_id})
+        return 1
+
+    local_dir = _bundle_dir(b)
+    direct_url = (b.get("direct_url") or "").strip()
+    repo_id = (b.get("repo_id") or "").strip()
+    ms_repo_id = (b.get("modelscope_repo_id") or "").strip()
+    size_hint = (b.get("size_hint") or "").strip()
+    source_used = source or "auto"
+    thread: Optional[threading.Thread] = None
+
+    if source_used == "direct":
+        if not direct_url:
+            _emit_setup_event({"type": "download", "phase": "error", "error": "no direct_url"})
+            return 1
+        thread = threading.Thread(
+            target=_download_worker_direct,
+            args=(bundle_id, direct_url, local_dir),
+            daemon=True,
+        )
+    elif source_used == "hf":
+        if not repo_id:
+            _emit_setup_event({"type": "download", "phase": "error", "error": "no repo_id"})
+            return 1
+        thread = threading.Thread(
+            target=_download_worker,
+            args=(bundle_id, repo_id, local_dir),
+            daemon=True,
+        )
+    elif source_used == "modelscope":
+        if not ms_repo_id:
+            _emit_setup_event({"type": "download", "phase": "error", "error": "no modelscope_repo_id"})
+            return 1
+        try:
+            import modelscope  # noqa: F401
+        except ModuleNotFoundError:
+            _emit_setup_event({
+                "type": "download",
+                "phase": "error",
+                "error": "未安装 modelscope 依赖",
+                "code": "need_modelscope",
+            })
+            return 1
+        thread = threading.Thread(
+            target=_download_worker_modelscope,
+            args=(bundle_id, ms_repo_id, local_dir, size_hint),
+            daemon=True,
+        )
+    else:
+        if direct_url:
+            thread = threading.Thread(
+                target=_download_worker_direct,
+                args=(bundle_id, direct_url, local_dir),
+                daemon=True,
+            )
+        elif repo_id:
+            thread = threading.Thread(
+                target=_download_worker,
+                args=(bundle_id, repo_id, local_dir),
+                daemon=True,
+            )
+        elif ms_repo_id:
+            try:
+                import modelscope  # noqa: F401
+            except ModuleNotFoundError:
+                _emit_setup_event({
+                    "type": "download",
+                    "phase": "error",
+                    "error": "未安装 modelscope 依赖，且该模型包无 HF repo_id 可回退",
+                })
+                return 1
+            thread = threading.Thread(
+                target=_download_worker_modelscope,
+                args=(bundle_id, ms_repo_id, local_dir, size_hint),
+                daemon=True,
+            )
+        else:
+            _emit_setup_event({"type": "download", "phase": "error", "error": "no download source"})
+            return 1
+
+    with _download_lock:
+        if _download_state["phase"] == "running":
+            _emit_setup_event({"type": "download", "phase": "error", "error": "已有任务进行中"})
+            return 1
+        _download_state["phase"] = "running"
+        _download_state["bundle_id"] = bundle_id
+        _download_state["progress_pct"] = 0
+        _download_state["message"] = "启动…"
+        _download_state["error"] = None
+
+    assert thread is not None
+    thread.start()
+
+    while thread.is_alive():
+        with _download_lock:
+            st = dict(_download_state)
+        st["type"] = "download"
+        _emit_setup_event(st)
+        time.sleep(0.35)
+
+    with _download_lock:
+        st = dict(_download_state)
+    st["type"] = "download"
+    _emit_setup_event(st)
+    return 0 if st.get("phase") == "success" else 1
+
+
+def wizard_apply_stt_model_cli(model_path: str) -> int:
+    from src.api.settings_ext import _load_yaml, _save_yaml
+
+    path = (model_path or "").strip()
+    y, data = _load_yaml()
+    if "stt" not in data:
+        data["stt"] = {}
+    data["stt"]["model_path"] = path
+    _save_yaml(y, data)
+    return 0
+
+
+def wizard_launch_gptsovits_cli(config: Any) -> int:
+    import platform
+
+    is_win = platform.system() == "Windows"
+    script = "scripts/start_gptsovits.bat" if is_win else "scripts/start_gptsovits.sh"
+    if not os.path.isfile(script):
+        return 1
+    script_abs = os.path.abspath(script)
+    env = os.environ.copy()
+    try:
+        gpt_dir = (config.tts_config.get("gpt_sovits") or {}).get("dir", "").strip()
+        if gpt_dir:
+            env["GPTSOVITS_DIR"] = os.path.abspath(gpt_dir)
+    except Exception:
+        pass
+    try:
+        if is_win:
+            subprocess.Popen(["cmd", "/c", "start", "", script_abs], shell=False, cwd=os.getcwd(), env=env)
+        else:
+            subprocess.Popen(
+                ["bash", script_abs],
+                cwd=os.getcwd(),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return 0
+    except OSError:
+        return 1
+
+
+def run_wizard_pip_uninstall_cli(packages: List[str], dirs: List[str]) -> int:
+    r = run_pip_uninstall_sync(packages, dirs)
+    sys.stdout.write("SETUP_RESULT:" + json.dumps(r, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+    return 0 if r.get("ok") else 1
 
 
 # ─── Pip install / uninstall ─────────────────────────────────────────────────
@@ -1550,43 +1772,31 @@ async def pip_install_status() -> Dict[str, Any]:
         return dict(_pip_install_state)
 
 
-@router.post("/pip-uninstall")
-async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
-    """Uninstall pip packages and optionally remove model dirs (synchronous).
-
-    - **Source / .venv**: remove matching site-packages trees first (covers broken dist-info), then
-      ``python -m pip uninstall -y``. If WinError 5 persists, torch native DLLs are likely still
-      mapped—fully quit the app and uninstall again (or delete/recreate the venv).
-    - **Frozen (packaged exe)**: wheels are installed with ``pip install --target user_packages``.
-      A plain ``pip uninstall`` often does not touch that directory or has no uninstall record there,
-      so we remove matching top-level folders / ``*.dist-info`` under ``user_packages`` first, then
-      run pip as a best-effort cleanup. Also clears ``sys.modules`` so the UI does not still see imports.
-    """
+def run_pip_uninstall_sync(packages: List[str], dirs: List[str]) -> Dict[str, Any]:
+    """与 POST /api/setup/pip-uninstall 相同逻辑；供启动器子进程与 HTTP 共用。"""
     import gc
     import shutil as _shutil
     from src.utils.paths import get_project_root
 
     errors: list = []
-    names = [_pip_spec_base(p) for p in (body.packages or []) if (p or "").strip()]
+    names = [_pip_spec_base(p) for p in (packages or []) if (p or "").strip()]
 
-    # 1. pip / user_packages 卸载
     if names:
         if getattr(sys, "frozen", False):
             exe_dir = os.path.dirname(os.path.abspath(sys.executable))
             target_dir = os.path.join(exe_dir, "user_packages")
-            _clear_sys_modules_for_packages(body.packages)
+            _clear_sys_modules_for_packages(packages)
             gc.collect()
-            fs_err = _remove_frozen_target_packages(target_dir, body.packages)
+            fs_err = _remove_frozen_target_packages(target_dir, packages)
             errors.extend(fs_err)
             embed_python = os.path.join(exe_dir, "python_embed", "python.exe")
             if not os.path.isfile(embed_python):
                 embed_python = _shutil.which("python3") or _shutil.which("python") or ""
-            # 对 embed 环境再跑一次 pip uninstall（对非 target 安装可能有效；失败可忽略）
             if embed_python:
                 cmd = [embed_python, "-m", "pip", "uninstall", "-y"] + names
                 subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            _clear_sys_modules_for_packages(body.packages)
-            for spec in body.packages:
+            _clear_sys_modules_for_packages(packages)
+            for spec in packages:
                 if _frozen_pkg_files_still_present(target_dir, spec):
                     pb = _pip_spec_base(spec)
                     if _pip_uninstall_fs_error_covers_pkg(fs_err, pb):
@@ -1595,24 +1805,20 @@ async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
                         {"key": "setupPipUninstallResidual", "pkg": pb, "dir": target_dir}
                     )
         else:
-            # For source/.venv, pip uninstall can fail or "skip not installed" when dist-info is missing.
-            # Remove matching files first so /api/setup/status reflects the real disk state.
-            _clear_sys_modules_for_packages(body.packages)
+            _clear_sys_modules_for_packages(packages)
             gc.collect()
-            fs_err = _remove_source_site_packages_top_level(body.packages)
+            fs_err = _remove_source_site_packages_top_level(packages)
             errors.extend(fs_err)
             cmd = [sys.executable, "-m", "pip", "uninstall", "-y"] + names
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            _clear_sys_modules_for_packages(body.packages)
+            _clear_sys_modules_for_packages(packages)
             if result.returncode != 0:
                 tail = (result.stderr or result.stdout or "")[-500:]
                 errors.append(tail or "pip uninstall failed")
 
-    # 2. 删除模型目录
     root = get_project_root()
-    for rel_dir in (body.dirs or []):
+    for rel_dir in (dirs or []):
         abs_dir = os.path.normpath(os.path.join(root, rel_dir))
-        # 安全校验：只允许删 models/ 子目录
         if not abs_dir.startswith(os.path.join(root, "models")):
             errors.append(f"Refused to delete non-models directory: {rel_dir}")
             continue
@@ -1628,6 +1834,21 @@ async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
     if errors:
         return {"ok": False, "errors": errors}
     return {"ok": True}
+
+
+@router.post("/pip-uninstall")
+async def pip_uninstall(body: PipUninstallBody) -> Dict[str, Any]:
+    """Uninstall pip packages and optionally remove model dirs (synchronous).
+
+    - **Source / .venv**: remove matching site-packages trees first (covers broken dist-info), then
+      ``python -m pip uninstall -y``. If WinError 5 persists, torch native DLLs are likely still
+      mapped—fully quit the app and uninstall again (or delete/recreate the venv).
+    - **Frozen (packaged exe)**: wheels are installed with ``pip install --target user_packages``.
+      A plain ``pip uninstall`` often does not touch that directory or has no uninstall record there,
+      so we remove matching top-level folders / ``*.dist-info`` under ``user_packages`` first, then
+      run pip as a best-effort cleanup. Also clears ``sys.modules`` so the UI does not still see imports.
+    """
+    return run_pip_uninstall_sync(list(body.packages or []), list(body.dirs or []))
 
 
 # ─── Launch GPT-SoVITS ───────────────────────────────────────────────────────

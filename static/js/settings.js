@@ -251,6 +251,8 @@ const SettingsMixin = {
       serverAddress: '',
       systemSaving: false,
       systemEnvSaving: false,
+      uiPrefsShowLauncher: true,
+      uiPrefsSaving: false,
       autoSaveState: null,   // null | 'saving' | 'saved'
       _autoSaveStateTimer: null,
       _systemFormLoaded: false,
@@ -599,6 +601,23 @@ const SettingsMixin = {
       if (!this.selectedProfileId) return this.memoryGlobalForm.daily_forgetting_enabled;
       const v = this.memoryProfileForm.daily_forgetting_enabled;
       return v === null || v === undefined ? this.memoryGlobalForm.daily_forgetting_enabled : !!v;
+    },
+
+    /** 入门页教程：与 /api/setup/status 的 bundles 一致 */
+    onboardingMemBundles() {
+      const g = this.setupGuide;
+      if (!g || !Array.isArray(g.bundles)) return [];
+      return g.bundles.filter((x) => x.category === 'memory' || x.category === 'embedding');
+    },
+    onboardingTtsBundles() {
+      const g = this.setupGuide;
+      if (!g || !Array.isArray(g.bundles)) return [];
+      return g.bundles.filter((x) => x.category === 'tts');
+    },
+    onboardingSttBundle() {
+      const g = this.setupGuide;
+      if (!g || !Array.isArray(g.bundles)) return null;
+      return g.bundles.find((x) => x.id === 'sherpa_sense_voice') || null;
     },
 
     // ── Persona canvas header computeds ──
@@ -997,6 +1016,22 @@ const SettingsMixin = {
       if (active && typeof active.blur === 'function') active.blur();
     },
 
+    onboardingBundleTitle(b) {
+      if (!b) return '';
+      void this.locale;
+      return this.locale === 'en'
+        ? (b.title_en || b.title_zh || '')
+        : (b.title_zh || b.title_en || '');
+    },
+    onboardingBundleDesc(b) {
+      if (!b) return '';
+      void this.locale;
+      const raw = this.locale === 'en'
+        ? (b.description_en || b.description_zh || '')
+        : (b.description_zh || b.description_en || '');
+      return raw;
+    },
+
     async loadSetupGuide() {
       this.setupGuideLoading = true;
       try {
@@ -1032,353 +1067,11 @@ const SettingsMixin = {
       }
     },
 
-    async startSetupDownload(bundleId, source) {
-      try {
-        // User explicitly clicked ModelScope: if modelscope isn't installed, install first then retry.
-        if (source === 'modelscope' && this.setupGuide && this.setupGuide.modelscope_installed === false) {
-          await this.installModelScope();
-          if (this.setupGuide && this.setupGuide.modelscope_installed === false) return;
-        }
-        const r = await fetch(getBaseUrl() + API_PATHS.setupDownload(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bundle: bundleId, source: source || 'auto' }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          if (source === 'modelscope' && (j.code === 'need_modelscope' || /modelscope/i.test(j.error || ''))) {
-            await this.installModelScope();
-            if (this.setupGuide && this.setupGuide.modelscope_installed) {
-              return await this.startSetupDownload(bundleId, source);
-            }
-            return;
-          }
-          window.alert(j.error || r.statusText || '下载启动失败');
-          return;
-        }
-      } catch (e) {
-        window.alert(String(e));
-        return;
-      }
-      if (this.setupDownloadPollId) clearInterval(this.setupDownloadPollId);
-      this.setupDownloadPollId = setInterval(async () => {
-        try {
-          const s = await fetch(getBaseUrl() + API_PATHS.setupDownloadStatus());
-          const d = await s.json();
-          if (this.setupGuide) this.setupGuide.download = d;
-          if (d.phase !== 'running') {
-            clearInterval(this.setupDownloadPollId);
-            this.setupDownloadPollId = null;
-            await this.loadSetupGuide();
-            if (d.phase === 'error' && d.error) window.alert(d.error);
-          }
-        } catch (_) {}
-      }, 800);
-    },
-
-    async pipUninstall(packages, dirs, confirmKey) {
-      const msg = this.t(confirmKey || 'confirmUninstallPackage');
-      if (!window.confirm(msg)) return;
-      if (!this.setupGuide) this.setupGuide = {};
-      this.setupGuide.pip_install = { phase: 'running', message: this.t('uninstalling'), error: null, target: 'uninstall' };
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-uninstall', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages, dirs: dirs || [] }),
-        });
-        const d = await res.json();
-        if (d.ok) {
-          this.setupGuide.pip_install = { phase: 'success', message: this.t('uninstallDone'), error: null, target: 'uninstall' };
-          this.showToast(this.t('uninstallDone'), 'success');
-        } else {
-          const errMsg = this.formatPipErrorsList(d.errors) || this.t('uninstallFailed');
-          this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: errMsg, target: 'uninstall' };
-          this.showToast(errMsg, 'error');
-        }
-        await this.loadSetupGuide();
-      } catch (e) {
-        this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: e.message, target: 'uninstall' };
-        this.showToast(this.t('uninstallFailed') + ': ' + e.message, 'error');
-      }
-    },
-
-    async installModelScope() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['modelscope'], target: 'modelscope' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            await this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-
-    async uninstallThenInstallTorchCuda() {
-      if (!window.confirm(this.t('confirmUninstallTorchForCuda'))) return;
-      if (!this.setupGuide) this.setupGuide = {};
-      // Step 1: uninstall
-      this.setupGuide.pip_install = { phase: 'running', message: this.t('uninstalling') + ' torch…', error: null, target: 'torch_cuda' };
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-uninstall', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['torch', 'torchvision', 'torchaudio'], dirs: [] }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          const errMsg = this.formatPipErrorsList(d.errors) || this.t('uninstallFailed');
-          this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: errMsg, target: 'torch_cuda' };
-          return;
-        }
-      } catch (e) {
-        this.setupGuide.pip_install = { phase: 'error', message: this.t('uninstallFailed'), error: e.message, target: 'torch_cuda' };
-        return;
-      }
-      // Step 2: install CUDA build
-      await this.installTorchCuda();
-    },
-
-    async installTorchCuda() {
-      const indexUrl = (this.setupGuide.cuda_info && this.setupGuide.cuda_info.recommended_url)
-        || 'https://download.pytorch.org/whl/cu124';
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            packages: ['torch', 'torchvision', 'torchaudio'],
-            index_url: indexUrl,
-            target: 'torch_cuda',
-          }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败', target: 'torch_cuda' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null, target: 'torch_cuda' };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            await this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message, target: 'torch_cuda' };
-      }
-    },
-
-    async installQwenTts() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['qwen-tts>=0.0.1', 'soundfile>=0.12.0'], target: 'qwen_tts' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            await this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-
-    setupBundleTitle(b) {
-      return this.locale === 'en' ? (b.title_en || b.title_zh) : (b.title_zh || b.title_en);
-    },
-    setupBundleDesc(b) {
-      return this.locale === 'en' ? (b.description_en || b.description_zh) : (b.description_zh || b.description_en);
-    },
-
     openUrl(url) {
       if (window.electronAPI && window.electronAPI.openExternal) {
         window.electronAPI.openExternal(url);
       } else {
         window.open(url, '_blank', 'noopener');
-      }
-    },
-
-    async launchGptSovits() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/launch-gptsovits', { method: 'POST' });
-        const d = await res.json();
-        if (d.ok) this.showToast('GPT-SoVITS 启动命令已发送', 'success');
-        else this.showToast(d.error || '启动失败', 'error');
-        setTimeout(() => this.loadSetupGuide(), 2500);
-      } catch (e) { this.showToast('启动失败: ' + e.message, 'error'); }
-    },
-    async installKokoro() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['kokoro-onnx', 'misaki[zh]'], target: 'kokoro' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        // Immediately reflect running state so button disables
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        // Poll until done, updating reactive state each tick
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-    async installKokoroJa() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['misaki[ja]'], target: 'kokoro_ja' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败', target: 'kokoro_ja' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null, target: 'kokoro_ja' };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message, target: 'kokoro_ja' };
-      }
-    },
-
-    async selectSTTModel(path) {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/apply-stt-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_path: path }),
-        });
-        const d = await res.json();
-        if (d.ok) this.showToast(path ? ('STT 模型：' + path) : 'STT 模型：自动', 'success');
-        else this.showToast(d.error || '更新失败', 'error');
-      } catch (e) { this.showToast('更新失败: ' + e.message, 'error'); }
-    },
-
-    async installSherpaOnnx() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['sherpa-onnx', 'soundfile'], target: 'sherpa_onnx' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-
-    async installAiMemory() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['chromadb>=0.5.0', 'transformers>=4.46.0,<5.0.0', 'sentence-transformers>=3.0.0', 'rank-bm25>=0.2.2'], target: 'ai_memory' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
       }
     },
 
@@ -1416,6 +1109,11 @@ const SettingsMixin = {
       this.currentTheme = name;
       document.documentElement.setAttribute('data-theme', name);
       localStorage.setItem('theme', name);
+      fetch(getBaseUrl() + '/api/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: name }),
+      }).catch(() => {});
     },
 
     /* ─────────────── Bubble Size ─────────────── */
@@ -3431,7 +3129,29 @@ const SettingsMixin = {
           this.systemEnvForm.proxy_url = data.proxy_url || '';
         }
       } catch (_) {}
+      try {
+        const res = await fetch(getBaseUrl() + '/api/preferences');
+        if (res.ok) {
+          const prefs = await res.json();
+          this.uiPrefsShowLauncher = prefs.show_startup_launcher !== false;
+        }
+      } catch (_) {}
       this.$nextTick(() => { this._systemFormLoaded = true; });
+    },
+
+    async saveUiPrefsLauncher() {
+      if (this.uiPrefsSaving) return;
+      this.uiPrefsSaving = true;
+      try {
+        await fetch(getBaseUrl() + '/api/preferences', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ show_startup_launcher: !!this.uiPrefsShowLauncher }),
+        });
+      } catch (_) {}
+      finally {
+        this.uiPrefsSaving = false;
+      }
     },
 
     async saveSystemConfig(silent = false) {

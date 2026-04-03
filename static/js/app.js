@@ -277,8 +277,26 @@ const App = {
           localStorage.setItem('locale', prefs.locale);
           document.documentElement.lang = prefs.locale;
         }
+        if (Object.prototype.hasOwnProperty.call(prefs, 'theme') && typeof prefs.theme === 'string') {
+          document.documentElement.setAttribute('data-theme', prefs.theme);
+          localStorage.setItem('theme', prefs.theme);
+        }
       }
     } catch (_) {}
+
+    if (!Object.prototype.hasOwnProperty.call(prefs, 'theme') || typeof prefs.theme !== 'string') {
+      const ts = localStorage.getItem('theme');
+      if (ts !== null) {
+        document.documentElement.setAttribute('data-theme', ts);
+        try {
+          await fetch(getBaseUrl() + '/api/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ theme: ts }),
+          });
+        } catch (_) {}
+      }
+    }
 
     if (prefs.locale !== 'zh' && prefs.locale !== 'en') {
       const stored = localStorage.getItem('locale');
