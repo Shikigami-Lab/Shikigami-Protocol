@@ -117,19 +117,15 @@ python server.py
 
 ## 配置 API Key
 
-编辑项目根目录的 `.env`，至少填入一个 LLM：
+**推荐**：启动应用后，在 **设置 → 模型** 里直接填写 API Key，自动保存。
+
+也可在启动前编辑项目根目录的 `.env`（适合 Docker / 无界面部署）：
 
 ```env
 GEMINI_API_KEY=你的密钥
 # 或本地 Ollama（无需 Key）：
 # OLLAMA_LOCAL_API_KEY=ollama
 ```
-
-也可在 UI 启动后通过 **设置 → 模型** 直接填写，会自动写回 `.env`。
-
-### PUBLIC_MODE（公开分发 / 受限构建）
-
-面向终端用户的安装包可在环境中设置 `PUBLIC_MODE=true`（见 `.env.example`），用于限制情绪键集合等「公开树」行为；**日常自用源码运行一般不要开启**。服务器侧在 `server.py` 中读取该变量并写入 `app.state.public_mode`。
 
 ---
 

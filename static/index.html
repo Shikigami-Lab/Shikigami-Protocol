@@ -492,7 +492,7 @@
             </div>
           </div>
         </div>
-        <button class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')">⚙</button>
+        <button class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
       </div>
     </header>
 
@@ -901,31 +901,23 @@
 
       <!-- ── Tab: 入门 / 新手引导 ── -->
       <div v-if="activeTab === 'onboarding'" class="settings-tab-content setup-guide-tab">
-        <p class="setup-guide-lead">{{ t('onboardingLead') }}</p>
-        <p class="setup-guide-doc-links">
-          <span class="setup-guide-doc-intro">{{ t('onboardingDocLinksIntro') }}</span>
-          <a :href="userDocUrl('GETTING_STARTED')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenGettingStarted') }}</a>
-          <span class="setup-guide-doc-sep">·</span>
-          <a :href="userDocUrl('SETUP_FIRST_RUN')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenSetupFirstRun') }}</a>
-          <span class="setup-guide-doc-sep">·</span>
-          <a :href="userDocUrl('profile_prompts')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenProfilePrompts') }}</a>
-          <span class="setup-guide-doc-sep">·</span>
-          <a :href="userDocUrl('ARCHITECTURE_REFERENCE')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenMinimum') }}</a>
-        </p>
-
-        <p class="setup-guide-tab-blurb">{{ t('onboardingTabBlurb') }}</p>
-
-        <div class="setup-guide-section setup-guide-checklist-section">
-          <h3 class="setup-guide-h3">{{ t('onboardingChecklistTitle') }}</h3>
-          <ol class="setup-guide-checklist">
-            <li v-html="t('onboardingCheck1')"></li>
-            <li v-html="t('onboardingCheck2')"></li>
-            <li v-html="t('onboardingCheck3')"></li>
-            <li v-html="t('onboardingCheck4')"></li>
-            <li v-html="t('onboardingCheck5')"></li>
-            <li v-html="t('onboardingCheck6')"></li>
-          </ol>
-        </div>
+        <h3 class="setup-guide-h3 setup-guide-shortpath-heading">{{ t('onboardingShortPathTitle') }}</h3>
+        <ol class="setup-guide-shortpath">
+          <li>
+            <span>{{ t('onboardingShortPathStep1') }}</span>
+            <div class="setup-shortpath-actions">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'llm'">{{ t('onboardingJumpModels') }}</button>
+            </div>
+          </li>
+          <li>
+            <span>{{ t('onboardingShortPathStep2') }}</span>
+            <div class="setup-shortpath-actions">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'profiles'">{{ t('onboardingJumpProfiles') }}</button>
+            </div>
+          </li>
+          <li>{{ t('onboardingShortPathStep3') }}</li>
+        </ol>
+        <p class="setup-guide-packaged-note" v-html="t('onboardingPackagedNote')"></p>
 
         <div class="setup-guide-section" v-if="setupGuide">
           <h3 class="setup-guide-h3">{{ t('onboardingQuickTitle') }}</h3>
@@ -939,16 +931,16 @@
               <span class="setup-quick-dot">{{ setupGuide.profile_count > 0 ? '✓' : '○' }}</span>
               <span>{{ t('onboardingQuickProfiles') }} ({{ setupGuide.profile_count }})</span>
             </div>
-            <div class="setup-quick-item" :class="{ ok: setupGuide.chromadb_installed }">
-              <span class="setup-quick-dot">{{ setupGuide.chromadb_installed ? '✓' : '○' }}</span>
-              <span>ChromaDB</span>
+            <div class="setup-quick-item optional" :class="{ ok: setupGuide.chromadb_installed }">
+              <span class="setup-quick-dot">{{ setupGuide.chromadb_installed ? '✓' : '–' }}</span>
+              <span>{{ t('onboardingQuickChromaDB') }}</span>
             </div>
-            <div class="setup-quick-item" :class="{ ok: !setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en)) }">
-              <span class="setup-quick-dot">{{ (!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? '✓' : '○' }}</span>
+            <div class="setup-quick-item optional" :class="{ ok: !setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en)) }">
+              <span class="setup-quick-dot">{{ (!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? '✓' : '–' }}</span>
               <span>{{ t('onboardingQuickEmbed') }}</span>
             </div>
-            <div class="setup-quick-item" :class="{ ok: setupGuide.stt_ready }">
-              <span class="setup-quick-dot">{{ setupGuide.stt_ready ? '✓' : '○' }}</span>
+            <div class="setup-quick-item optional" :class="{ ok: setupGuide.stt_ready }">
+              <span class="setup-quick-dot">{{ setupGuide.stt_ready ? '✓' : '–' }}</span>
               <span>{{ t('onboardingQuickStt') }}</span>
             </div>
           </div>
@@ -960,10 +952,40 @@
             <button type="button" class="s-btn s-btn-primary" :disabled="setupGuideLoading" @click="loadSetupGuide">{{ t('onboardingRefresh') }}</button>
           </div>
         </div>
-        <div v-else-if="setupGuideLoading" class="muted">{{ t('onboardingLoading') }}</div>
+        <p v-else-if="setupGuideLoading" class="muted setup-guide-inline-loading">{{ t('onboardingLoading') }}</p>
+
+        <p class="setup-guide-lead">{{ t('onboardingLead') }}</p>
+        <p class="setup-guide-doc-links">
+          <span class="setup-guide-doc-intro">{{ t('onboardingDocLinksIntro') }}</span>
+          <a :href="userDocUrl('GETTING_STARTED')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenGettingStarted') }}</a>
+          <span class="setup-guide-doc-sep">·</span>
+          <a :href="userDocUrl('SETUP_FIRST_RUN')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenSetupFirstRun') }}</a>
+          <span class="setup-guide-doc-sep">·</span>
+          <a :href="userDocUrl('profile_prompts')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenProfilePrompts') }}</a>
+        </p>
+        <p class="setup-guide-doc-links setup-guide-doc-links-dev">
+          <span>{{ t('onboardingDocLinksDevIntro') }}</span>
+          <a :href="userDocUrl('ARCHITECTURE_REFERENCE')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenMinimum') }}</a>
+        </p>
+
+        <div class="setup-guide-section setup-guide-checklist-section">
+          <h3 class="setup-guide-h3">{{ t('onboardingChecklistTitle') }}</h3>
+          <ol class="setup-guide-checklist">
+            <li v-html="t('onboardingCheck1')"></li>
+            <li v-html="t('onboardingCheck2')"></li>
+            <li v-html="t('onboardingCheck3')"></li>
+            <li v-html="t('onboardingCheck4')"></li>
+            <li v-html="t('onboardingCheck5')"></li>
+            <li v-html="t('onboardingCheck6')"></li>
+          </ol>
+        </div>
+
+        <div class="setup-guide-optional-wrap" v-if="setupGuide">
+          <h3 class="setup-guide-h3">{{ t('onboardingOptionalAdvancedTitle') }}</h3>
+          <p class="setup-guide-advanced-hint muted">{{ t('onboardingOptionalAdvancedHint') }}</p>
 
         <!-- 第一步：网络与下载环境配置 -->
-        <div class="setup-guide-section" v-if="setupGuide">
+        <div class="setup-guide-section">
           <h3 class="setup-guide-h3">{{ t('onboardingNetworkTitle') }}</h3>
           <p class="muted" style="margin-bottom:12px;">{{ t('onboardingNetworkDesc') }}</p>
 
@@ -992,7 +1014,7 @@
         </div>
 
         <!-- 第二步：AI 记忆模块 -->
-        <div class="setup-guide-section" v-if="setupGuide">
+        <div class="setup-guide-section">
           <h3 class="setup-guide-h3">{{ t('onboardingAiMemoryTitle') }}</h3>
           
           <!-- 组件A：依赖库 -->
@@ -1019,7 +1041,7 @@
           </div>
 
           <!-- 组件B：Embedding 模型 -->
-          <div class="setup-tts-card" v-if="setupGuide && setupGuide.bundles && setupGuide.bundles.some(b => b.category === 'embedding')" :class="{ active: setupGuide.ai_memory_installed }">
+          <div class="setup-tts-card" v-if="setupGuide.bundles && setupGuide.bundles.some(b => b.category === 'embedding')" :class="{ active: setupGuide.ai_memory_installed }">
             <div class="setup-tts-head">
               <span class="setup-tts-name">2. {{ t('onboardingAiMemoryModels') }} (Embedding Models)</span>
             </div>
@@ -1057,7 +1079,7 @@
         </div>
 
         <!-- 第三步：TTS 设置区 -->
-        <div class="setup-guide-section" v-if="setupGuide && setupGuide.tts">
+        <div class="setup-guide-section" v-if="setupGuide.tts">
           <h3 class="setup-guide-h3">{{ t('onboardingTtsTitle') }}</h3>
           <p class="muted" style="margin-bottom:8px;">{{ t('onboardingTtsActive') }}：<strong>{{ setupGuide.tts.active }}</strong></p>
 
@@ -1264,7 +1286,7 @@
         </div>
 
         <!-- STT 引擎选择 -->
-        <div class="setup-guide-section" v-if="setupGuide">
+        <div class="setup-guide-section">
           <h3 class="setup-guide-h3">{{ t('onboardingSttTitle') }}</h3>
           <!-- sherpa-onnx SenseVoice -->
           <div class="setup-tts-card active">
@@ -1328,6 +1350,8 @@
               </div>
             </div>
           </div>
+
+        </div>
 
         </div>
 

@@ -320,7 +320,7 @@ When the app is running, open `/docs-viewer.html?doc=GETTING_STARTED.en.md` dire
 
 Need help, or want to share your custom persona? Join our community:
 
-- [🗣️ GitHub Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) (**Recommended** for Q&A, general chat, and persona sharing)
+- [🗣️ GitHub Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) (**Recommended** for Q&A and general chat)
 - [🐛 GitHub Issues](https://github.com/Shikigami-Lab/Shikigami-Protocol/issues) (For bug reports and feature requests only)
 
 <a id="license-community"></a>
@@ -331,7 +331,7 @@ This repository is licensed under [**AGPL-3.0**](LICENSE).
 
 - **Local / self-hosted use**: free to use, modify, and redistribute under AGPL terms.
 - **Network service / SaaS**: if you offer the modified program over a network, you must comply with AGPL source-offer obligations.
-- **Contributing**: PRs welcome — demo GIFs/screenshots, example SFW persona cards, translations, bug reports (OS + Python version + logs). Read [CONTRIBUTING.md](CONTRIBUTING.md) first and sign off each commit with `git commit -s` per [DCO 1.1](DCO.md).
+- **Contributing**: PRs welcome — demo GIFs/screenshots, translations, bug reports (OS + Python version + logs). Read [CONTRIBUTING.md](CONTRIBUTING.md) first and sign off each commit with `git commit -s` per [DCO 1.1](DCO.md).
 - **Security**: Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 
 *This section is a summary, not legal advice; the [LICENSE](LICENSE) and [DCO](DCO.md) texts prevail.*

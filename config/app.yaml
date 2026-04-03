@@ -96,7 +96,7 @@ engines:
 secondary_models:
   analysis:
     enabled: true
-    preset: "Gemini"
+    preset: ""
   reflection:
     enabled: true
     primary_preset: "Gemini"

@@ -117,19 +117,15 @@ python server.py
 
 ## Configuring API keys
 
-Edit `.env` in the project root — add at least one LLM:
+**Recommended**: after launching the app, go to **Settings → LLM** and type in your API key — it saves automatically.
+
+Alternatively, edit `.env` in the project root before launching (useful for Docker / headless deployments):
 
 ```env
 GEMINI_API_KEY=your_key_here
 # Local Ollama (no key needed):
 # OLLAMA_LOCAL_API_KEY=ollama
 ```
-
-You can also fill these in via **Settings → LLM** in the UI after startup; the UI writes back to `.env` automatically.
-
-### PUBLIC_MODE (public distribution builds)
-
-Installers aimed at end users may set `PUBLIC_MODE=true` in `.env` (see `.env.example`) to enable stricter, public-tree-safe behavior (e.g. emotion-key restrictions). **For normal local development, leave it unset or `false`.** The backend reads this in `server.py` and exposes `app.state.public_mode`.
 
 ---
 

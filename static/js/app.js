@@ -386,6 +386,9 @@ const App = {
     this.loadEngineWarnings();
     this._engineWarnTimer = setInterval(() => this.loadEngineWarnings(), 60000);
 
+    // 启动时检测配置是否完整，用于显示设置按钮红点
+    this.loadSetupGuide();
+
     // Close toolbar panels when clicking outside
     this._outsideClickHandler = (e) => {
       if (!e.target.closest('.toolbar-panel-wrap') && !e.target.closest('.toolbar-btn.toolbar-gear')) {

@@ -4,6 +4,8 @@
 
 人物卡文件位于 `profiles/<profile_id>.json`，定义了单个 AI 人格的全部行为参数。
 
+> **大多数字段可通过「设置 → 人格」界面直接编辑，无需手动改 JSON。本文是进阶字段参考，手写或精调人物卡时使用。**
+
 ---
 
 ## 顶层标识字段
@@ -34,7 +36,7 @@
 "emotion_config": {
   "enabled": true,
   "default_state": "calm",
-  "energy_prompts": { "0": "...", "30": "...", "60": "...", "80": "..." },
+  "energy_prompts": { "0": "...", "10": "...", "30": "...", "60": "...", "80": "..." },
   "affinity_prompts": { "-100": "...", "0": "...", "200": "...", "1000": "..." },
   "emotion_zh_descriptions": { "joyful": "恬静的愉悦", ... },
   "emotion_prompts": { "joyful": ["..."], "sad": ["..."], ... }
@@ -89,7 +91,7 @@
 
 | 子字段 | 说明 |
 |---|---|
-| `custom_prompt` | **单一来源**：注入自省 LLM 的「人设要点 + 自省规则」；与同人格的情感分类、好感度 LLM 调整共用同一段文字（`src/utils/persona_context.py` 读取，默认最长约 3500 字后截断）。**不含** `base_prompt`。格式建议：以 `【角色要点】你是{name}: {key traits}` 开头（约 150 字），后接第一人称自省说明（「此刻你独自思考……」）。`thought` 输出须 ≤30 汉字 / ≤20 英文单词，指令需保持简洁 |
+| `custom_prompt` | **单一来源**：注入自省 LLM 的「人设要点 + 自省规则」；与同人格的情感分类、好感度 LLM 调整共用同一段文字（默认最长约 3500 字后截断）。**不含** `base_prompt`。格式建议：以 `【角色要点】你是{name}: {key traits}` 开头（约 150 字），后接第一人称自省说明（「此刻你独自思考……」）。`thought` 输出须 ≤30 汉字 / ≤20 英文单词，指令需保持简洁 |
 | `chat_inject_topic_hint` | 是否在主对话注入 `topic_hint`（默认 true）|
 | `long_absence_hours` 等 | 见引擎与 segment 文档 |
 

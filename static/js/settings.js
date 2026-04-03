@@ -67,7 +67,7 @@ const SettingsMixin = {
       settingsOpen: false,
       activeTab: 'profiles',
       settingsTabs: [
-        { id: 'onboarding', labelZh: '入门',  labelEn: 'Start',      shortEn: 'Start',   icon: '◇' },
+        { id: 'onboarding', labelZh: '新手引导', labelEn: 'First steps', shortEn: 'Guide', icon: '◇' },
         { id: 'profiles',   labelZh: '人格',  labelEn: 'Profiles',   shortEn: 'Profile', icon: '◆' },
         { id: 'llm',        labelZh: '模型',  labelEn: 'Models',     shortEn: 'Models',  icon: '◈' },
         { id: 'tts',        labelZh: '语音',  labelEn: 'Voice',      shortEn: 'Voice',   icon: '♪' },
@@ -1377,6 +1377,7 @@ const SettingsMixin = {
         if (data.ok) {
           this.showToast(this.t('toastLLMSaved'), 'success');
           await this.loadLLMPresets();
+          this.loadSetupGuide();
         } else {
           this.showToast(`保存失败: ${data.error || 'unknown'}`, 'error');
         }

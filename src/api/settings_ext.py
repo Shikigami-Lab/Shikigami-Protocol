@@ -176,6 +176,11 @@ async def create_llm_preset(request: Request, body: LLMPresetBody):
     # Hot-reload: keep actual key in memory (not the empty YAML value)
     config.llm_presets[body.name] = dict(preset_data)
     config.llm_presets[body.name]["api_key"] = final_api_key
+
+    # Re-register analysis provider in case this preset is used for analysis
+    from src.llm.registry import ensure_analysis_provider
+    ensure_analysis_provider(config)
+
     return {"ok": True, "name": body.name}
 
 
@@ -240,6 +245,10 @@ async def update_llm_preset(name: str, request: Request, body: LLMPresetBody):
     config.llm_presets[name] = dict(preset_data)
     config.llm_presets[name]["api_key"] = final_key
 
+    # Re-register analysis provider in case this preset is used for analysis
+    from src.llm.registry import ensure_analysis_provider
+    ensure_analysis_provider(config)
+
     return {"ok": True, "name": name}
 
 
@@ -279,6 +288,10 @@ async def set_active_llm(request: Request, body: SetActiveBody):
     y, data = _load_yaml()
     data["default_llm"] = body.name
     _save_yaml(y, data)
+
+    # Re-register analysis provider in case it uses the active model (preset = "")
+    from src.llm.registry import ensure_analysis_provider
+    ensure_analysis_provider(config)
 
     return {"ok": True, "active": body.name}
 

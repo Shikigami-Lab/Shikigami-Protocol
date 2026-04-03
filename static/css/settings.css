@@ -2850,6 +2850,70 @@ textarea.form-input {
   margin: 0 0 10px;
   line-height: 1.5;
 }
+.setup-guide-shortpath-heading {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.setup-guide-shortpath {
+  margin: 0 0 14px;
+  padding-left: 1.35rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+.setup-guide-shortpath > li {
+  margin-bottom: 12px;
+}
+.setup-shortpath-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.setup-guide-packaged-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.04));
+  border-radius: 0 8px 8px 0;
+}
+.setup-guide-doc-links-dev {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: -6px 0 14px;
+  padding: 0 2px;
+}
+.setup-guide-doc-links-dev a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.setup-guide-doc-links-dev a:hover {
+  text-decoration: underline;
+}
+/* 新手引导：可选组件（镜像 / 向量 / TTS / STT），保持展开可见，避免 <details> 默认折叠导致「下载区消失」 */
+.setup-guide-optional-wrap {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  padding: 12px 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.02));
+}
+.setup-guide-optional-wrap > .setup-guide-h3:first-child {
+  margin-top: 0;
+}
+.setup-guide-advanced-hint {
+  margin: 6px 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.setup-guide-inline-loading {
+  margin: 0 0 14px;
+  font-size: 12px;
+}
 .setup-guide-lead {
   color: var(--text-secondary);
   margin-bottom: 16px;
@@ -2885,6 +2949,8 @@ textarea.form-input {
   font-size: 12px;
 }
 .setup-quick-item.ok { border-color: rgba(80, 160, 100, 0.45); }
+.setup-quick-item.optional { opacity: 0.65; }
+.setup-quick-item.optional.ok { opacity: 1; }
 .setup-quick-dot { font-weight: bold; width: 1.2em; text-align: center; }
 .setup-guide-meta {
   font-size: 11px;
