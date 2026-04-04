@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="setup-wizard-html">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Shikigami Protocol — 启动器</title>
+  <link rel="icon" href="icon.png" type="image/png" />
+  <!-- 必须在任何主题 CSS 之前设置 data-theme，避免首帧白屏/错色；与 main getWizardResolvedTheme 同源。 -->
+  <script>
+    (function initSetupWizardTheme() {
+      var t = 'light';
+      try {
+        if (window.electronAPI && typeof window.electronAPI.getSetupWizardThemeBootstrap === 'function') {
+          t = String(window.electronAPI.getSetupWizardThemeBootstrap());
+        } else {
+          try {
+            var ls = localStorage.getItem('theme');
+            if (ls === 'velvet_legacy') ls = 'velvet';
+            if (ls === '') t = '';
+            else if (ls != null && ls !== '') t = ls;
+          } catch (e1) { /* keep light */ }
+        }
+        if (t === 'velvet_legacy') t = 'velvet';
+      } catch (e0) {
+        t = 'light';
+      }
+      try {
+        document.documentElement.setAttribute('data-theme', t);
+        localStorage.setItem('theme', t);
+      } catch (e2) { /* ignore */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/settings.css" />
+  <script src="libs/vue.global.prod.js"></script>
+  <script src="js/i18n.js"></script>
+  <script>
+    (function initSetupWizardLocale() {
+      function inferFromNavigator() {
+        try {
+          var list = (navigator.languages && navigator.languages.length) ? navigator.languages.slice() : [];
+          if (navigator.language) list.push(navigator.language);
+          for (var i = 0; i < list.length; i++) {
+            var low = String(list[i]).toLowerCase();
+            if (low.indexOf('zh') === 0) return 'zh';
+          }
+          return 'en';
+        } catch (e) {
+          return 'zh';
+        }
+      }
+      var chosen = '';
+      try {
+        var stored = localStorage.getItem('locale');
+        if (stored === 'zh' || stored === 'en') chosen = stored;
+      } catch (e1) { /* ignore */ }
+      if (!chosen) {
+        try {
+          if (window.electronAPI && typeof window.electronAPI.getSetupWizardLocaleBootstrap === 'function') {
+            var fromMain = window.electronAPI.getSetupWizardLocaleBootstrap();
+            if (fromMain === 'zh' || fromMain === 'en') chosen = fromMain;
+          }
+        } catch (e2) { /* ignore */ }
+      }
+      if (!chosen) chosen = inferFromNavigator();
+      try {
+        localStorage.setItem('locale', chosen);
+        document.documentElement.lang = chosen === 'en' ? 'en' : 'zh-CN';
+      } catch (e3) { /* ignore */ }
+    })();
+  </script>
+  <style>
+    /* 全局 html,body 为 height:100% + 主界面渐变画在 body 上；长页面时渐变被拉满整页会严重失真。
+       启动器：html/body 随内容增高，背景用 fixed 相对视口固定，滚动时配色一致。 */
+    html.setup-wizard-html {
+      height: auto;
+      min-height: 100%;
+      overflow-x: hidden;
+      overflow-y: auto;
+      background: transparent;
+    }
+    html.setup-wizard-html body {
+      height: auto;
+      min-height: 100dvh;
+      overflow: visible;
+      box-sizing: border-box;
+      padding-bottom: 148px;
+      background-attachment: fixed;
+    }
+    .setup-wizard-page { max-width: 860px; margin: 0 auto; padding: 16px 20px 24px; color: var(--text-primary); }
+    .setup-wizard-footer {
+      position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 20px 12px;
+      background: var(--bg-panel);
+      border-top: 1px solid var(--border);
+      color: var(--text-primary);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+      z-index: 50;
+      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
+    }
+    .setup-wizard-footer-inner {
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .setup-wizard-footer-progress {
+      margin-bottom: 10px;
+    }
+    .setup-wizard-footer-progress .setup-wizard-dl-msg {
+      display: block;
+      font-size: 11px;
+      margin-top: 6px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .setup-wizard-footer-pip {
+      margin-bottom: 10px;
+    }
+    .setup-wizard-pip-indeterminate {
+      height: 5px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--border), var(--accent), var(--border));
+      background-size: 200% 100%;
+      animation: setup-wizard-pip-scan 1.1s linear infinite;
+      margin-bottom: 6px;
+    }
+    @keyframes setup-wizard-pip-scan {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+    .setup-wizard-footer-log {
+      max-height: 72px;
+      overflow: auto;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: var(--bg-app, rgba(0, 0, 0, 0.2));
+      border: 1px solid var(--border);
+      font-size: 10px;
+      line-height: 1.45;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .setup-wizard-footer-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .setup-wizard-lang {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .setup-wizard-lang-label { font-size: 11px; white-space: nowrap; }
+    .setup-wizard-footer-actions-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .setup-wizard-footer-loading { font-size: 11px; }
+    [data-theme="light"] .setup-wizard-footer {
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.06);
+    }
+    .setup-wizard-footer .s-btn-secondary {
+      border-color: var(--border);
+      color: var(--text-primary);
+    }
+    .setup-wizard-status-err { color: var(--red, #e74c3c); font-size: 13px; margin: 8px 0; }
+    .setup-wizard-error-banner {
+      margin: 12px 0 16px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--red, #c8231e);
+      background: rgba(248, 113, 113, 0.08);
+      color: var(--text-primary);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .setup-wizard-error-banner strong { display: block; margin-bottom: 6px; color: var(--red, #c8231e); }
+    .setup-wizard-dl-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+    .setup-wizard-dl-fill { height: 100%; background: var(--accent); transition: width .2s; }
+    .setup-wizard-log {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text-secondary);
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .setup-wizard-details {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .setup-wizard-details summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .setup-wizard-substep {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+    }
+    .setup-wizard-substep-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text-primary);
+    }
+    /* Vue 挂载前全屏占位，避免整页 v-cloak 空白 + 无提示 */
+    #wiz-pre-vue {
+      position: fixed;
+      inset: 0;
+      z-index: 400;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: var(--bg-app, #1a1a1e);
+      color: var(--text-secondary, #9898a8);
+      font-size: 14px;
+    }
+    #wiz-pre-vue .setup-wizard-boot-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border, #444);
+      border-top-color: var(--accent, #7c9cff);
+      border-radius: 50%;
+      animation: setup-wizard-spin 0.85s linear infinite;
+    }
+    @keyframes setup-wizard-spin {
+      to { transform: rotate(360deg); }
+    }
+    .setup-wizard-loading-panel {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin: 12px 0 16px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px dashed var(--border);
+      background: var(--bg-elevated, rgba(0, 0, 0, 0.04));
+    }
+    .setup-wizard-inline-spinner {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      margin-top: 2px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: setup-wizard-spin 0.8s linear infinite;
+    }
+  </style>
+</head>
+<body>
+  <div id="wiz-pre-vue" aria-live="polite">
+    <div class="setup-wizard-boot-spinner" aria-hidden="true"></div>
+    <span id="wiz-pre-vue-msg">…</span>
+  </div>
+  <script>
+    (function () {
+      var m = document.getElementById('wiz-pre-vue-msg');
+      if (!m) return;
+      try {
+        var loc = (typeof localStorage !== 'undefined' && localStorage.getItem('locale') === 'en') ? 'en' : 'zh';
+        var L = window.LOCALES && window.LOCALES[loc];
+        m.textContent = (L && L.setupWizardBootSplash) || (loc === 'en' ? 'Loading launcher…' : '正在加载启动器…');
+      } catch (e) {
+        m.textContent = 'Loading launcher…';
+      }
+    })();
+  </script>
+  <div id="wiz" class="setup-wizard-page">
+    <h2 class="setup-guide-h3">{{ tw('setupWizardTitle') }}</h2>
+    <p class="setup-guide-lead muted">{{ tw('setupWizardIntro') }}</p>
+    <p class="setup-guide-lead muted" style="margin-top:8px;" v-html="tw('onboardingLead')"></p>
+    <p v-if="statusError" class="setup-wizard-status-err">{{ statusError }}</p>
+
+    <div v-if="statusLoading && !g" class="setup-wizard-loading-panel">
+      <div class="setup-wizard-inline-spinner" aria-hidden="true"></div>
+      <p class="muted" style="margin:0;font-size:13px;line-height:1.5;">{{ tw('setupWizardStatusLoadingHint') }}</p>
+    </div>
+
+    <div v-if="hasAnyError" class="setup-wizard-error-banner">
+      <strong>{{ tw('setupWizardErrorBannerTitle') }}</strong>
+      <div v-if="pipErrorText">{{ pipErrorText }}</div>
+      <div v-if="downloadErrorText" style="margin-top:8px;">{{ downloadErrorText }}</div>
+      <div v-if="miscErrorText" style="margin-top:8px;">{{ miscErrorText }}</div>
+    </div>
+
+    <div v-if="g" class="setup-guide-section">
+      <h3 class="setup-guide-h3">{{ tw('onboardingQuickTitle') }}</h3>
+      <p class="setup-guide-quick-hint muted">{{ tw('onboardingQuickHint') }}</p>
+      <div class="setup-quick-grid">
+        <div class="setup-quick-item" :class="{ ok: g.llm_preset_configured }">
+          <span class="setup-quick-dot">{{ g.llm_preset_configured ? '✓' : '○' }}</span>
+          <span>{{ tw('onboardingQuickLlmCfg') }}</span>
+        </div>
+        <div class="setup-quick-item" :class="{ ok: g.profile_count > 0 }">
+          <span class="setup-quick-dot">{{ g.profile_count > 0 ? '✓' : '○' }}</span>
+          <span>{{ tw('onboardingQuickProfiles') }} ({{ g.profile_count }})</span>
+        </div>
+        <div class="setup-quick-item optional" :class="{ ok: g.chromadb_installed }">
+          <span class="setup-quick-dot">{{ g.chromadb_installed ? '✓' : '–' }}</span>
+          <span>{{ tw('onboardingQuickChromaDB') }}</span>
+        </div>
+        <div class="setup-quick-item optional" :class="{ ok: !g.memory_vector_enabled || g.embedding_provider !== 'local' || g.embedding_local_on_disk || (g.embed_installed && (g.embed_installed.bge_small_zh || g.embed_installed.minilm_en)) }">
+          <span class="setup-quick-dot">{{ (!g.memory_vector_enabled || g.embedding_provider !== 'local' || g.embedding_local_on_disk || (g.embed_installed && (g.embed_installed.bge_small_zh || g.embed_installed.minilm_en))) ? '✓' : '–' }}</span>
+          <span>{{ tw('onboardingQuickEmbed') }}</span>
+        </div>
+        <div class="setup-quick-item optional" :class="{ ok: g.stt_ready }">
+          <span class="setup-quick-dot">{{ g.stt_ready ? '✓' : '–' }}</span>
+          <span>{{ tw('onboardingQuickStt') }}</span>
+        </div>
+      </div>
+      <p class="setup-guide-meta">
+        {{ tw('onboardingModelsLabel') }}: <code>{{ g.models_root }}</code><br/>
+        HF: <code>{{ g.hf_endpoint || '(default)' }}</code>
+        <span v-if="g.hf_hub_offline" class="warn"> · offline</span>
+      </p>
+    </div>
+
+    <p class="setup-guide-doc-links muted" style="font-size:12px;">{{ tw('setupWizardDocHint') }}</p>
+
+    <div v-if="g" class="setup-guide-optional-wrap">
+      <h3 class="setup-guide-h3">{{ tw('onboardingOptionalAdvancedTitle') }}</h3>
+      <p class="setup-guide-advanced-hint muted">{{ tw('setupWizardOpsHint') }}</p>
+      <p v-if="!g.bundles || !g.bundles.length" class="warn" style="font-size:12px;margin:0 0 12px;">{{ tw('setupWizardEmptyBundlesHint') }}</p>
+
+      <!-- 网络与 ModelScope -->
+      <div class="setup-guide-section">
+        <h3 class="setup-guide-h3">{{ tw('onboardingNetworkTitle') }}</h3>
+        <p class="setup-tts-desc">{{ tw('onboardingNetworkDesc') }}</p>
+        <div class="setup-tts-card">
+          <div class="setup-tts-head">
+            <span class="setup-tts-name">ModelScope ({{ tw('onboardingNetworkChinaRecommended') }})</span>
+            <span class="setup-bundle-badge" :class="{ installed: g.modelscope_installed }">
+              {{ g.modelscope_installed ? tw('onboardingInstalled') : tw('onboardingNotInstalled') }}
+            </span>
+          </div>
+          <p class="setup-tts-desc">{{ tw('onboardingModelScopeDesc') }}</p>
+          <p class="muted" style="margin-top:8px;font-size:11px;line-height:1.45;">{{ tw('onboardingModelScopeTorchHint') }}</p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;">
+            <button type="button" class="s-btn s-btn-small s-btn-primary" :disabled="busy" @click="pipInstall(['modelscope'], 'modelscope', '')">
+              {{ tw('onboardingModelScopeInstall') }}
+            </button>
+            <button v-if="g.modelscope_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['modelscope'])">
+              {{ tw('btnUninstall') }} ModelScope
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 向量记忆 -->
+      <div class="setup-guide-section">
+        <h3 class="setup-guide-h3">{{ tw('onboardingAiMemoryTitle') }}</h3>
+        <p class="setup-tts-desc">{{ tw('onboardingAiMemoryDesc') }}</p>
+
+        <div class="setup-wizard-substep">
+          <div class="setup-wizard-substep-title">1. {{ tw('onboardingAiMemoryDeps') }}</div>
+          <div class="setup-tts-card">
+            <div class="setup-tts-head">
+              <span class="setup-tts-name">{{ tw('onboardingAiMemoryDeps') }}</span>
+              <span class="setup-bundle-badge" :class="{ installed: g.ai_memory_installed }">
+                {{ g.ai_memory_installed ? tw('onboardingInstalled') : tw('onboardingNotInstalled') }}
+              </span>
+            </div>
+            <p class="muted" style="font-size:11px;line-height:1.45;">{{ tw('setupWizardAiMemoryDepsShort') }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+              <button type="button" class="s-btn s-btn-small" :disabled="busy" @click="pipInstall(['chromadb>=0.5.0','transformers>=4.46.0,<5.0.0','sentence-transformers>=3.0.0','rank-bm25>=0.2.2'], 'ai_memory', '')">
+                {{ tw('onboardingAiMemoryInstall') }}
+              </button>
+              <button v-if="g.ai_memory_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['chromadb','transformers','sentence-transformers','rank-bm25'])">
+                {{ tw('btnUninstall') }} {{ tw('onboardingAiMemoryDeps') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="setup-wizard-substep">
+          <div class="setup-wizard-substep-title">2. {{ tw('onboardingAiMemoryModels') }}</div>
+          <p class="setup-tts-desc">{{ tw('onboardingAiMemoryModelsDesc') }}</p>
+          <p v-if="!g.ai_memory_installed" class="warn" style="font-size:12px;margin:8px 0;">⚠️ {{ tw('onboardingAiMemoryNeedDepsFirst') }}</p>
+          <div v-for="b in memBundles" :key="b.id" class="setup-tts-card" style="margin-top:10px;">
+            <div class="setup-tts-head">
+              <span class="setup-tts-name">{{ bundleTitle(b) }}</span>
+              <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
+              <span class="setup-bundle-badge" :class="{ installed: b.installed }">{{ b.installed ? tw('onboardingInstalled') : tw('onboardingNotInstalled') }}</span>
+            </div>
+            <p class="setup-tts-desc" v-html="bundleDesc(b)"></p>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">
+              <button v-if="b.repo_id" type="button" class="s-btn s-btn-small" :disabled="busy || !g.ai_memory_installed" @click="doDownload(b.id, 'hf')">{{ tw('onboardingBtnHfMirror') }}</button>
+              <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy || !g.ai_memory_installed" @click="doDownload(b.id, 'modelscope')">{{ tw('onboardingBtnModelScope') }}</button>
+              <button v-if="b.direct_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy || !g.ai_memory_installed" @click="doDownload(b.id, 'direct')">{{ tw('onboardingBtnGitHubDirect') }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TTS -->
+      <div class="setup-guide-section" v-if="g.tts">
+        <h3 class="setup-guide-h3">{{ tw('onboardingTtsTitle') }}</h3>
+        <p class="muted" style="margin-bottom:10px;">{{ tw('onboardingTtsActive') }}：<strong>{{ g.tts.active }}</strong></p>
+
+        <div class="setup-tts-card">
+          <div class="setup-tts-head">
+            <span class="setup-tts-name">Edge TTS</span>
+            <span class="setup-bundle-badge installed">{{ tw('onboardingTtsReady') }}</span>
+          </div>
+          <p class="setup-tts-desc">{{ tw('onboardingTtsEdge') }}</p>
+        </div>
+
+        <div class="setup-tts-card" style="margin-top:10px;">
+          <div class="setup-tts-head">
+            <span class="setup-tts-name">GPT-SoVITS</span>
+            <span class="setup-bundle-badge" :class="{ installed: g.tts.gpt_sovits_port_open }">
+              {{ g.tts.gpt_sovits_port_open ? tw('onboardingTtsReady') : tw('onboardingTtsNotReady') }}
+            </span>
+          </div>
+          <p class="setup-tts-desc">{{ tw('onboardingTtsGptSoVits') }}</p>
+          <p class="muted" style="font-size:11px;">{{ g.tts.gpt_sovits_port_open ? tw('onboardingTtsGptSoVitsOpen') : tw('onboardingTtsGptSoVitsClosed') }}</p>
+          <details class="setup-wizard-details">
+            <summary>{{ tw('onboardingTtsGptSoVitsHowToGet') }}</summary>
+            <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">① {{ tw('onboardingTtsGptSoVitsStep1') }}</span><br/>
+              <span style="font-size:11px;">{{ tw('onboardingTtsGptSoVitsStep1Hint') }}</span><br/>
+              <a href="#" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block;text-decoration:underline;" @click.prevent="openGptsovitsReleases">{{ tw('onboardingTtsGptSoVitsReleaseLinkText') }}</a></p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="openGptsovitsReleases">{{ tw('onboardingTtsGptSoVitsOpenReleasesBtn') }}</button>
+            </div>
+            <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">② {{ tw('onboardingTtsGptSoVitsStep2') }}</span><br/>
+              {{ tw('onboardingTtsGptSoVitsStep2Hint') }}</p>
+            <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">③ {{ tw('onboardingTtsGptSoVitsStep3') }}</span><br/>
+              {{ tw('onboardingTtsGptSoVitsStep3Hint') }}</p>
+          </details>
+          <div class="setup-wizard-substep" style="margin-top:10px;padding-top:10px;">
+            <label class="muted" style="font-size:11px;display:block;margin-bottom:4px;">{{ tw('lblGptSovitsDir') }}</label>
+            <input type="text" class="form-input" v-model="gptsovitsDir" :placeholder="tw('phGptSovitsDir')"
+              style="width:100%;max-width:100%;box-sizing:border-box;font-size:12px;margin-bottom:6px;" />
+            <p class="muted" style="font-size:10px;line-height:1.45;margin:0 0 8px;">{{ tw('hintGptSovitsDir') }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="saveGptsovitsDir">{{ tw('onboardingGptsovitsSaveDir') }}</button>
+              <button type="button" class="s-btn s-btn-small" :disabled="busy || g.tts.gpt_sovits_port_open" @click="startOp({ op: 'launch-gptsovits' })">
+                {{ g.tts.gpt_sovits_port_open ? tw('onboardingTtsGptSoVitsRunning') : tw('onboardingTtsGptSoVitsLaunch') }}
+              </button>
+            </div>
+            <p v-if="gptsovitsSaveMsg" class="ok" style="font-size:11px;margin-top:8px;">{{ gptsovitsSaveMsg }}</p>
+          </div>
+        </div>
+
+        <div class="setup-tts-card" style="margin-top:10px;">
+          <div class="setup-tts-head">
+            <span class="setup-tts-name">KokoroTTS</span>
+            <span class="setup-bundle-badge" :class="{ installed: g.tts.kokoro_installed && g.tts.kokoro_models_ready }">
+              {{ (g.tts.kokoro_installed && g.tts.kokoro_models_ready) ? tw('onboardingTtsReady') : tw('onboardingTtsNotReady') }}
+            </span>
+          </div>
+          <p class="setup-tts-desc">{{ tw('onboardingTtsKokoro') }}</p>
+          <div class="setup-wizard-substep" style="margin-top:0;padding-top:0;border-top:none;">
+            <div class="setup-wizard-substep-title">1. {{ tw('onboardingKokoroPkgStepTitle') }}</div>
+            <p class="muted" style="font-size:11px;line-height:1.5;">
+              {{ g.tts.kokoro_installed ? '✓' : '○' }} {{ g.tts.kokoro_installed ? tw('onboardingTtsKokoroPkg') : tw('onboardingTtsKokoroPkgMissing') }}<br/>
+              {{ g.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ tw('onboardingTtsKokoroMisakiZh') }}
+            </p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+              <button type="button" class="s-btn s-btn-small" :disabled="busy" @click="pipInstall(['kokoro-onnx','misaki[zh]'], 'kokoro', '')">{{ tw('onboardingKokoroInstall') }}</button>
+              <button v-if="g.tts.kokoro_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['kokoro-onnx','misaki[zh]'])">
+                {{ tw('btnUninstall') }} Kokoro
+              </button>
+            </div>
+          </div>
+          <div class="setup-wizard-substep">
+            <div class="setup-wizard-substep-title">2. {{ tw('onboardingKokoroModelStepTitle') }}</div>
+            <p v-if="!g.tts.kokoro_installed" class="warn" style="font-size:12px;margin:0 0 8px;">⚠️ {{ tw('onboardingKokoroNeedPkgFirst') }}</p>
+            <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="tw('onboardingKokoroModelsHint')"></p>
+            <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="tw('onboardingKokoroModelsSaveTo')"></p>
+            <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="tw('onboardingKokoroModelsReleases')"></p>
+            <p class="muted" style="font-size:11px;line-height:1.45;margin:0 0 8px;">{{ tw('onboardingKokoroModelsDownloadHint') }}</p>
+            <div v-for="b in kokoroBundles" :key="b.id" class="setup-tts-card" style="margin-top:8px;">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">{{ bundleTitle(b) }}</span>
+                <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
+                <span class="setup-bundle-badge" :class="{ installed: b.installed }">{{ b.installed ? tw('onboardingInstalled') : tw('onboardingNotInstalled') }}</span>
+              </div>
+              <p class="setup-tts-desc" v-html="bundleDesc(b)"></p>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;">
+                <button v-if="b.direct_url" type="button" class="s-btn s-btn-small" :disabled="busy || !g.tts.kokoro_installed" @click="doDownload(b.id, 'direct')">{{ tw('onboardingBtnGitHubDirect') }}</button>
+              </div>
+            </div>
+            <p v-if="g.tts.kokoro_installed" class="setup-tts-check" style="font-size:12px;">
+              <span :class="g.tts.kokoro_models_ready ? 'ok' : 'warn'">{{ g.tts.kokoro_models_ready ? '✓' : '○' }} {{ tw('onboardingKokoroModels') }}</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="setup-tts-card" style="margin-top:10px;">
+          <div class="setup-tts-head">
+            <span class="setup-tts-name">Qwen3-TTS</span>
+            <span class="setup-bundle-badge" :class="{ installed: g.qwen_tts_installed && g.tts.qwen3_model_ready }">
+              {{ (g.qwen_tts_installed && g.tts.qwen3_model_ready) ? tw('onboardingTtsReady') : tw('onboardingTtsNotReady') }}
+            </span>
+          </div>
+          <p class="setup-tts-desc">{{ tw('onboardingTtsQwen3') }}</p>
+
+          <div class="setup-wizard-substep">
+            <div class="setup-wizard-substep-title">1. {{ tw('onboardingQwenTtsPkgStepTitle') }}</div>
+            <p class="setup-tts-desc">{{ tw('onboardingQwenTtsPkgDesc') }}</p>
+            <p v-if="g.qwen_tts_installed" class="ok" style="font-size:12px;">✓ {{ tw('onboardingQwenTtsPkgInstalled') }}</p>
+            <p v-if="g.torch_import_ok && g.torch_load && g.torch_load.ok" class="muted" style="font-size:11px;line-height:1.45;">
+              <template v-if="g.torch_load.built_with_cuda">
+                {{ tw('onboardingTorchMetaCuda').replace('{version}', g.torch_load.version || '?').replace('{cuda}', g.torch_load.cuda_built_version || '?') }}<span v-if="g.torch_cuda_available">{{ tw('onboardingTorchMetaGpuOn') }}</span><span v-else>{{ tw('onboardingTorchMetaGpuOff') }}</span>
+              </template>
+              <template v-else>
+                {{ tw('onboardingTorchMetaCpu').replace('{version}', g.torch_load.version || '?') }}
+              </template>
+            </p>
+            <p v-if="g.torch_installed && !g.torch_import_ok" class="warn" style="font-size:11px;">{{ tw('onboardingTorchBrokenBadge') }} {{ tw('onboardingTorchBrokenHint') }}</p>
+            <p v-else-if="g.torch_installed && g.torch_import_ok && g.torch_cuda_available" class="muted ok" style="font-size:11px;">{{ tw('onboardingTorchCudaActive') }}</p>
+            <p v-else-if="g.torch_installed && g.torch_import_ok && g.torch_load && g.torch_load.built_with_cuda && !g.torch_cuda_available && g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingTorchCudaRuntimeHint') }}</p>
+            <p v-else-if="g.torch_installed && g.torch_import_ok && !(g.torch_load && g.torch_load.built_with_cuda) && !g.torch_cuda_available && g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingTorchCudaHint') }}</p>
+            <p v-if="g.runtime_python" class="muted" style="font-size:10px;margin:4px 0;">{{ tw('onboardingBackendPython') }}<code>{{ g.runtime_python.executable }}</code></p>
+            <p v-if="g.cuda_info && g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingDetectedGpu') }}{{ g.cuda_info.gpu_name }}</p>
+            <p v-else-if="g.cuda_info && !g.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ tw('onboardingNoNvidiaGpu') }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center;">
+              <button type="button" class="s-btn s-btn-small" :disabled="busy" @click="pipQwen">{{ tw('onboardingQwenTtsPkgInstall') }}</button>
+              <button v-if="g.cuda_info && g.cuda_info.recommended_url && !(g.torch_load && g.torch_load.built_with_cuda && g.torch_cuda_available)" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipTorchCuda">
+                {{ tw('onboardingTorchCudaInstall') }} ({{ g.cuda_info.recommended_cu }})
+              </button>
+              <button v-if="g.torch_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['torch','torchvision','torchaudio'])">
+                {{ tw('btnUninstall') }} PyTorch
+              </button>
+              <button v-if="g.qwen_tts_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['qwen-tts'])">
+                {{ tw('btnUninstall') }} Qwen-TTS
+              </button>
+            </div>
+            <p class="muted" style="font-size:10px;margin-top:6px;">{{ tw('onboardingTorchUninstallAlwaysHint') }}</p>
+          </div>
+
+          <div class="setup-wizard-substep">
+            <div class="setup-wizard-substep-title">2. {{ tw('onboardingQwenTtsModelStepTitle') }}</div>
+            <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 8px;" v-html="tw('onboardingQwenTtsModelStepLead')"></p>
+            <p class="muted" style="font-size:11px;margin:0 0 8px;">{{ tw('onboardingModelsLabel') }}: <code>{{ g.models_root }}</code></p>
+            <p v-if="g.tts.qwen3_model_ready && g.tts.qwen3_model_path" class="ok" style="font-size:11px;line-height:1.45;margin:0 0 8px;">
+              {{ tw('onboardingQwenTtsModelPathReadyLabel') }}<code style="word-break:break-all;">{{ g.tts.qwen3_model_path }}</code>
+            </p>
+            <p v-if="!g.qwen_tts_installed" class="warn" style="font-size:12px;">⚠️ {{ tw('onboardingQwenTtsNeedDepsFirst') }}</p>
+            <div v-for="b in ttsBundles" :key="b.id" class="setup-tts-card" style="margin-top:8px;">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">{{ bundleTitle(b) }}</span>
+                <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
+                <span class="setup-bundle-badge" :class="{ installed: b.installed }">{{ b.installed ? tw('onboardingInstalled') : tw('onboardingNotInstalled') }}</span>
+              </div>
+              <p class="setup-tts-desc" v-html="bundleDesc(b)"></p>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;">
+                <button v-if="b.repo_id" type="button" class="s-btn s-btn-small" :disabled="busy || !g.qwen_tts_installed" @click="doDownload(b.id, 'hf')">{{ tw('onboardingBtnHfMirror') }}</button>
+                <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy || !g.qwen_tts_installed" @click="doDownload(b.id, 'modelscope')">{{ tw('onboardingBtnModelScope') }}</button>
+                <button v-if="b.direct_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy || !g.qwen_tts_installed" @click="doDownload(b.id, 'direct')">{{ tw('onboardingBtnGitHubDirect') }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STT -->
+      <div class="setup-guide-section">
+        <h3 class="setup-guide-h3">{{ tw('onboardingSttTitle') }}</h3>
+        <div class="setup-tts-card">
+          <div class="setup-tts-head">
+            <span class="setup-tts-name">SenseVoice</span>
+            <span class="muted" style="font-size:11px;margin-left:6px;">sherpa-onnx</span>
+            <span class="setup-bundle-badge" :class="{ installed: g.sherpa_onnx_installed && g.sherpa_sense_voice_ready }">
+              {{ (g.sherpa_onnx_installed && g.sherpa_sense_voice_ready) ? tw('onboardingTtsReady') : tw('onboardingTtsNotReady') }}
+            </span>
+          </div>
+          <p class="setup-tts-desc">{{ tw('onboardingSttSenseVoiceDesc') }}</p>
+
+          <div class="setup-wizard-substep">
+            <div class="setup-wizard-substep-title">1. {{ tw('onboardingSttDepsStepTitle') }}</div>
+            <p v-if="g.sherpa_onnx_installed" class="ok" style="font-size:12px;">✓ sherpa-onnx {{ tw('onboardingInstalled') }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <button v-if="!g.sherpa_onnx_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipInstall(['sherpa-onnx','soundfile'], 'sherpa_onnx', '')">{{ tw('onboardingSttInstallSherpa') }}</button>
+              <button v-if="g.sherpa_onnx_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['sherpa-onnx'])">
+                {{ tw('btnUninstall') }} sherpa-onnx
+              </button>
+            </div>
+          </div>
+
+          <div class="setup-wizard-substep">
+            <div class="setup-wizard-substep-title">2. {{ tw('onboardingSttModelStepTitle') }}</div>
+            <p v-if="!g.sherpa_onnx_installed" class="muted" style="font-size:12px;">⚠️ {{ tw('onboardingSttNeedDepsFirst') }}</p>
+            <template v-else>
+              <p class="setup-tts-check" style="font-size:12px;">
+                <span :class="g.sherpa_sense_voice_ready ? 'ok' : 'warn'">{{ g.sherpa_sense_voice_ready ? '✓' : '○' }} {{ tw('onboardingSttModelFiles') }}</span>
+              </p>
+              <div v-if="sttBundle" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+                <button v-if="sttBundle.repo_id" type="button" class="s-btn s-btn-small" :disabled="busy" @click="doDownload('sherpa_sense_voice', 'hf')">{{ tw('onboardingBtnHfMirror350') }}</button>
+                <button v-if="sttBundle.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="doDownload('sherpa_sense_voice', 'modelscope')">{{ tw('onboardingBtnModelScope') }}</button>
+              </div>
+              <p class="muted" style="font-size:11px;line-height:1.55;margin-top:10px;" v-html="tw('setupWizardPickSttModelHint')"></p>
+              <p v-if="g.stt_model_path" class="muted" style="font-size:11px;margin-top:6px;">
+                {{ tw('setupWizardSttConfiguredPath') }}: <code style="word-break:break-all;">{{ g.stt_model_path }}</code>
+              </p>
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" style="margin-top:8px;" :disabled="busy" @click="pickStt">{{ tw('setupWizardPickSttModel') }}</button>
+            </template>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="setup-wizard-footer">
+      <div class="setup-wizard-footer-inner">
+        <div v-if="dl && dl.phase === 'running'" class="setup-wizard-footer-progress">
+          <div class="setup-wizard-dl-bar"><div class="setup-wizard-dl-fill" :style="{ width: (dl.progress_pct || 0) + '%' }"></div></div>
+          <span class="setup-wizard-dl-msg muted">{{ dl.message }}</span>
+        </div>
+        <div v-else-if="busy && lastLog" class="setup-wizard-footer-pip">
+          <div class="setup-wizard-pip-indeterminate" aria-hidden="true"></div>
+          <div class="setup-wizard-footer-log">{{ lastLog }}</div>
+        </div>
+        <div class="setup-wizard-footer-actions">
+          <div class="setup-wizard-lang">
+            <span class="muted setup-wizard-lang-label">{{ tw('setupWizardLangLabel') }}</span>
+            <button type="button" class="s-btn s-btn-small" :class="{ 's-btn-primary': wizardUiLocale === 'zh' }" @click="setWizardLocale('zh')" :disabled="busy">中文</button>
+            <button type="button" class="s-btn s-btn-small" :class="{ 's-btn-primary': wizardUiLocale === 'en' }" @click="setWizardLocale('en')" :disabled="busy">English</button>
+          </div>
+          <div class="setup-wizard-footer-actions-right">
+            <span v-if="(statusLoading && g) || statusRefreshing" class="muted setup-wizard-footer-loading">{{ tw('onboardingLoading') }}</span>
+            <button type="button" class="s-btn s-btn-secondary" @click="refresh()" :disabled="statusLoading || statusRefreshing || busy">{{ tw('onboardingRefresh') }}</button>
+            <button type="button" class="s-btn s-btn-primary" @click="proceed" :disabled="statusLoading || !g || busy">{{ tw('setupWizardLaunch') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="js/setup_wizard.js"></script>
+</body>
+</html>

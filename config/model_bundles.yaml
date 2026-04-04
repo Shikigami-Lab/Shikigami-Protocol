@@ -1,5 +1,7 @@
-# 入门页「下载模型」清单
-# HF镜像（hf-mirror.com）或 ModelScope 均可下载，在入门页按钮选择
+# 入门 / 启动器「下载模型」清单（技术字段）
+# 卡片标题与说明：static/js/i18n.js → modelBundle_<id>_title / modelBundle_<id>_desc
+# 私库合并时若需在 YAML 写 title_zh 等，仍可作为无 i18n 键时的回退由 API 下发
+# HF 镜像（hf-mirror.com）或 ModelScope 均可下载，在界面按钮选择
 # modelscope_repo_id: 国内 ModelScope 镜像源
 models_root_env: SHIKIGAMI_MODELS_ROOT  # 未设置则使用 项目根/models
 
@@ -13,10 +15,6 @@ bundles:
     modelscope_repo_id: AI-ModelScope/bge-small-zh-v1.5
     local_subdir: bge-small-zh-v1.5
     size_hint: "~400 MB"
-    title_zh: 中文向量模型（BGE-small，记忆语义检索）
-    title_en: Chinese embedding (BGE-small, memory search)
-    description_zh: 约 400MB。无 Gemini Key 时推荐。下载后到「模型」→ 嵌入模型，选「本地」并填入路径 models/bge-small-zh-v1.5。
-    description_en: ~400MB. Recommended without Gemini. After download go to Models → Embedding, set provider to Local, path models/bge-small-zh-v1.5.
     memory_local_model_hint: models/bge-small-zh-v1.5
 
   - id: minilm_en
@@ -25,10 +23,6 @@ bundles:
     modelscope_repo_id: AI-ModelScope/all-MiniLM-L6-v2
     local_subdir: all-MiniLM-L6-v2
     size_hint: "~90 MB"
-    title_zh: 英文向量模型（MiniLM，记忆语义检索）
-    title_en: English embedding (MiniLM, memory search)
-    description_zh: 约 90MB。英文或中英混合场景。下载后到「模型」→ 嵌入模型，选「本地」并填入路径 models/all-MiniLM-L6-v2。
-    description_en: ~90MB. For English or mixed content. After download go to Models → Embedding, set provider to Local, path models/all-MiniLM-L6-v2.
     memory_local_model_hint: models/all-MiniLM-L6-v2
 
   # ── STT 语音识别 ─────────────────────────────────────────────────────────────
@@ -39,10 +33,6 @@ bundles:
     modelscope_repo_id: pengzhendong/sherpa-onnx-sense-voice-zh-en-ja-ko-yue
     local_subdir: sherpa-onnx-sense-voice-zh-en-ja-ko-yue
     size_hint: "~350 MB"
-    title_zh: SenseVoice ONNX 多语言 STT（推荐）
-    title_en: SenseVoice ONNX multilingual STT (recommended)
-    description_zh: 约 350MB。支持中/英/日/韩/粤等 50+ 语言，ONNX Runtime 推理，无需 ffmpeg。先点「安装 sherpa-onnx」，再下载模型，设置页切换到 SenseVoice 引擎即可。
-    description_en: ~350MB. 50+ languages, ONNX Runtime, no ffmpeg. Install sherpa-onnx first, then download model, then switch engine in STT settings.
 
   # ── TTS 语音合成 ─────────────────────────────────────────────────────────────
   - id: qwen3_tts_custom_voice
@@ -51,10 +41,6 @@ bundles:
     modelscope_repo_id: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
     local_subdir: Qwen-Qwen3-TTS-12Hz-1.7B-CustomVoice
     size_hint: "~3.4 GB"
-    title_zh: Qwen3-TTS CustomVoice（内置音色，推荐）
-    title_en: Qwen3-TTS CustomVoice (built-in speakers)
-    description_zh: 约 3.4GB。内置 Vivian / Serena 等 9 种音色，无需参考音频。下载后到 TTS 设置 → Qwen3-TTS，模式选 custom_voice，模型路径填 models/Qwen-Qwen3-TTS-12Hz-1.7B-CustomVoice。
-    description_en: ~3.4GB. Built-in speakers (Vivian, Serena etc), no ref audio needed. After download go to TTS settings → Qwen3-TTS, set mode to custom_voice and model path to models/Qwen-Qwen3-TTS-12Hz-1.7B-CustomVoice.
 
   - id: qwen3_tts_base
     category: tts
@@ -62,10 +48,6 @@ bundles:
     modelscope_repo_id: Qwen/Qwen3-TTS-12Hz-1.7B-Base
     local_subdir: Qwen-Qwen3-TTS-12Hz-1.7B-Base
     size_hint: "~3.4 GB"
-    title_zh: Qwen3-TTS Base（音色克隆，需参考音频）
-    title_en: Qwen3-TTS Base (voice clone, needs ref audio)
-    description_zh: 约 3.4GB。音色克隆模式，需提供 10–30 秒参考音频和对应文本。下载后到 TTS 设置 → Qwen3-TTS，模式选 voice_clone，填写参考音频路径。
-    description_en: ~3.4GB. Voice clone mode — needs 10-30s ref audio + matching text. After download go to TTS settings → Qwen3-TTS, set mode to voice_clone and fill in ref audio path.
 
   - id: qwen3_tts_voice_design
     category: tts
@@ -73,7 +55,20 @@ bundles:
     modelscope_repo_id: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
     local_subdir: Qwen-Qwen3-TTS-12Hz-1.7B-VoiceDesign
     size_hint: "~3.4 GB"
-    title_zh: Qwen3-TTS VoiceDesign（自然语言描述音色）
-    title_en: Qwen3-TTS VoiceDesign (describe voice in text)
-    description_zh: 约 3.4GB。用自然语言描述音色（如「温柔女声」），无需参考音频。下载后到 TTS 设置 → Qwen3-TTS，模式选 voice_design，填写音色描述。
-    description_en: ~3.4GB. Describe the voice in natural language (e.g. "gentle female voice"), no ref audio needed. After download go to TTS settings → Qwen3-TTS, set mode to voice_design and enter a voice description.
+
+  # ── Kokoro ONNX（单文件直链 → 项目 models/ 根目录）────────────────────────────
+  - id: kokoro_v1_onnx
+    category: kokoro
+    recommended: true
+    direct_url: https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+    local_subdir: "."
+    install_check_file: kokoro-v1.0.onnx
+    size_hint: "~310 MB"
+
+  - id: kokoro_v1_voices
+    category: kokoro
+    recommended: true
+    direct_url: https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+    local_subdir: "."
+    install_check_file: voices-v1.0.bin
+    size_hint: "~27 MB"

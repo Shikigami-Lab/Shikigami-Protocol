@@ -56,18 +56,21 @@ release/
 out/
 
 # ── 可能含本机路径或会话 id 的运行时配置 ─────────────────────────────────────
+config/app.yaml
+!config/app.yaml.example
 config/sessions_meta.json
 config/ui_prefs.json
 
 # ── Electron：启动时由 Python 写入 ───────────────────────────────────────────
 startup_progress.json
 
-# ── Private 同步脚本（仅本地使用，不上传 GitHub）──────────────────────────────
+# ── scripts：默认忽略（私库同步工具等不上传），以下例外可进公开仓库 ─────────────
 scripts/*
 !scripts/start_gptsovits.bat
 !scripts/start_gptsovits.sh
 !scripts/check_runtime_deps.py
 !scripts/build_binary.py
+!scripts/setup_wizard_helper.py
 
 # ── 日志 ───────────────────────────────────────────────────────────────────────
 *.log

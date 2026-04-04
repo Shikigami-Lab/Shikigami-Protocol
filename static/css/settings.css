@@ -2824,7 +2824,7 @@ textarea.form-input {
   font-size: 12px;
   line-height: 1.65;
   color: var(--text-secondary);
-  margin: 0 0 14px;
+  margin: 12px 0 14px;
 }
 .setup-guide-checklist-section .setup-guide-checklist {
   margin: 0;
@@ -2849,6 +2849,109 @@ textarea.form-input {
   font-size: 11px;
   margin: 0 0 10px;
   line-height: 1.5;
+}
+.setup-guide-shortpath-heading {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.setup-guide-shortpath {
+  margin: 0 0 14px;
+  padding-left: 1.35rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+.setup-guide-shortpath > li {
+  margin-bottom: 12px;
+}
+.setup-shortpath-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.setup-guide-packaged-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.04));
+  border-radius: 0 8px 8px 0;
+}
+.setup-guide-doc-links-dev {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: -6px 0 14px;
+  padding: 0 2px;
+}
+.setup-guide-doc-links-dev a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.setup-guide-doc-links-dev a:hover {
+  text-decoration: underline;
+}
+/* 新手引导：可选组件（镜像 / 向量 / TTS / STT），保持展开可见，避免 <details> 默认折叠导致「下载区消失」 */
+.setup-guide-optional-wrap {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  padding: 12px 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.02));
+}
+.setup-guide-optional-wrap > .setup-guide-h3:first-child {
+  margin-top: 0;
+}
+.setup-guide-advanced-hint {
+  margin: 6px 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* 入门页：与启动器对齐的分节教程（只读说明） */
+.setup-guide-tutorial-section .setup-wizard-substep {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.setup-guide-tutorial-section .setup-wizard-substep-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+.setup-guide-tutorial-section .setup-wizard-details {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.setup-guide-tutorial-section .setup-wizard-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.setup-guide-tutorial-launcher-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.02));
+}
+.setup-guide-tutorial-dl-tags .setup-bundle-badge {
+  display: inline-block;
+  margin-right: 6px;
+  margin-top: 4px;
+  font-weight: 500;
+}
+.setup-guide-inline-loading {
+  margin: 0 0 14px;
+  font-size: 12px;
 }
 .setup-guide-lead {
   color: var(--text-secondary);
@@ -2885,6 +2988,8 @@ textarea.form-input {
   font-size: 12px;
 }
 .setup-quick-item.ok { border-color: rgba(80, 160, 100, 0.45); }
+.setup-quick-item.optional { opacity: 0.65; }
+.setup-quick-item.optional.ok { opacity: 1; }
 .setup-quick-dot { font-weight: bold; width: 1.2em; text-align: center; }
 .setup-guide-meta {
   font-size: 11px;
@@ -2995,10 +3100,6 @@ textarea.form-input {
   border-radius: 10px;
   background: var(--bg-panel);
   margin-bottom: 8px;
-}
-.setup-tts-card.active {
-  border-color: var(--accent);
-  background: rgba(124, 108, 240, 0.05);
 }
 .setup-tts-head {
   display: flex;

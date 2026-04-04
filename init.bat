@@ -134,6 +134,19 @@ if %_ENV_EXISTS%==0 (
     echo   .env already exists, not overwritten.
 )
 set _ENV_EXISTS=
+
+rem     Copy app.yaml from example if it doesn't exist yet
+set _YAML_EXISTS=0
+if exist "config\app.yaml" set _YAML_EXISTS=1
+if %_YAML_EXISTS%==0 (
+    if exist "config\app.yaml.example" (
+        copy config\app.yaml.example config\app.yaml >nul
+        echo   Copied config/app.yaml from app.yaml.example.
+    )
+) else (
+    echo   config/app.yaml already exists, not overwritten.
+)
+set _YAML_EXISTS=
 echo.
 
 echo   +--------------------------------------+

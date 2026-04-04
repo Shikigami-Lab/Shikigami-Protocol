@@ -54,4 +54,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-status', handler);
     return () => ipcRenderer.removeListener('update-status', handler);
   },
+
+  /** 启动前安装器（仅 Electron） */
+  /** 同步：在页面最早脚本中读取，优先级见 main getWizardInitialLocale */
+  getSetupWizardLocaleBootstrap: () => {
+    try {
+      const v = ipcRenderer.sendSync('setup-wizard:get-locale-bootstrap');
+      return v === 'zh' || v === 'en' ? v : '';
+    } catch (_) {
+      return '';
+    }
+  },
+  /** 与 config/ui_prefs.json 及主窗口默认一致；须在首帧 CSS 前同步读取。 */
+  getSetupWizardThemeBootstrap: () => {
+    try {
+      const v = ipcRenderer.sendSync('setup-wizard:get-theme-bootstrap');
+      return typeof v === 'string' ? v : 'light';
+    } catch (_) {
+      return 'light';
+    }
+  },
+  setupWizardGetStatus: () => ipcRenderer.invoke('setup-wizard:get-status'),
+  setupWizardSaveGptsovitsDir: (dir) => ipcRenderer.invoke('setup-wizard:save-gptsovits-dir', dir),
+  setupWizardProceed: () => ipcRenderer.invoke('setup-wizard:proceed'),
+  setupWizardPickSttModel: () => ipcRenderer.invoke('setup-wizard:pick-stt-model'),
+  setupWizardStartOp: (payload) => ipcRenderer.send('setup-wizard:start-op', payload),
+  onSetupWizardEvent: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('setup-wizard:event', handler);
+    return () => ipcRenderer.removeListener('setup-wizard:event', handler);
+  },
 });

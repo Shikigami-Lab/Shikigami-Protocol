@@ -37,6 +37,11 @@ class AppConfig:
             path = get_resource_path(os.path.join("config", "app.yaml"))
         
         raw: Dict[str, Any] = {}
+        # Fall back to app.yaml.example if app.yaml doesn't exist (e.g. fresh clone without running init)
+        if not os.path.exists(path):
+            example_path = path.replace("app.yaml", "app.yaml.example")
+            if os.path.exists(example_path):
+                path = example_path
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -215,7 +220,7 @@ class AppConfig:
     def get_stt_config(self) -> Dict[str, Any]:
         """返回 STT 配置，含默认值（SenseVoice / sherpa-onnx）。"""
         defaults = {
-            "enabled": False,
+            "enabled": True,
             "model_path": "",
             "language": "zh",  # zh | en | ja | ko | auto
             "num_threads": 4,

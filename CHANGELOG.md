@@ -8,6 +8,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Build / Release
+
+- GitHub Releases no longer ship pre-built desktop installers (`.exe` / `.dmg` / `.AppImage`). Tags still trigger a release with generated notes; use GitHub’s source archives or clone the repository.
+
 ### In Progress
 
 - [ASE/Reflection] Better ASE — more natural and surprising proactive speech (see `docs/ARCHITECTURE_REFERENCE.en.md` / `.zh.md` for reflection & ASE overview):

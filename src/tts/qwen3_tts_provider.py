@@ -19,6 +19,7 @@ os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 from src.tts.base import TTSProvider
 from src.tts.sentence_split import split_sentences_for_tts
+from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ _HF_REPO_TO_LOCAL = {
     "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign": _LOCAL_MODEL_DIRS["voice_design"],
     "Qwen/Qwen3-TTS-12Hz-1.7B-Base": _LOCAL_MODEL_DIRS["voice_clone"],
 }
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PROJECT_ROOT = get_project_root()
 
 
 def _resolve_model_path(model_id) -> Union[pathlib.Path, str]:
@@ -88,8 +89,27 @@ def _suppress_noisy_warnings() -> None:
             pass
 
 
+def _safe_device(device: str) -> str:
+    """若请求 CUDA 但环境不支持，自动 fallback 到 cpu 并打印一次警告。"""
+    if device == "cpu":
+        return device
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            logger.warning(
+                "[Qwen3-TTS] CUDA 不可用（当前 PyTorch 为 CPU-only 版本），已自动切换到 cpu。"
+                "若需 GPU 加速，请重新安装带 CUDA 的 PyTorch："
+                " pip install torch --index-url https://download.pytorch.org/whl/cu124"
+            )
+            return "cpu"
+    except ImportError:
+        pass
+    return device
+
+
 def _get_model(model_id: str, device: str, dtype_name: str, attn: str, use_torch_compile: bool = False):
     global _qwen_model, _qwen_model_key, _qwen_import_warned, _matmul_precision_set, _qwen_failed_keys  # noqa: PLW0603
+    device = _safe_device(device)
     key = (model_id, device, dtype_name, attn, use_torch_compile)
     if _qwen_model is not None and _qwen_model_key == key:
         return _qwen_model
@@ -128,18 +148,16 @@ def _get_model(model_id: str, device: str, dtype_name: str, attn: str, use_torch
         dtype = torch.float32
 
     load_path = _resolve_model_path(model_id)
-    # Use a dict device_map ({"": device}) instead of a plain string.
-    # A plain string like "cuda:0" triggers accelerate's big-model dispatch path which
-    # calls model.to(device) on a meta-device model and raises NotImplementedError.
-    # A dict form bypasses that code path and places all layers on the target device correctly.
-    device_map_arg: Any = {"": device} if device != "cpu" else "cpu"
+    # For GPU: use dict device_map to bypass accelerate's meta-device dispatch path.
+    # For CPU: pass device_map=None — model defaults to CPU, no accelerate required.
+    #   Passing device_map="cpu" (string) triggers the accelerate import check in
+    #   transformers ≥4.38 even for CPU, causing ImportError when accelerate is absent.
+    device_map_arg: Any = {"": device} if device != "cpu" else None
+    fp_kwargs: dict = {"dtype": dtype, "attn_implementation": attn_impl}
+    if device_map_arg is not None:
+        fp_kwargs["device_map"] = device_map_arg
     try:
-        _qwen_model = Qwen3TTSModel.from_pretrained(
-            load_path,
-            device_map=device_map_arg,
-            dtype=dtype,
-            attn_implementation=attn_impl,
-        )
+        _qwen_model = Qwen3TTSModel.from_pretrained(load_path, **fp_kwargs)
         if use_torch_compile and device != "cpu":
             try:
                 _qwen_model = torch.compile(_qwen_model, mode="reduce-overhead")

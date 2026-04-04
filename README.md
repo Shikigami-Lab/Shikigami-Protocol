@@ -13,7 +13,6 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/Shikigami-Lab/Shikigami-Protocol)
 [![Release](https://img.shields.io/github/v/release/Shikigami-Lab/Shikigami-Protocol)](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Shikigami-Lab/Shikigami-Protocol/total)](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)
 
 <a href="README_zh.md">简体中文</a>
 
@@ -75,7 +74,7 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 
 - **Reflection + proactive speech (ASE)**: Background **Reflection** generates inner monologue while you are away; **ASE** turns that into real outreach — check-ins, teasing, or “you’re late tonight” moments when thresholds are met, not scheduled spam.
 - **Group chat**: Several personas in one room, each with streaming replies and clean speaker attribution — built in, not a bolt-on tab per character.
-- **Out-of-the-box Desktop App**: Installers on [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) — Windows `.exe`, macOS `.dmg`, Linux `.AppImage` — packaged UI, no coding required.
+- **Desktop + Web UI**: Electron shell or browser against a local FastAPI server — run from source (see [Quick start](#quick-start)) or use Docker for a headless server + web UI.
 - **Cross-device Web UI**: Runs a local server with a responsive web UI. Access from your phone or tablet on the same network — no separate app needed.
 - **Emotion & Affinity Engine**: State machines for mood, energy, and relationship tier — not a one-shot system prompt.
 - **Integrated Memory Pipeline**: Fact extraction, vector retrieval, daily summaries, and Ebbinghaus-curve forgetting — all built in.
@@ -114,15 +113,9 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 
 ## Quick start
 
-### Option 1: 📥 Download the installer (recommended for new users)
+> **Note:** Pre-built desktop installers are **not** published on GitHub Releases anymore — use **source** or **Docker** below. Tags still mark versions; each release includes GitHub’s default **source archives** only. Desktop packaging and the end-user release story are **under active development**.
 
-Go to the [Releases page](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest) and download the build for your OS: **Windows** `Shikigami Protocol Setup vX.X.X.exe`, **macOS** `.dmg`, **Linux** `.AppImage`. Double-click to install (or run the AppImage) and follow the built-in setup guide. **No Python or Node.js required** for these builds.
-
-You'll need API keys and/or a local stack for the LLM (Gemini / OpenAI / Ollama, etc.) — the onboarding screen will walk you through it.
-
----
-
-### Option 2: Run from source
+### Option 1: Run from source
 
 **Requirements**
 
@@ -150,7 +143,7 @@ bash launch.sh
 
 ---
 
-### Option 3: Docker (server / NAS)
+### Option 2: Docker (server / NAS)
 
 ```bash
 git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
@@ -320,7 +313,7 @@ When the app is running, open `/docs-viewer.html?doc=GETTING_STARTED.en.md` dire
 
 Need help, or want to share your custom persona? Join our community:
 
-- [🗣️ GitHub Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) (**Recommended** for Q&A, general chat, and persona sharing)
+- [🗣️ GitHub Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) (**Recommended** for Q&A and general chat)
 - [🐛 GitHub Issues](https://github.com/Shikigami-Lab/Shikigami-Protocol/issues) (For bug reports and feature requests only)
 
 <a id="license-community"></a>
@@ -331,7 +324,7 @@ This repository is licensed under [**AGPL-3.0**](LICENSE).
 
 - **Local / self-hosted use**: free to use, modify, and redistribute under AGPL terms.
 - **Network service / SaaS**: if you offer the modified program over a network, you must comply with AGPL source-offer obligations.
-- **Contributing**: PRs welcome — demo GIFs/screenshots, example SFW persona cards, translations, bug reports (OS + Python version + logs). Read [CONTRIBUTING.md](CONTRIBUTING.md) first and sign off each commit with `git commit -s` per [DCO 1.1](DCO.md).
+- **Contributing**: PRs welcome — demo GIFs/screenshots, translations, bug reports (OS + Python version + logs). Read [CONTRIBUTING.md](CONTRIBUTING.md) first and sign off each commit with `git commit -s` per [DCO 1.1](DCO.md).
 - **Security**: Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 
 *This section is a summary, not legal advice; the [LICENSE](LICENSE) and [DCO](DCO.md) texts prevail.*

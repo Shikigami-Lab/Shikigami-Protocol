@@ -51,17 +51,46 @@ if not getattr(sys, 'frozen', False):
     if _root not in sys.path:
         sys.path.insert(0, _root)
 
-# 打包模式下，把 user_packages/ 注入 sys.path，使通过 UI 安装的可选依赖可被导入
-if getattr(sys, 'frozen', False):
-    _user_pkg = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'user_packages')
-    if os.path.isdir(_user_pkg) and _user_pkg not in sys.path:
-        sys.path.insert(0, _user_pkg)
-
 from src.utils.paths import get_project_root, get_resource_path
 
+# 打包：可选依赖装在 user_packages/；须与 get_project_root()（含 SHIKIGAMI_APP_ROOT）一致，并处理 pip --target 生成的 .pth
+if getattr(sys, 'frozen', False):
+    _user_pkg = os.path.join(get_project_root(), 'user_packages')
+    if os.path.isdir(_user_pkg):
+        try:
+            import site
+            if _user_pkg not in sys.path:
+                sys.path.insert(0, _user_pkg)
+            # addsitedir：执行目录内 .pth，否则部分 wheel 的子路径不会被加入 sys.path
+            site.addsitedir(_user_pkg)
+        except Exception:
+            if _user_pkg not in sys.path:
+                sys.path.insert(0, _user_pkg)
+
+# 固定工作目录为项目根，确保所有相对路径（profiles/, groups/, lorebooks/ 等）在打包 exe 下也能正确解析
+os.chdir(get_project_root())
+
+# 启动器子进程只输出 JSON / SETUP_EVENT，禁止混入 SPLASH 行（否则 Electron 无法 parse JSON）
+_WIZARD_ONLY_STDOUT = any(
+    x in sys.argv
+    for x in (
+        "--setup-status-json",
+        "--wizard-download",
+        "--wizard-apply-stt",
+        "--wizard-launch-gptsovits",
+        "--wizard-pip-uninstall",
+        "--wizard-save-gptsovits-dir",
+    )
+)
+
+# 启动器「卸载 torch」子进程若先执行 embedding 预热，会 import transformers → 映射 torch DLL；
+# 随后在同进程内 rmtree user_packages/torch 时 Windows 报 WinError 5（非「主程序未退出」）。
+_SKIP_EMBEDDING_BOOTSTRAP_FOR_UNINSTALL = "--wizard-pip-uninstall" in sys.argv
+
 # 尽早向 Electron 发送进度（模块导入前），避免启动界面长时间停在 0%
-sys.stdout.write("SPLASH:33:Loading Python modules...\n")
-sys.stdout.flush()
+if not _WIZARD_ONLY_STDOUT:
+    sys.stdout.write("SPLASH:33:Loading Python modules...\n")
+    sys.stdout.flush()
 
 from dotenv import load_dotenv
 load_dotenv()  # 加载 .env（GOOGLE_API_KEY 等）到 os.environ
@@ -70,11 +99,12 @@ load_dotenv()  # 加载 .env（GOOGLE_API_KEY 等）到 os.environ
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 # embedding 模块在 import 时会先读 config 设好离线 env，再导出；此处仅做 PreTrainedModel 补丁
-try:
-    from src.memory.embedding import _ensure_pretrained_model_on_transformers
-    _ensure_pretrained_model_on_transformers()
-except Exception:
-    pass
+if not _SKIP_EMBEDDING_BOOTSTRAP_FOR_UNINSTALL:
+    try:
+        from src.memory.embedding import _ensure_pretrained_model_on_transformers
+        _ensure_pretrained_model_on_transformers()
+    except Exception:
+        pass
 
 import uvicorn
 from contextlib import asynccontextmanager
@@ -399,6 +429,87 @@ if os.path.exists(static_dir):
 
 
 if __name__ == "__main__":
+    # ── Electron 启动器：在常驻服务启动前跑一次性子任务（与主进程隔离，减轻 Windows 文件锁问题）
+
+    def _wizard_stdout_utf8_line(line: str) -> None:
+        try:
+            sys.stdout.buffer.write(line.encode("utf-8"))
+            sys.stdout.buffer.flush()
+        except (AttributeError, OSError, BrokenPipeError, ValueError):
+            try:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+    if "--setup-status-json" in sys.argv:
+        import json as _json
+
+        config = AppConfig.load()
+        from src.api.setup_guide import build_setup_status_dict
+
+        # Windows 打包 exe 下 stdout 常为系统代码页；写 buffer 保证 UTF-8，与前端读静态资源一致
+        _line = _json.dumps(build_setup_status_dict(config), ensure_ascii=False) + "\n"
+        try:
+            sys.stdout.buffer.write(_line.encode("utf-8"))
+            sys.stdout.buffer.flush()
+        except (AttributeError, OSError, BrokenPipeError, ValueError):
+            print(_line, end="")
+        raise SystemExit(0)
+    if "--wizard-download" in sys.argv:
+        _wi = sys.argv.index("--wizard-download")
+        _bid = sys.argv[_wi + 1] if len(sys.argv) > _wi + 1 else ""
+        _src = sys.argv[_wi + 2] if len(sys.argv) > _wi + 2 else "auto"
+        from src.api.setup_guide import run_wizard_download_cli
+
+        raise SystemExit(run_wizard_download_cli(_bid, _src))
+    if "--wizard-apply-stt" in sys.argv:
+        _wi = sys.argv.index("--wizard-apply-stt")
+        _mp = sys.argv[_wi + 1] if len(sys.argv) > _wi + 1 else ""
+        from src.api.setup_guide import wizard_apply_stt_model_cli
+
+        raise SystemExit(wizard_apply_stt_model_cli(_mp))
+    if "--wizard-launch-gptsovits" in sys.argv:
+        config = AppConfig.load()
+        from src.api.setup_guide import wizard_launch_gptsovits_cli
+
+        raise SystemExit(wizard_launch_gptsovits_cli(config))
+    if "--wizard-pip-uninstall" in sys.argv:
+        import json as _json
+
+        from src.api.setup_guide import run_wizard_pip_uninstall_cli
+
+        _raw = sys.stdin.read() or "{}"
+        try:
+            _body = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _wizard_stdout_utf8_line("SETUP_RESULT:" + _json.dumps({"ok": False, "errors": ["invalid json stdin"]}) + "\n")
+            raise SystemExit(1)
+        raise SystemExit(
+            run_wizard_pip_uninstall_cli(_body.get("packages") or [], _body.get("dirs") or [])
+        )
+    if "--wizard-save-gptsovits-dir" in sys.argv:
+        import json as _json
+
+        from src.api.settings_ext import _load_yaml, _save_yaml
+
+        _raw = sys.stdin.read() or "{}"
+        try:
+            _body = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _wizard_stdout_utf8_line("SETUP_RESULT:" + _json.dumps({"ok": False, "error": "invalid json stdin"}) + "\n")
+            raise SystemExit(1)
+        _dir = (_body.get("dir") or "").strip()
+        y, data = _load_yaml()
+        if "tts" not in data or not isinstance(data.get("tts"), dict):
+            data["tts"] = {}
+        if "gpt_sovits" not in data["tts"] or not isinstance(data["tts"].get("gpt_sovits"), dict):
+            data["tts"]["gpt_sovits"] = {}
+        data["tts"]["gpt_sovits"]["dir"] = _dir
+        _save_yaml(y, data)
+        _wizard_stdout_utf8_line("SETUP_RESULT:" + _json.dumps({"ok": True}, ensure_ascii=False) + "\n")
+        raise SystemExit(0)
+
     config = AppConfig.load()
     uvicorn.run(
         app,

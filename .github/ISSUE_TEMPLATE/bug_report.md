@@ -7,7 +7,7 @@ labels: bug
 ## Environment
 - OS and version (e.g. Windows 11, macOS 14, Ubuntu 22.04):
 - App version (from Settings UI, `package.json`, or release tag):
-- Install method (Release installer / `python server.py` / Docker):
+- Install method (git clone + `init.bat`/`init.sh` / `python server.py` / Docker / other):
 
 ## Steps to reproduce
 1. 

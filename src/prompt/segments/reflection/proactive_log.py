@@ -13,6 +13,7 @@ from typing import List, Dict, Any
 from src.prompt.base import PromptSegment, ReflectionBuildContext, SegmentResult
 from src.prompt.registry import register
 from src.config.prompt_loader import get_locale
+from src.utils.paths import get_project_root
 
 
 _REASON_LABELS_ZH = {
@@ -60,7 +61,7 @@ class ReflectionProactiveLogSegment(PromptSegment):
         locale = ctx.locale or get_locale()
 
         # Find ase_state.json path via profile storage root
-        storage_root = os.path.join("profiles", ctx.profile_id)
+        storage_root = os.path.join(get_project_root(), "profiles", ctx.profile_id)
         ase_state_path = os.path.join(storage_root, "ase_state.json")
         if not os.path.exists(ase_state_path):
             return SegmentResult(messages=[])

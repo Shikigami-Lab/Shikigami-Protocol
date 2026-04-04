@@ -10,7 +10,7 @@ Do **not** open a public issue for exploitable security problems (RCE, credentia
 
 If that is not available, open a **draft** Security Advisory with minimal reproduction details, or contact maintainers through a non-public channel they publish on the repo/org profile.
 
-Include: affected version or commit, environment (OS, install path: release binary vs source), and steps to reproduce.
+Include: affected version or commit, environment (OS, how you run the app: local source checkout, Docker, etc.), and steps to reproduce.
 
 ## Scope
 

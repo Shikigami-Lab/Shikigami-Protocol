@@ -1534,9 +1534,20 @@ html, body {
 /* ── 工具栏按钮悬停抬起 ── */
 .gear-btn, .screenshot-btn {
   transition: background 0.15s, color 0.15s, transform 0.15s;
+  position: relative;
 }
 .gear-btn:hover, .screenshot-btn:hover {
   transform: translateY(-1px);
+}
+.gear-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  background: #e0254a;
+  border-radius: 50%;
+  pointer-events: none;
 }
 
 /* ── streaming 气泡边框闪光 ── */

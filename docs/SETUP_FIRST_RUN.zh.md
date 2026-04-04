@@ -9,16 +9,9 @@
 
 ## 快速路径
 
-### 直接使用（推荐）
+**已不再发布预编译桌面安装包（.exe / .dmg / .AppImage）。** 请使用下方 **源码运行**，或 **Docker**。[Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 仅作版本标签与说明，附件为 GitHub 默认提供的**源码压缩包**；桌面端打包与发行形态**正在开发中**。
 
-前往 [GitHub Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 下载对应平台的安装包：
-- **Windows**: `Shikigami-Protocol-Setup-x.y.z.exe` (一键安装)
-- **macOS**: `Shikigami-Protocol-x.y.z.dmg`
-- **Linux**: `Shikigami-Protocol-x.y.z.AppImage`
-
-> **注意**：下载 Release 版本无需安装 Python 或 Node.js，但 AI 向量记忆、本地语音识别/合成等大型组件仍需在 UI 中按需下载模型。
-
-### 源码运行（开发者/高级用户）
+### 源码运行
 
 #### Windows
 ```bat
@@ -117,19 +110,15 @@ python server.py
 
 ## 配置 API Key
 
-编辑项目根目录的 `.env`，至少填入一个 LLM：
+**推荐**：启动应用后，在 **设置 → 模型** 里直接填写 API Key，自动保存。
+
+也可在启动前编辑项目根目录的 `.env`（适合 Docker / 无界面部署）：
 
 ```env
 GEMINI_API_KEY=你的密钥
 # 或本地 Ollama（无需 Key）：
 # OLLAMA_LOCAL_API_KEY=ollama
 ```
-
-也可在 UI 启动后通过 **设置 → 模型** 直接填写，会自动写回 `.env`。
-
-### PUBLIC_MODE（公开分发 / 受限构建）
-
-面向终端用户的安装包可在环境中设置 `PUBLIC_MODE=true`（见 `.env.example`），用于限制情绪键集合等「公开树」行为；**日常自用源码运行一般不要开启**。服务器侧在 `server.py` 中读取该变量并写入 `app.state.public_mode`。
 
 ---
 

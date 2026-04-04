@@ -4,7 +4,7 @@
 > Persona JSON fields: [profile_prompts.en.md](./profile_prompts.en.md).
 > **中文：** [GETTING_STARTED.zh.md](./GETTING_STARTED.zh.md)
 
-**This guide assumes your environment is already set up and the backend is running (browser can open `http://localhost:7788`).**
+**Set up Python / Node and run from source first:** [SETUP_FIRST_RUN.en.md](./SETUP_FIRST_RUN.en.md). Then use the two steps below.
 
 ---
 
@@ -23,6 +23,8 @@ Steps **1 + 2** are all you need to start chatting in the main window.
 ---
 
 ## Proxy (restricted networks)
+
+> Most users can skip this section. Only needed if your network cannot reach Gemini / OpenAI or other cloud APIs directly.
 
 The backend is a **Python process** — "the browser can use a VPN" does not mean Python can too.
 
@@ -47,7 +49,7 @@ You can also edit **`.env`** directly to set `HTTP_PROXY` / `HTTPS_PROXY` — sa
 | **LLM** | LLM preset management, API keys, local OpenAI-compatible URLs, auxiliary models (emotion / affinity) |
 | **Memory** | Long-term facts, vector memory toggle, embedding model (cloud Gemini or local BGE), diary and forgetting preview |
 | **TTS** | Voice engines: Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
-| **自省 / ASE** | Character inner monologue, proactive speech configuration |
+| **Behavior / Reflection** | Character inner monologue, proactive speech configuration |
 | **VLM** | Screen / visual understanding: model and screenshot strategy |
 | **Tools** | Todos, timers, weather, trends, web search — plugin toggles and config |
 | **System** | Theme, proxy, HF mirror, offline toggle |

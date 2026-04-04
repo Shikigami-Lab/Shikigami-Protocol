@@ -100,6 +100,16 @@ if [[ ! -f ".env" ]]; then
 else
     echo "  .env already exists, not overwritten."
 fi
+
+# ── 6. config/app.yaml ────────────────────────────────────────────────────────
+if [[ ! -f "config/app.yaml" ]]; then
+    if [[ -f "config/app.yaml.example" ]]; then
+        cp config/app.yaml.example config/app.yaml
+        echo "  Copied config/app.yaml from app.yaml.example."
+    fi
+else
+    echo "  config/app.yaml already exists, not overwritten."
+fi
 echo ""
 
 echo "  +--------------------------------------+"

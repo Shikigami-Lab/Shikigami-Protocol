@@ -9,16 +9,9 @@ This doc covers: **Python / Node installation, `init.bat` / `init.sh`, Docker de
 
 ## Quick paths
 
-### Pre-built release (Recommended)
+**Pre-built desktop installers (.exe / .dmg / .AppImage) are no longer published.** Clone the repo and use **Run from source** below, or **Docker**. [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) are version tags with auto-generated notes plus GitHub’s default **source code** archives only; desktop packaging is **under active development**.
 
-Go to [GitHub Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) and download the installer for your platform:
-- **Windows**: `Shikigami-Protocol-Setup-x.y.z.exe` (One-click installer)
-- **macOS**: `Shikigami-Protocol-x.y.z.dmg`
-- **Linux**: `Shikigami-Protocol-x.y.z.AppImage`
-
-> **Note**: Pre-built releases do not require Python or Node.js. Large components like AI memory vectors and local TTS/STT still require on-demand model downloads via the UI.
-
-### Run from source (Developers/Advanced)
+### Run from source
 
 #### Windows
 ```bat
@@ -117,19 +110,15 @@ python server.py
 
 ## Configuring API keys
 
-Edit `.env` in the project root — add at least one LLM:
+**Recommended**: after launching the app, go to **Settings → LLM** and type in your API key — it saves automatically.
+
+Alternatively, edit `.env` in the project root before launching (useful for Docker / headless deployments):
 
 ```env
 GEMINI_API_KEY=your_key_here
 # Local Ollama (no key needed):
 # OLLAMA_LOCAL_API_KEY=ollama
 ```
-
-You can also fill these in via **Settings → LLM** in the UI after startup; the UI writes back to `.env` automatically.
-
-### PUBLIC_MODE (public distribution builds)
-
-Installers aimed at end users may set `PUBLIC_MODE=true` in `.env` (see `.env.example`) to enable stricter, public-tree-safe behavior (e.g. emotion-key restrictions). **For normal local development, leave it unset or `false`.** The backend reads this in `server.py` and exposes `app.state.public_mode`.
 
 ---
 

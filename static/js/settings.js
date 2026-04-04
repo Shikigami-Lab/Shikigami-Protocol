@@ -67,7 +67,7 @@ const SettingsMixin = {
       settingsOpen: false,
       activeTab: 'profiles',
       settingsTabs: [
-        { id: 'onboarding', labelZh: '入门',  labelEn: 'Start',      shortEn: 'Start',   icon: '◇' },
+        { id: 'onboarding', labelZh: '新手引导', labelEn: 'First steps', shortEn: 'Guide', icon: '◇' },
         { id: 'profiles',   labelZh: '人格',  labelEn: 'Profiles',   shortEn: 'Profile', icon: '◆' },
         { id: 'llm',        labelZh: '模型',  labelEn: 'Models',     shortEn: 'Models',  icon: '◈' },
         { id: 'tts',        labelZh: '语音',  labelEn: 'Voice',      shortEn: 'Voice',   icon: '♪' },
@@ -111,6 +111,7 @@ const SettingsMixin = {
       // ── 入门 / 环境自检 ──
       setupGuide: null,
       setupGuideLoading: false,
+      onboardingGptsovitsDir: '',
       setupVerifyResult: null,
       setupVerifyLoading: false,
       setupDownloadPollId: null,
@@ -251,6 +252,8 @@ const SettingsMixin = {
       serverAddress: '',
       systemSaving: false,
       systemEnvSaving: false,
+      uiPrefsShowLauncher: true,
+      uiPrefsSaving: false,
       autoSaveState: null,   // null | 'saving' | 'saved'
       _autoSaveStateTimer: null,
       _systemFormLoaded: false,
@@ -601,6 +604,23 @@ const SettingsMixin = {
       return v === null || v === undefined ? this.memoryGlobalForm.daily_forgetting_enabled : !!v;
     },
 
+    /** 入门页教程：与 /api/setup/status 的 bundles 一致 */
+    onboardingMemBundles() {
+      const g = this.setupGuide;
+      if (!g || !Array.isArray(g.bundles)) return [];
+      return g.bundles.filter((x) => x.category === 'memory' || x.category === 'embedding');
+    },
+    onboardingTtsBundles() {
+      const g = this.setupGuide;
+      if (!g || !Array.isArray(g.bundles)) return [];
+      return g.bundles.filter((x) => x.category === 'tts');
+    },
+    onboardingSttBundle() {
+      const g = this.setupGuide;
+      if (!g || !Array.isArray(g.bundles)) return null;
+      return g.bundles.find((x) => x.id === 'sherpa_sense_voice') || null;
+    },
+
     // ── Persona canvas header computeds ──
     /** 条宽 0–100%（亲密度可为负，负值时条为 0，避免 CSS width 为负） */
     personaAffinityPct() {
@@ -930,6 +950,27 @@ const SettingsMixin = {
       setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 3500);
     },
 
+    /** Render pip install/uninstall API errors: strings pass through; `{ key, detail?, pkg?, dir?, prefix? }` uses i18n. */
+    formatPipError(err) {
+      if (err == null || err === '') return '';
+      if (typeof err === 'string') return err;
+      if (typeof err === 'object' && typeof err.key === 'string') {
+        let msg = this.t(err.key);
+        if (err.pkg != null) msg = msg.replace(/\{pkg\}/g, String(err.pkg));
+        if (err.dir != null) msg = msg.replace(/\{dir\}/g, String(err.dir));
+        if (err.prefix != null && err.detail != null)
+          msg = msg + '\n' + String(err.prefix) + ': ' + String(err.detail);
+        else if (err.detail) msg = msg + '\n' + String(err.detail);
+        return msg;
+      }
+      return String(err);
+    },
+
+    formatPipErrorsList(errors) {
+      if (!errors || !errors.length) return '';
+      return errors.map((e) => this.formatPipError(e)).filter(Boolean).join('\n\n');
+    },
+
     /* ─────────────── Engine Health ─────────────── */
 
     async loadEngineWarnings() {
@@ -976,6 +1017,29 @@ const SettingsMixin = {
       if (active && typeof active.blur === 'function') active.blur();
     },
 
+    onboardingBundleTitle(b) {
+      if (!b || !b.id) return '';
+      void this.locale;
+      const loc = this.locale === 'en' ? 'en' : 'zh';
+      const k = `modelBundle_${b.id}_title`;
+      const L = window.LOCALES && window.LOCALES[loc];
+      if (L && L[k]) return L[k];
+      return this.locale === 'en'
+        ? (b.title_en || b.title_zh || b.id)
+        : (b.title_zh || b.title_en || b.id);
+    },
+    onboardingBundleDesc(b) {
+      if (!b || !b.id) return '';
+      void this.locale;
+      const loc = this.locale === 'en' ? 'en' : 'zh';
+      const k = `modelBundle_${b.id}_desc`;
+      const L = window.LOCALES && window.LOCALES[loc];
+      if (L && L[k]) return L[k];
+      return this.locale === 'en'
+        ? (b.description_en || b.description_zh || '')
+        : (b.description_zh || b.description_en || '');
+    },
+
     async loadSetupGuide() {
       this.setupGuideLoading = true;
       try {
@@ -985,12 +1049,82 @@ const SettingsMixin = {
           this.setupGuide = data;
           if (data.stt_model_path !== undefined) this.sttModelPath = data.stt_model_path;
           // Sync gptsovits_dir into ttsForm so the inline save button works
-          if (data.tts && data.tts.gpt_sovits_dir != null)
+          if (data.tts && data.tts.gpt_sovits_dir != null) {
             this.ttsForm.gptsovits_dir = data.tts.gpt_sovits_dir;
+            this.onboardingGptsovitsDir = data.tts.gpt_sovits_dir;
+          }
         }
       } catch (_) {}
       finally {
         this.setupGuideLoading = false;
+      }
+    },
+
+    async saveOnboardingGptsovitsDir() {
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsGptSovitsDir(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir: this.onboardingGptsovitsDir || '' }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.ok) {
+          this.showToast(this.t('onboardingGptsovitsSaved'), 'success');
+          await this.loadSetupGuide();
+        } else {
+          this.showToast((j.detail || j.error || res.statusText || 'Save failed'), 'error');
+        }
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
+      }
+    },
+
+    async pickOnboardingSttModelDir() {
+      if (!window.electronAPI || typeof window.electronAPI.setupWizardPickSttModel !== 'function') {
+        this.showToast(this.t('setupWizardPickSttModelNeedElectron'), 'error');
+        return;
+      }
+      let picked;
+      try {
+        picked = await window.electronAPI.setupWizardPickSttModel();
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
+        return;
+      }
+      if (!picked || !picked.path) return;
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/apply-stt-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_path: picked.path }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.ok !== false) {
+          this.showToast(this.t('setupWizardPickSttModelSaved'), 'success');
+          await this.loadSetupGuide();
+        } else {
+          this.showToast((j.error || j.detail || res.statusText || 'Save failed'), 'error');
+        }
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
+      }
+    },
+
+    async launchOnboardingGptsovits() {
+      if (this.setupGuide?.tts?.gpt_sovits_port_open) {
+        return;
+      }
+      try {
+        const res = await fetch(getBaseUrl() + '/api/setup/launch-gptsovits', { method: 'POST' });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.ok !== false) {
+          this.showToast(this.t('onboardingTtsGptSoVitsLaunch') + ' …', 'success');
+          await this.loadSetupGuide();
+        } else {
+          this.showToast((j.error || j.detail || 'Launch failed'), 'error');
+        }
+      } catch (e) {
+        this.showToast(String(e.message || e), 'error');
       }
     },
 
@@ -1011,235 +1145,11 @@ const SettingsMixin = {
       }
     },
 
-    async startSetupDownload(bundleId, source) {
-      try {
-        // User explicitly clicked ModelScope: if modelscope isn't installed, install first then retry.
-        if (source === 'modelscope' && this.setupGuide && this.setupGuide.modelscope_installed === false) {
-          await this.installModelScope();
-          if (this.setupGuide && this.setupGuide.modelscope_installed === false) return;
-        }
-        const r = await fetch(getBaseUrl() + API_PATHS.setupDownload(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bundle: bundleId, source: source || 'auto' }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          if (source === 'modelscope' && (j.code === 'need_modelscope' || /modelscope/i.test(j.error || ''))) {
-            await this.installModelScope();
-            if (this.setupGuide && this.setupGuide.modelscope_installed) {
-              return await this.startSetupDownload(bundleId, source);
-            }
-            return;
-          }
-          window.alert(j.error || r.statusText || '下载启动失败');
-          return;
-        }
-      } catch (e) {
-        window.alert(String(e));
-        return;
-      }
-      if (this.setupDownloadPollId) clearInterval(this.setupDownloadPollId);
-      this.setupDownloadPollId = setInterval(async () => {
-        try {
-          const s = await fetch(getBaseUrl() + API_PATHS.setupDownloadStatus());
-          const d = await s.json();
-          if (this.setupGuide) this.setupGuide.download = d;
-          if (d.phase !== 'running') {
-            clearInterval(this.setupDownloadPollId);
-            this.setupDownloadPollId = null;
-            await this.loadSetupGuide();
-            if (d.phase === 'error' && d.error) window.alert(d.error);
-          }
-        } catch (_) {}
-      }, 800);
-    },
-
-    async installModelScope() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['modelscope'], target: 'modelscope' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            await this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-
-    async installQwenTts() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['qwen-tts>=0.0.1', 'soundfile>=0.12.0'], target: 'qwen_tts' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            await this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-
-    setupBundleTitle(b) {
-      return this.locale === 'en' ? (b.title_en || b.title_zh) : (b.title_zh || b.title_en);
-    },
-    setupBundleDesc(b) {
-      return this.locale === 'en' ? (b.description_en || b.description_zh) : (b.description_zh || b.description_en);
-    },
-
     openUrl(url) {
       if (window.electronAPI && window.electronAPI.openExternal) {
         window.electronAPI.openExternal(url);
       } else {
         window.open(url, '_blank', 'noopener');
-      }
-    },
-
-    async launchGptSovits() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/launch-gptsovits', { method: 'POST' });
-        const d = await res.json();
-        if (d.ok) this.showToast('GPT-SoVITS 启动命令已发送', 'success');
-        else this.showToast(d.error || '启动失败', 'error');
-        setTimeout(() => this.loadSetupGuide(), 2500);
-      } catch (e) { this.showToast('启动失败: ' + e.message, 'error'); }
-    },
-    async installKokoro() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['kokoro-onnx', 'misaki[zh]', 'misaki[ja]'], target: 'kokoro' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        // Immediately reflect running state so button disables
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        // Poll until done, updating reactive state each tick
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-    async selectSTTModel(path) {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/apply-stt-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_path: path }),
-        });
-        const d = await res.json();
-        if (d.ok) this.showToast(path ? ('STT 模型：' + path) : 'STT 模型：自动', 'success');
-        else this.showToast(d.error || '更新失败', 'error');
-      } catch (e) { this.showToast('更新失败: ' + e.message, 'error'); }
-    },
-
-    async installSherpaOnnx() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['sherpa-onnx', 'soundfile'], target: 'sherpa_onnx' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
-      }
-    },
-
-    async installAiMemory() {
-      try {
-        const res = await fetch(getBaseUrl() + '/api/setup/pip-install', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: ['chromadb>=0.5.0', 'transformers>=4.46.0,<5.0.0', 'sentence-transformers>=3.0.0', 'rank-bm25>=0.2.2'], target: 'ai_memory' }),
-        });
-        const d = await res.json();
-        if (!d.ok) {
-          if (!this.setupGuide) this.setupGuide = {};
-          this.setupGuide.pip_install = { phase: 'error', message: '启动失败', error: d.error || '启动安装失败' };
-          return;
-        }
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'running', message: '安装中…', error: null };
-        const poll = setInterval(async () => {
-          const s = await fetch(getBaseUrl() + '/api/setup/pip-install/status').then(r => r.json()).catch(() => null);
-          if (!s) return;
-          this.setupGuide.pip_install = s;
-          if (s.phase !== 'running' && s.phase !== 'idle') {
-            clearInterval(poll);
-            this.loadSetupGuide();
-          }
-        }, 2000);
-      } catch (e) {
-        if (!this.setupGuide) this.setupGuide = {};
-        this.setupGuide.pip_install = { phase: 'error', message: '安装失败', error: e.message };
       }
     },
 
@@ -1277,6 +1187,11 @@ const SettingsMixin = {
       this.currentTheme = name;
       document.documentElement.setAttribute('data-theme', name);
       localStorage.setItem('theme', name);
+      fetch(getBaseUrl() + '/api/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: name }),
+      }).catch(() => {});
     },
 
     /* ─────────────── Bubble Size ─────────────── */
@@ -1377,6 +1292,7 @@ const SettingsMixin = {
         if (data.ok) {
           this.showToast(this.t('toastLLMSaved'), 'success');
           await this.loadLLMPresets();
+          this.loadSetupGuide();
         } else {
           this.showToast(`保存失败: ${data.error || 'unknown'}`, 'error');
         }
@@ -1606,49 +1522,54 @@ const SettingsMixin = {
       }
     },
 
+    /** 与 POST /settings/tts/save、/settings/tts/test 共用，避免试听仍用未保存的旧 default_tts */
+    buildTtsSavePayload() {
+      return {
+        engine:                      this.ttsForm.engine,
+        voice:                       this.ttsForm.voice,
+        rate_pct:                    parseInt(this.ttsForm.rate_pct, 10) || 0,
+        language:                    this.ttsForm.language,
+        gptsovits_host:              this.ttsForm.gptsovits_host,
+        gptsovits_port:              parseInt(this.ttsForm.gptsovits_port, 10) || 9880,
+        gptsovits_dir:               this.ttsForm.gptsovits_dir || '',
+        gptsovits_text_lang:         this.ttsForm.gptsovits_text_lang,
+        gptsovits_prompt_lang:       this.ttsForm.gptsovits_prompt_lang,
+        gptsovits_speed:             parseFloat(this.ttsForm.gptsovits_speed) || 1.0,
+        gptsovits_temperature:       parseFloat(this.ttsForm.gptsovits_temperature) || 1.0,
+        gptsovits_top_p:             parseFloat(this.ttsForm.gptsovits_top_p) || 1.0,
+        gptsovits_top_k:             parseInt(this.ttsForm.gptsovits_top_k, 10) || 15,
+        gptsovits_repetition_penalty: parseFloat(this.ttsForm.gptsovits_repetition_penalty) || 1.35,
+        gptsovits_ref_audio_path: this.ttsForm.gptsovits_ref_audio_path || '',
+        gptsovits_prompt_text: this.ttsForm.gptsovits_prompt_text || '',
+        qwen3_mode:                  this.ttsForm.qwen3_mode || 'custom_voice',
+        qwen3_model_id:              this.ttsForm.qwen3_model_id || '',
+        qwen3_device:                this.ttsForm.qwen3_device || 'cuda:0',
+        qwen3_dtype:                 this.ttsForm.qwen3_dtype || 'bfloat16',
+        qwen3_language:              this.ttsForm.qwen3_language || 'Chinese',
+        qwen3_speaker:               this.ttsForm.qwen3_speaker || 'Vivian',
+        qwen3_instruct:              this.ttsForm.qwen3_instruct || '',
+        qwen3_voice_description:     this.ttsForm.qwen3_voice_description || '',
+        qwen3_ref_audio_path:        this.ttsForm.qwen3_ref_audio_path || '',
+        qwen3_ref_text:              this.ttsForm.qwen3_ref_text || '',
+        qwen3_temperature:           parseFloat(this.ttsForm.qwen3_temperature) || 0.9,
+        qwen3_top_p:                 parseFloat(this.ttsForm.qwen3_top_p) || 1.0,
+        qwen3_top_k:                 parseInt(this.ttsForm.qwen3_top_k, 10) || 50,
+        qwen3_repetition_penalty:    parseFloat(this.ttsForm.qwen3_repetition_penalty) || 1.05,
+        qwen3_attn_implementation:   this.ttsForm.qwen3_attn_implementation || 'eager',
+        qwen3_use_torch_compile:    !!this.ttsForm.qwen3_use_torch_compile,
+        qwen3_use_sentence_chunking: !!this.ttsForm.qwen3_use_sentence_chunking,
+        qwen3_sentence_max_chars:    parseInt(this.ttsForm.qwen3_sentence_max_chars, 10) || 0,
+        kokoro_voice:               this.ttsForm.kokoro_voice || '',
+        kokoro_lang:                this.ttsForm.kokoro_lang || 'zh',
+        kokoro_speed:               parseFloat(this.ttsForm.kokoro_speed) || 1.0,
+        kokoro_auto_detect_lang:    !!this.ttsForm.kokoro_auto_detect_lang,
+      };
+    },
+
     async saveTTSConfig(silent = false) {
       this.ttsSaveState = 'saving';
       try {
-        const body = {
-          engine:                      this.ttsForm.engine,
-          voice:                       this.ttsForm.voice,
-          rate_pct:                    parseInt(this.ttsForm.rate_pct, 10) || 0,
-          language:                    this.ttsForm.language,
-          gptsovits_host:              this.ttsForm.gptsovits_host,
-          gptsovits_port:              parseInt(this.ttsForm.gptsovits_port, 10) || 9880,
-          gptsovits_dir:               this.ttsForm.gptsovits_dir || '',
-          gptsovits_text_lang:         this.ttsForm.gptsovits_text_lang,
-          gptsovits_prompt_lang:       this.ttsForm.gptsovits_prompt_lang,
-          gptsovits_speed:             parseFloat(this.ttsForm.gptsovits_speed) || 1.0,
-          gptsovits_temperature:       parseFloat(this.ttsForm.gptsovits_temperature) || 1.0,
-          gptsovits_top_p:             parseFloat(this.ttsForm.gptsovits_top_p) || 1.0,
-          gptsovits_top_k:             parseInt(this.ttsForm.gptsovits_top_k, 10) || 15,
-          gptsovits_repetition_penalty: parseFloat(this.ttsForm.gptsovits_repetition_penalty) || 1.35,
-          gptsovits_ref_audio_path: this.ttsForm.gptsovits_ref_audio_path || '',
-          gptsovits_prompt_text: this.ttsForm.gptsovits_prompt_text || '',
-          qwen3_mode:                  this.ttsForm.qwen3_mode || 'custom_voice',
-          qwen3_model_id:              this.ttsForm.qwen3_model_id || '',
-          qwen3_device:                this.ttsForm.qwen3_device || 'cuda:0',
-          qwen3_dtype:                 this.ttsForm.qwen3_dtype || 'bfloat16',
-          qwen3_language:              this.ttsForm.qwen3_language || 'Chinese',
-          qwen3_speaker:               this.ttsForm.qwen3_speaker || 'Vivian',
-          qwen3_instruct:              this.ttsForm.qwen3_instruct || '',
-          qwen3_voice_description:     this.ttsForm.qwen3_voice_description || '',
-          qwen3_ref_audio_path:        this.ttsForm.qwen3_ref_audio_path || '',
-          qwen3_ref_text:              this.ttsForm.qwen3_ref_text || '',
-          qwen3_temperature:           parseFloat(this.ttsForm.qwen3_temperature) || 0.9,
-          qwen3_top_p:                 parseFloat(this.ttsForm.qwen3_top_p) || 1.0,
-          qwen3_top_k:                 parseInt(this.ttsForm.qwen3_top_k, 10) || 50,
-          qwen3_repetition_penalty:    parseFloat(this.ttsForm.qwen3_repetition_penalty) || 1.05,
-          qwen3_attn_implementation:   this.ttsForm.qwen3_attn_implementation || 'eager',
-          qwen3_use_torch_compile:    !!this.ttsForm.qwen3_use_torch_compile,
-          qwen3_use_sentence_chunking: !!this.ttsForm.qwen3_use_sentence_chunking,
-          qwen3_sentence_max_chars:    parseInt(this.ttsForm.qwen3_sentence_max_chars, 10) || 0,
-          kokoro_voice:               this.ttsForm.kokoro_voice || '',
-          kokoro_lang:                this.ttsForm.kokoro_lang || 'zh',
-          kokoro_speed:               parseFloat(this.ttsForm.kokoro_speed) || 1.0,
-          kokoro_auto_detect_lang:    !!this.ttsForm.kokoro_auto_detect_lang,
-        };
+        const body = this.buildTtsSavePayload();
         const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsSave(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1677,7 +1598,11 @@ const SettingsMixin = {
     async testTTSVoice() {
       this.ttsTestState = 'loading';
       try {
-        const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsTest(), { method: 'POST' });
+        const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsTest(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.buildTtsSavePayload()),
+        });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'synthesis failed');
         const audio = new Audio(`data:${data.mime};base64,${data.audio}`);
@@ -1686,6 +1611,8 @@ const SettingsMixin = {
       } catch (e) {
         this.ttsTestState = 'error';
         console.error('[testTTS]', e);
+        const msg = (e && e.message) ? String(e.message) : String(e);
+        if (this.showToast) this.showToast(msg, 'error');
       }
       setTimeout(() => { this.ttsTestState = null; }, 3000);
     },
@@ -3291,7 +3218,29 @@ const SettingsMixin = {
           this.systemEnvForm.proxy_url = data.proxy_url || '';
         }
       } catch (_) {}
+      try {
+        const res = await fetch(getBaseUrl() + '/api/preferences');
+        if (res.ok) {
+          const prefs = await res.json();
+          this.uiPrefsShowLauncher = prefs.show_startup_launcher !== false;
+        }
+      } catch (_) {}
       this.$nextTick(() => { this._systemFormLoaded = true; });
+    },
+
+    async saveUiPrefsLauncher() {
+      if (this.uiPrefsSaving) return;
+      this.uiPrefsSaving = true;
+      try {
+        await fetch(getBaseUrl() + '/api/preferences', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ show_startup_launcher: !!this.uiPrefsShowLauncher }),
+        });
+      } catch (_) {}
+      finally {
+        this.uiPrefsSaving = false;
+      }
     },
 
     async saveSystemConfig(silent = false) {

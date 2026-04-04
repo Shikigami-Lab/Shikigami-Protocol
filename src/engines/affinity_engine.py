@@ -159,7 +159,8 @@ class AffinityEngine:
             try:
                 import json as _json
                 import os as _os
-                _path = _os.path.join("profiles", f"{session.profile_id}.json")
+                from src.utils.paths import get_project_root as _get_root
+                _path = _os.path.join(_get_root(), "profiles", f"{session.profile_id}.json")
                 if _os.path.exists(_path):
                     with open(_path, encoding="utf-8") as _f:
                         profile = _json.load(_f)

@@ -8,7 +8,7 @@
   <link rel="icon" href="icon.png" type="image/png" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='25' x='16' text-anchor='middle' font-size='22' font-family='KaiTi, STKaiti, Kaiti SC, 楷体, serif'>式</text></svg>" type="image/svg+xml" />
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
-  <script>(function(){var t=localStorage.getItem('theme')||'';if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
+  <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/settings.css" />
 
@@ -492,7 +492,7 @@
             </div>
           </div>
         </div>
-        <button class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')">⚙</button>
+        <button class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
       </div>
     </header>
 
@@ -509,7 +509,7 @@
 
       <!-- Empty state -->
       <div v-if="!hasMessages" class="empty-state">
-        <template v-if="!currentSessionId">
+        <template v-if="!currentSessionId && !currentGroupId">
           <div class="empty-icon">🪄</div>
           <div class="empty-hint">{{ t('emptyStateNoProfile') }}</div>
           <button class="s-btn s-btn-primary" @click="openSettings(); activeTab = 'profiles'">
@@ -901,7 +901,28 @@
 
       <!-- ── Tab: 入门 / 新手引导 ── -->
       <div v-if="activeTab === 'onboarding'" class="settings-tab-content setup-guide-tab">
-        <p class="setup-guide-lead">{{ t('onboardingLead') }}</p>
+        <h3 class="setup-guide-h3 setup-guide-shortpath-heading">{{ t('onboardingShortPathTitle') }}</h3>
+        <ol class="setup-guide-shortpath">
+          <li>
+            <span>{{ t('onboardingShortPathStep1') }}</span>
+            <div class="setup-shortpath-actions">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'llm'">{{ t('onboardingJumpModels') }}</button>
+            </div>
+          </li>
+          <li>
+            <span>{{ t('onboardingShortPathStep2') }}</span>
+            <div class="setup-shortpath-actions">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'profiles'">{{ t('onboardingJumpProfiles') }}</button>
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openProfileWizard">✦ {{ t('onboardingOpenPersonaWizard') }}</button>
+            </div>
+          </li>
+          <li>{{ t('onboardingShortPathStep3') }}</li>
+        </ol>
+        <p class="setup-guide-packaged-note" v-html="t('onboardingPackagedNote')"></p>
+
+        <p class="setup-guide-tab-blurb muted">{{ t('onboardingTabBlurb') }}</p>
+
+        <p class="setup-guide-lead" v-html="t('onboardingLead')"></p>
         <p class="setup-guide-doc-links">
           <span class="setup-guide-doc-intro">{{ t('onboardingDocLinksIntro') }}</span>
           <a :href="userDocUrl('GETTING_STARTED')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenGettingStarted') }}</a>
@@ -909,11 +930,11 @@
           <a :href="userDocUrl('SETUP_FIRST_RUN')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenSetupFirstRun') }}</a>
           <span class="setup-guide-doc-sep">·</span>
           <a :href="userDocUrl('profile_prompts')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenProfilePrompts') }}</a>
-          <span class="setup-guide-doc-sep">·</span>
+        </p>
+        <p class="setup-guide-doc-links setup-guide-doc-links-dev">
+          <span>{{ t('onboardingDocLinksDevIntro') }}</span>
           <a :href="userDocUrl('ARCHITECTURE_REFERENCE')" target="_blank" rel="noopener noreferrer">{{ t('onboardingOpenMinimum') }}</a>
         </p>
-
-        <p class="setup-guide-tab-blurb">{{ t('onboardingTabBlurb') }}</p>
 
         <div class="setup-guide-section setup-guide-checklist-section">
           <h3 class="setup-guide-h3">{{ t('onboardingChecklistTitle') }}</h3>
@@ -939,16 +960,16 @@
               <span class="setup-quick-dot">{{ setupGuide.profile_count > 0 ? '✓' : '○' }}</span>
               <span>{{ t('onboardingQuickProfiles') }} ({{ setupGuide.profile_count }})</span>
             </div>
-            <div class="setup-quick-item" :class="{ ok: setupGuide.chromadb_installed }">
-              <span class="setup-quick-dot">{{ setupGuide.chromadb_installed ? '✓' : '○' }}</span>
-              <span>ChromaDB</span>
+            <div class="setup-quick-item optional" :class="{ ok: setupGuide.chromadb_installed }">
+              <span class="setup-quick-dot">{{ setupGuide.chromadb_installed ? '✓' : '–' }}</span>
+              <span>{{ t('onboardingQuickChromaDB') }}</span>
             </div>
-            <div class="setup-quick-item" :class="{ ok: !setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en)) }">
-              <span class="setup-quick-dot">{{ (!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? '✓' : '○' }}</span>
+            <div class="setup-quick-item optional" :class="{ ok: !setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en)) }">
+              <span class="setup-quick-dot">{{ (!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? '✓' : '–' }}</span>
               <span>{{ t('onboardingQuickEmbed') }}</span>
             </div>
-            <div class="setup-quick-item" :class="{ ok: setupGuide.stt_ready }">
-              <span class="setup-quick-dot">{{ setupGuide.stt_ready ? '✓' : '○' }}</span>
+            <div class="setup-quick-item optional" :class="{ ok: setupGuide.stt_ready }">
+              <span class="setup-quick-dot">{{ setupGuide.stt_ready ? '✓' : '–' }}</span>
               <span>{{ t('onboardingQuickStt') }}</span>
             </div>
           </div>
@@ -960,377 +981,241 @@
             <button type="button" class="s-btn s-btn-primary" :disabled="setupGuideLoading" @click="loadSetupGuide">{{ t('onboardingRefresh') }}</button>
           </div>
         </div>
-        <div v-else-if="setupGuideLoading" class="muted">{{ t('onboardingLoading') }}</div>
+        <p v-else-if="setupGuideLoading" class="muted setup-guide-inline-loading">{{ t('onboardingLoading') }}</p>
 
-        <!-- 第一步：网络与下载环境配置 -->
-        <div class="setup-guide-section" v-if="setupGuide">
-          <h3 class="setup-guide-h3">{{ t('onboardingNetworkTitle') }}</h3>
-          <p class="muted" style="margin-bottom:12px;">{{ t('onboardingNetworkDesc') }}</p>
+        <div v-if="setupGuide" class="setup-guide-optional-wrap setup-guide-tutorial-section">
+          <h3 class="setup-guide-h3">{{ t('onboardingTutorialSectionTitle') }}</h3>
+          <p class="setup-guide-advanced-hint" style="margin-top:0;">{{ t('onboardingTutorialSectionLead') }}</p>
+          <p class="muted" style="font-size:12px;line-height:1.6;">{{ t('onboardingOptionalAdvancedHint') }}</p>
+          <p class="setup-guide-tutorial-launcher-note">{{ t('onboardingTutorialDoInLauncher') }}</p>
 
-          <!-- ModelScope -->
-          <div class="setup-tts-card" :class="{ active: setupGuide.modelscope_installed }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">ModelScope ({{ t('onboardingNetworkChinaRecommended') }})</span>
-              <span class="setup-bundle-badge" :class="{ installed: setupGuide.modelscope_installed }">
-                {{ setupGuide.modelscope_installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}
-              </span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingModelScopeDesc') }}</p>
-            <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-              <button v-if="!setupGuide.modelscope_installed" type="button" class="s-btn s-btn-secondary"
-                      :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                      :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'modelscope' ? t('onboardingOtherInstalling') : ''"
-                      @click="installModelScope()">
-                {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'modelscope' ? t('onboardingKokoroInstalling') : t('onboardingModelScopeInstall') }}
-              </button>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'modelscope' && !setupGuide.modelscope_installed"
-                    class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'modelscope' && !setupGuide.modelscope_installed"
-                    class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
+          <div class="setup-guide-section">
+            <h3 class="setup-guide-h3">{{ t('onboardingNetworkTitle') }}</h3>
+            <p class="setup-tts-desc">{{ t('onboardingNetworkDesc') }}</p>
+            <div class="setup-tts-card">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">ModelScope ({{ t('onboardingNetworkChinaRecommended') }})</span>
+                <span class="setup-bundle-badge" :class="{ installed: setupGuide.modelscope_installed }">
+                  {{ setupGuide.modelscope_installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}
+                </span>
+              </div>
+              <p class="setup-tts-desc">{{ t('onboardingModelScopeDesc') }}</p>
+              <p class="muted" style="margin-top:8px;font-size:11px;line-height:1.45;">{{ t('onboardingModelScopeTorchHint') }}</p>
             </div>
           </div>
-        </div>
 
-        <!-- 第二步：AI 记忆模块 -->
-        <div class="setup-guide-section" v-if="setupGuide">
-          <h3 class="setup-guide-h3">{{ t('onboardingAiMemoryTitle') }}</h3>
-          
-          <!-- 组件A：依赖库 -->
-          <div class="setup-tts-card" :class="{ active: setupGuide.ai_memory_installed }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">1. {{ t('onboardingAiMemoryDeps') }} (chromadb + transformers)</span>
-              <span class="setup-bundle-badge" :class="{ installed: setupGuide.ai_memory_installed }">
-                {{ setupGuide.ai_memory_installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}
-              </span>
-            </div>
+          <div class="setup-guide-section">
+            <h3 class="setup-guide-h3">{{ t('onboardingAiMemoryTitle') }}</h3>
             <p class="setup-tts-desc">{{ t('onboardingAiMemoryDesc') }}</p>
-            <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-              <button v-if="!setupGuide.ai_memory_installed" type="button" class="s-btn s-btn-secondary"
-                      :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                      :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'ai_memory' ? t('onboardingOtherInstalling') : ''"
-                      @click="installAiMemory()">
-                {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'ai_memory' ? t('onboardingKokoroInstalling') : t('onboardingAiMemoryInstall') }}
-              </button>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'ai_memory' && !setupGuide.ai_memory_installed"
-                    class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'ai_memory' && !setupGuide.ai_memory_installed"
-                    class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
-            </div>
-          </div>
-
-          <!-- 组件B：Embedding 模型 -->
-          <div class="setup-tts-card" v-if="setupGuide && setupGuide.bundles && setupGuide.bundles.some(b => b.category === 'embedding')" :class="{ active: setupGuide.ai_memory_installed }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">2. {{ t('onboardingAiMemoryModels') }} (Embedding Models)</span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingAiMemoryModelsDesc') }}</p>
-            
-            <div v-if="!setupGuide.ai_memory_installed" class="muted" style="margin-top:8px; font-size:12px;">
-              ⚠️ {{ t('onboardingAiMemoryNeedDepsFirst') }}
-            </div>
-            
-            <div v-else>
-              <div v-if="setupGuide.download && setupGuide.download.phase === 'running'" class="setup-dl-progress">
-                <div class="setup-dl-bar"><div class="setup-dl-fill" :style="{ width: (setupGuide.download.progress_pct || 0) + '%' }"></div></div>
-                <span>{{ setupGuide.download.message }}</span>
-              </div>
-              <div class="setup-bundle-list" style="margin-top:10px;">
-                <div v-for="b in (setupGuide.bundles || []).filter(x => x.category === 'embedding')" :key="b.id" class="setup-bundle-card">
-                  <div class="setup-bundle-head">
-                    <span class="setup-bundle-title">{{ setupBundleTitle(b) }}</span>
-                    <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
-                    <span v-if="b.recommended" class="setup-bundle-rec">{{ t('onboardingRecommended') }}</span>
-                    <span v-if="b.installed" class="setup-bundle-badge installed">{{ t('onboardingInstalled') }}</span>
-                    <span v-else class="setup-bundle-badge">{{ t('onboardingNotInstalled') }}</span>
-                  </div>
-                  <p class="setup-bundle-desc">{{ setupBundleDesc(b) }}</p>
-                  <code class="setup-bundle-path">{{ b.local_path }}</code>
-                  <div class="setup-bundle-actions" style="display:flex;gap:4px;flex-wrap:wrap;">
-                    <button v-if="b.repo_id" type="button" class="s-btn s-btn-small" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'hf')">{{ t('onboardingBtnHfMirror') }}</button>
-                    <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'modelscope')">{{ t('onboardingBtnModelScope') }}</button>
-                    <button v-if="b.direct_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'direct')">{{ t('onboardingBtnGitHubDirect') }}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 第三步：TTS 设置区 -->
-        <div class="setup-guide-section" v-if="setupGuide && setupGuide.tts">
-          <h3 class="setup-guide-h3">{{ t('onboardingTtsTitle') }}</h3>
-          <p class="muted" style="margin-bottom:8px;">{{ t('onboardingTtsActive') }}：<strong>{{ setupGuide.tts.active }}</strong></p>
-
-          <!-- Edge TTS -->
-          <div class="setup-tts-card" :class="{ active: setupGuide.tts.active === 'edge_tts' }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">Edge TTS</span>
-              <span class="setup-bundle-badge installed">{{ t('onboardingTtsReady') }}</span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingTtsEdge') }}</p>
-          </div>
-
-          <!-- GPT-SoVITS -->
-          <div class="setup-tts-card" :class="{ active: setupGuide.tts.active === 'gpt_sovits' }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">GPT-SoVITS</span>
-              <span class="setup-bundle-badge" :class="{ installed: setupGuide.tts.gpt_sovits_port_open }">
-                {{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
-              </span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingTtsGptSoVits') }}</p>
-            <p class="setup-tts-check">
-              <span :class="setupGuide.tts.gpt_sovits_port_open ? 'ok' : 'warn'">
-                {{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsGptSoVitsOpen') : t('onboardingTtsGptSoVitsClosed') }}
-              </span>
-            </p>
-
-            <!-- Download guide — shown when service not running -->
-            <div v-if="!setupGuide.tts.gpt_sovits_port_open" style="margin-top:10px;">
-              <details>
-                <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);user-select:none;">
-                  {{ t('onboardingTtsGptSoVitsHowToGet') }}
-                </summary>
-                <div style="margin-top:8px;font-size:12px;line-height:1.7;color:var(--text-secondary);">
-                  <div style="margin-bottom:6px;">
-                    <span style="color:var(--accent);font-weight:600;">① {{ t('onboardingTtsGptSoVitsStep1') }}</span><br>
-                    <button type="button" class="s-btn s-btn-secondary" style="margin-top:4px;font-size:12px;"
-                            @click="openUrl('https://github.com/RVC-Boss/GPT-SoVITS/releases')">
-                      ↗ github.com/RVC-Boss/GPT-SoVITS/releases
-                    </button>
-                    <span style="display:block;margin-top:3px;">{{ t('onboardingTtsGptSoVitsStep1Hint') }}</span>
-                  </div>
-                  <div style="margin-bottom:6px;">
-                    <span style="color:var(--accent);font-weight:600;">② {{ t('onboardingTtsGptSoVitsStep2') }}</span><br>
-                    <span>{{ t('onboardingTtsGptSoVitsStep2Hint') }}</span>
-                  </div>
-                  <div>
-                    <span style="color:var(--accent);font-weight:600;">③ {{ t('onboardingTtsGptSoVitsStep3') }}</span><br>
-                    <span>{{ t('onboardingTtsGptSoVitsStep3Hint') }}</span>
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <!-- Dir config + launch -->
-            <div style="margin-top:10px;margin-bottom:6px;">
-              <div class="form-label" style="margin-bottom:4px;">{{ t('lblGptSovitsDir') }}</div>
-              <div style="display:flex;gap:6px;">
-                <input class="form-input" v-model="ttsForm.gptsovits_dir"
-                       :placeholder="t('phGptSovitsDir')" style="flex:1;font-size:12px;" />
-              </div>
-              <div class="form-hint" style="margin-top:3px;">{{ t('hintGptSovitsDir') }}</div>
-            </div>
-            <div style="margin-top:8px;">
-              <button type="button" class="s-btn s-btn-secondary"
-                      :disabled="setupGuide.tts.gpt_sovits_port_open"
-                      @click="launchGptSovits()">
-                {{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsGptSoVitsRunning') : t('onboardingTtsGptSoVitsLaunch') }}
-              </button>
-            </div>
-          </div>
-
-          <!-- KokoroTTS -->
-          <div class="setup-tts-card" :class="{ active: setupGuide.tts.active === 'kokoro' }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">KokoroTTS</span>
-              <span class="setup-bundle-badge" :class="{ installed: setupGuide.tts.kokoro_installed }">
-                {{ setupGuide.tts.kokoro_installed ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
-              </span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingTtsKokoro') }}</p>
-            <div class="setup-tts-checks">
-              <span :class="setupGuide.tts.kokoro_installed ? 'ok' : 'warn'">
-                {{ setupGuide.tts.kokoro_installed ? '✓' : '○' }} {{ t('onboardingTtsKokoroPkg') }}
-              </span>
-              <span :class="setupGuide.tts.kokoro_misaki_zh ? 'ok' : 'muted'">
-                {{ setupGuide.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiZh') }}
-              </span>
-              <span :class="setupGuide.tts.kokoro_misaki_ja ? 'ok' : 'muted'">
-                {{ setupGuide.tts.kokoro_misaki_ja ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiJa') }}
-              </span>
-            </div>
-            <div v-if="!setupGuide.tts.kokoro_installed" style="margin-top:8px;">
-              <button type="button" class="s-btn s-btn-secondary"
-                      :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                      :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'kokoro' ? t('onboardingOtherInstalling') : ''"
-                      @click="installKokoro()">
-                {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'kokoro' ? t('onboardingKokoroInstalling') : t('onboardingKokoroInstall') }}
-              </button>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'kokoro'" class="warn" style="font-size:11px;margin-left:6px;">{{ setupGuide.pip_install.error }}</span>
-              <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'kokoro'" class="ok" style="font-size:11px;margin-left:6px;">{{ t('onboardingKokoroInstallDone') }}</span>
-            </div>
-            <!-- Model files status + download -->
-            <div v-if="setupGuide.tts.kokoro_installed" style="margin-top:10px;">
-              <div style="font-size:12px;margin-bottom:6px;">
-                <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'">
-                  {{ setupGuide.tts.kokoro_models_ready ? '✓' : '○' }} {{ t('onboardingKokoroModels') }}
-                </span>
-              </div>
-              <div v-if="!setupGuide.tts.kokoro_models_ready">
-                <details>
-                  <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);user-select:none;">
-                    {{ t('onboardingKokoroModelsHowTo') }}
-                  </summary>
-                  <div style="margin-top:8px;font-size:12px;line-height:1.8;color:var(--text-secondary);">
-                    <div>{{ t('onboardingKokoroModelsHint') }}</div>
-                    <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">
-                      <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
-                              @click="openUrl('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx')">
-                        ↓ kokoro-v1.0.onnx
-                      </button>
-                      <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
-                              @click="openUrl('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin')">
-                        ↓ voices-v1.0.bin
-                      </button>
-                    </div>
-                    <div style="margin-top:4px;" v-html="t('onboardingKokoroModelsSaveTo')"></div>
-                  </div>
-                </details>
-              </div>
-            </div>
-          </div>
-
-          <!-- Qwen3-TTS -->
-          <div class="setup-tts-card" :class="{ active: setupGuide.tts.active === 'qwen3_tts' }">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">Qwen3-TTS</span>
-              <span class="setup-bundle-badge" :class="{ installed: setupGuide.tts.qwen3_model_ready }">
-                {{ setupGuide.tts.qwen3_model_ready ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
-              </span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingTtsQwen3') }}</p>
-
-            <!-- 1. Qwen3-TTS 运行依赖安装 -->
-            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
-              <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:var(--text-primary);">
-                1. {{ t('onboardingQwenTtsPkgStepTitle') }}
-              </div>
-              <p class="setup-tts-desc" style="margin-bottom:8px;">
-                {{ t('onboardingQwenTtsPkgDesc') }}
-                <span v-if="setupGuide.torch_installed" class="ok" style="margin-left:6px;">(torch ✓)</span>
-                <span v-else class="muted" style="margin-left:6px;">(torch ?)</span>
-              </p>
-              
-              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                <span v-if="setupGuide.qwen_tts_installed" class="ok" style="font-size:12px;">
-                  ✓ {{ t('onboardingQwenTtsPkgInstalled') }}
-                </span>
-                <button v-else type="button" class="s-btn s-btn-secondary"
-                        :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                        :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'qwen_tts' ? t('onboardingOtherInstalling') : ''"
-                        @click="installQwenTts()">
-                  {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'qwen_tts' ? t('onboardingKokoroInstalling') : t('onboardingQwenTtsPkgInstall') }}
-                </button>
-                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'qwen_tts' && !setupGuide.qwen_tts_installed"
-                      class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
-                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'success' && setupGuide.pip_install.target === 'qwen_tts' && !setupGuide.qwen_tts_installed"
-                      class="ok" style="font-size:11px;">{{ t('onboardingKokoroInstallDone') }}</span>
-              </div>
-            </div>
-
-            <!-- 2. Qwen3 模型文件下载 -->
-            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
-              <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:var(--text-primary);">
-                2. {{ t('onboardingQwenTtsModelStepTitle') }}
-              </div>
-              
-              <div v-if="!setupGuide.qwen_tts_installed" class="muted" style="margin-top:8px; font-size:12px;">
-                ⚠️ {{ t('onboardingQwenTtsNeedDepsFirst') }}
-              </div>
-              
-              <div v-else>
-                <div v-if="setupGuide.download && setupGuide.download.phase === 'running' && setupGuide.download.bundle_id && setupGuide.download.bundle_id.startsWith('qwen3')" class="setup-dl-progress">
-                  <div class="setup-dl-bar"><div class="setup-dl-fill" :style="{ width: (setupGuide.download.progress_pct || 0) + '%' }"></div></div>
-                  <span>{{ setupGuide.download.message }}</span>
-                </div>
-                <div class="setup-tts-bundles">
-                  <div v-for="b in (setupGuide.bundles || []).filter(x => x.category === 'tts')" :key="b.id" class="setup-tts-bundle-row">
-                    <div class="setup-tts-bundle-info">
-                      <span class="setup-tts-bundle-name">{{ setupBundleTitle(b) }}</span>
-                      <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
-                      <span class="setup-bundle-badge" :class="{ installed: b.installed }">{{ b.installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}</span>
-                    </div>
-                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                      <button v-if="b.repo_id" type="button" class="s-btn s-btn-small" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'hf')">{{ t('onboardingBtnHfMirror') }}</button>
-                      <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'modelscope')">{{ t('onboardingBtnModelScope') }}</button>
-                      <button v-if="b.direct_url" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload(b.id, 'direct')">{{ t('onboardingBtnGitHub') }}</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- STT 引擎选择 -->
-        <div class="setup-guide-section" v-if="setupGuide">
-          <h3 class="setup-guide-h3">{{ t('onboardingSttTitle') }}</h3>
-          <!-- sherpa-onnx SenseVoice -->
-          <div class="setup-tts-card active">
-            <div class="setup-tts-head">
-              <span class="setup-tts-name">SenseVoice</span>
-              <span class="muted" style="font-size:11px;margin-left:6px;">via sherpa-onnx</span>
-              <span class="setup-bundle-badge" :class="{ installed: setupGuide.sherpa_onnx_installed && setupGuide.sherpa_sense_voice_ready }">
-                {{ (setupGuide.sherpa_onnx_installed && setupGuide.sherpa_sense_voice_ready) ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
-              </span>
-            </div>
-            <p class="setup-tts-desc">{{ t('onboardingSttSenseVoiceDesc') }}</p>
-
-            <!-- 1. STT 运行依赖 -->
-            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
-              <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:var(--text-primary);">
-                1. {{ t('onboardingSttDepsStepTitle') }}
-              </div>
-              <div class="setup-tts-check" style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
-                <span v-if="setupGuide.sherpa_onnx_installed" class="ok">
-                  ✓ sherpa-onnx {{ t('onboardingInstalled') }}
-                </span>
-                <button v-else type="button" class="s-btn s-btn-secondary" style="width: fit-content;"
-                        :disabled="setupGuide.pip_install && setupGuide.pip_install.phase === 'running'"
-                        :title="setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target !== 'sherpa_onnx' ? t('onboardingOtherInstalling') : ''"
-                        @click="installSherpaOnnx()">
-                  {{ setupGuide.pip_install && setupGuide.pip_install.phase === 'running' && setupGuide.pip_install.target === 'sherpa_onnx' ? t('onboardingKokoroInstalling') : t('onboardingSttInstallSherpa') }}
-                </button>
-                <span v-if="setupGuide.pip_install && setupGuide.pip_install.phase === 'error' && setupGuide.pip_install.target === 'sherpa_onnx' && !setupGuide.sherpa_onnx_installed" class="warn" style="font-size:11px;">{{ setupGuide.pip_install.error }}</span>
-              </div>
-            </div>
-
-            <!-- 2. STT 模型文件 -->
-            <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-color);">
-              <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:var(--text-primary);">
-                2. {{ t('onboardingSttModelStepTitle') }}
-              </div>
-              
-              <div v-if="!setupGuide.sherpa_onnx_installed" class="muted" style="margin-top:8px; font-size:12px;">
-                ⚠️ {{ t('onboardingSttNeedDepsFirst') }}
-              </div>
-              
-              <div v-else>
-                <div class="setup-tts-check" style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
-                  <span :class="setupGuide.sherpa_sense_voice_ready ? 'ok' : 'warn'">
-                    {{ setupGuide.sherpa_sense_voice_ready ? '✓' : '○' }} {{ t('onboardingSttModelFiles') }} (models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue)
+            <div class="setup-wizard-substep">
+              <div class="setup-wizard-substep-title">1. {{ t('onboardingAiMemoryDeps') }}</div>
+              <div class="setup-tts-card">
+                <div class="setup-tts-head">
+                  <span class="setup-tts-name">{{ t('onboardingAiMemoryDeps') }}</span>
+                  <span class="setup-bundle-badge" :class="{ installed: setupGuide.ai_memory_installed }">
+                    {{ setupGuide.ai_memory_installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}
                   </span>
                 </div>
-                <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                  <template v-if="!setupGuide.sherpa_sense_voice_ready">
-                    <template v-for="b in (setupGuide.bundles || []).filter(x => x.id === 'sherpa_sense_voice')" :key="b.id">
-                      <button v-if="b.repo_id" type="button" class="s-btn s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload('sherpa_sense_voice', 'hf')">{{ t('onboardingBtnHfMirror350') }}</button>
-                      <button v-if="b.modelscope_repo_id" type="button" class="s-btn s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload('sherpa_sense_voice', 'modelscope')">{{ t('onboardingBtnModelScope') }}</button>
-                      <button v-if="b.direct_url" type="button" class="s-btn s-btn-secondary" :disabled="setupGuide.download && setupGuide.download.phase === 'running'" @click="startSetupDownload('sherpa_sense_voice', 'direct')">{{ t('onboardingBtnGitHubDirect') }}</button>
-                    </template>
-                  </template>
+                <p class="muted" style="font-size:11px;line-height:1.45;">{{ t('setupWizardAiMemoryDepsShort') }}</p>
+              </div>
+            </div>
+            <div class="setup-wizard-substep">
+              <div class="setup-wizard-substep-title">2. {{ t('onboardingAiMemoryModels') }}</div>
+              <p class="setup-tts-desc">{{ t('onboardingAiMemoryModelsDesc') }}</p>
+              <p v-if="!setupGuide.ai_memory_installed" class="warn" style="font-size:12px;margin:8px 0;">⚠️ {{ t('onboardingAiMemoryNeedDepsFirst') }}</p>
+              <div v-for="b in onboardingMemBundles" :key="b.id" class="setup-tts-card" style="margin-top:10px;">
+                <div class="setup-tts-head">
+                  <span class="setup-tts-name">{{ onboardingBundleTitle(b) }}</span>
+                  <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
+                  <span class="setup-bundle-badge" :class="{ installed: b.installed }">{{ b.installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}</span>
                 </div>
-                <div v-if="setupGuide.download && setupGuide.download.phase === 'running' && setupGuide.download.bundle_id === 'sherpa_sense_voice'" class="setup-dl-progress" style="margin-top:8px;">
-                  <div class="setup-dl-bar"><div class="setup-dl-fill" :style="{ width: (setupGuide.download.progress_pct || 0) + '%' }"></div></div>
-                  <span>{{ setupGuide.download.message }}</span>
+                <p class="setup-tts-desc" v-html="onboardingBundleDesc(b)"></p>
+                <p class="muted setup-guide-tutorial-dl-tags" style="font-size:11px;margin-top:6px;">
+                  <span v-if="b.repo_id" class="setup-bundle-badge">{{ t('onboardingBtnHfMirror') }}</span>
+                  <span v-if="b.modelscope_repo_id" class="setup-bundle-badge">{{ t('onboardingBtnModelScope') }}</span>
+                  <span v-if="b.direct_url" class="setup-bundle-badge">{{ t('onboardingBtnGitHubDirect') }}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="setup-guide-section" v-if="setupGuide.tts">
+            <h3 class="setup-guide-h3">{{ t('onboardingTtsTitle') }}</h3>
+            <p class="muted" style="margin-bottom:10px;">{{ t('onboardingTtsActive') }}：<strong>{{ setupGuide.tts.active }}</strong></p>
+
+            <div class="setup-tts-card">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">Edge TTS</span>
+                <span class="setup-bundle-badge installed">{{ t('onboardingTtsReady') }}</span>
+              </div>
+              <p class="setup-tts-desc">{{ t('onboardingTtsEdge') }}</p>
+            </div>
+
+            <div class="setup-tts-card" style="margin-top:10px;">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">GPT-SoVITS</span>
+                <span class="setup-bundle-badge" :class="{ installed: setupGuide.tts.gpt_sovits_port_open }">
+                  {{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
+                </span>
+              </div>
+              <p class="setup-tts-desc">{{ t('onboardingTtsGptSoVits') }}</p>
+              <p class="muted" style="font-size:11px;">{{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsGptSoVitsOpen') : t('onboardingTtsGptSoVitsClosed') }}</p>
+              <details class="setup-wizard-details">
+                <summary>{{ t('onboardingTtsGptSoVitsHowToGet') }}</summary>
+                <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">① {{ t('onboardingTtsGptSoVitsStep1') }}</span><br/>
+                  <span style="font-size:11px;">{{ t('onboardingTtsGptSoVitsStep1Hint') }}</span><br/>
+                  <a href="#" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block;text-decoration:underline;" @click.prevent="openUrl('https://github.com/RVC-Boss/GPT-SoVITS/releases/latest')">{{ t('onboardingTtsGptSoVitsReleaseLinkText') }}</a></p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;">
+                  <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openUrl('https://github.com/RVC-Boss/GPT-SoVITS/releases/latest')">{{ t('onboardingTtsGptSoVitsOpenReleasesBtn') }}</button>
+                </div>
+                <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">② {{ t('onboardingTtsGptSoVitsStep2') }}</span><br/>
+                  {{ t('onboardingTtsGptSoVitsStep2Hint') }}</p>
+                <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">③ {{ t('onboardingTtsGptSoVitsStep3') }}</span><br/>
+                  {{ t('onboardingTtsGptSoVitsStep3Hint') }}</p>
+              </details>
+              <div class="setup-wizard-substep" style="margin-top:10px;padding-top:10px;">
+                <label class="muted" style="font-size:11px;display:block;margin-bottom:4px;">{{ t('lblGptSovitsDir') }}</label>
+                <input type="text" class="form-input" v-model="onboardingGptsovitsDir" :placeholder="t('phGptSovitsDir')"
+                  style="width:100%;max-width:520px;box-sizing:border-box;font-size:12px;margin-bottom:6px;" />
+                <p class="muted" style="font-size:10px;line-height:1.45;margin:0 0 8px;">{{ t('hintGptSovitsDir') }}</p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                  <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="saveOnboardingGptsovitsDir">{{ t('onboardingGptsovitsSaveDir') }}</button>
+                  <button type="button" class="s-btn s-btn-small" :disabled="setupGuide.tts.gpt_sovits_port_open" @click="launchOnboardingGptsovits">{{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsGptSoVitsRunning') : t('onboardingTtsGptSoVitsLaunch') }}</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="setup-tts-card" style="margin-top:10px;">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">KokoroTTS</span>
+                <span class="setup-bundle-badge" :class="{ installed: setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready }">
+                  {{ (setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
+                </span>
+              </div>
+              <p class="setup-tts-desc">{{ t('onboardingTtsKokoro') }}</p>
+              <div class="setup-wizard-substep" style="margin-top:0;padding-top:0;border-top:none;">
+                <div class="setup-wizard-substep-title">1. {{ t('onboardingKokoroPkgStepTitle') }}</div>
+                <p class="muted" style="font-size:11px;line-height:1.5;">
+                  {{ setupGuide.tts.kokoro_installed ? '✓' : '○' }} {{ setupGuide.tts.kokoro_installed ? t('onboardingTtsKokoroPkg') : t('onboardingTtsKokoroPkgMissing') }}<br/>
+                  {{ setupGuide.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiZh') }}
+                </p>
+                <p class="muted" style="font-size:11px;margin-top:6px;">{{ t('onboardingTutorialDoInLauncher') }}</p>
+              </div>
+              <div class="setup-wizard-substep">
+                <div class="setup-wizard-substep-title">2. {{ t('onboardingKokoroModelStepTitle') }}</div>
+                <p v-if="!setupGuide.tts.kokoro_installed" class="warn" style="font-size:12px;margin:0 0 8px;">⚠️ {{ t('onboardingKokoroNeedPkgFirst') }}</p>
+                <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="t('onboardingKokoroModelsHint')"></p>
+                <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="t('onboardingKokoroModelsSaveTo')"></p>
+                <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 8px;" v-html="t('onboardingKokoroModelsReleases')"></p>
+                <p v-if="setupGuide.tts.kokoro_installed" class="setup-tts-check" style="font-size:12px;">
+                  <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'">{{ setupGuide.tts.kokoro_models_ready ? '✓' : '○' }} {{ t('onboardingKokoroModels') }}</span>
+                </p>
+              </div>
+            </div>
+
+            <div class="setup-tts-card" style="margin-top:10px;">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">Qwen3-TTS</span>
+                <span class="setup-bundle-badge" :class="{ installed: setupGuide.qwen_tts_installed && setupGuide.tts.qwen3_model_ready }">
+                  {{ (setupGuide.qwen_tts_installed && setupGuide.tts.qwen3_model_ready) ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
+                </span>
+              </div>
+              <p class="setup-tts-desc">{{ t('onboardingTtsQwen3') }}</p>
+              <div class="setup-wizard-substep">
+                <div class="setup-wizard-substep-title">1. {{ t('onboardingQwenTtsPkgStepTitle') }}</div>
+                <p class="setup-tts-desc">{{ t('onboardingQwenTtsPkgDesc') }}</p>
+                <p v-if="setupGuide.qwen_tts_installed" class="ok" style="font-size:12px;">✓ {{ t('onboardingQwenTtsPkgInstalled') }}</p>
+                <p v-if="setupGuide.torch_import_ok && setupGuide.torch_load && setupGuide.torch_load.ok" class="muted" style="font-size:11px;line-height:1.45;">
+                  <template v-if="setupGuide.torch_load.built_with_cuda">
+                    {{ t('onboardingTorchMetaCuda').replace('{version}', setupGuide.torch_load.version || '?').replace('{cuda}', setupGuide.torch_load.cuda_built_version || '?') }}<span v-if="setupGuide.torch_cuda_available">{{ t('onboardingTorchMetaGpuOn') }}</span><span v-else>{{ t('onboardingTorchMetaGpuOff') }}</span>
+                  </template>
+                  <template v-else>
+                    {{ t('onboardingTorchMetaCpu').replace('{version}', setupGuide.torch_load.version || '?') }}
+                  </template>
+                </p>
+                <p v-if="setupGuide.torch_installed && !setupGuide.torch_import_ok" class="warn" style="font-size:11px;">{{ t('onboardingTorchBrokenBadge') }} {{ t('onboardingTorchBrokenHint') }}</p>
+                <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && setupGuide.torch_cuda_available" class="muted ok" style="font-size:11px;">{{ t('onboardingTorchCudaActive') }}</p>
+                <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && setupGuide.torch_load && setupGuide.torch_load.built_with_cuda && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingTorchCudaRuntimeHint') }}</p>
+                <p v-else-if="setupGuide.torch_installed && setupGuide.torch_import_ok && !(setupGuide.torch_load && setupGuide.torch_load.built_with_cuda) && !setupGuide.torch_cuda_available && setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingTorchCudaHint') }}</p>
+                <p v-if="setupGuide.runtime_python" class="muted" style="font-size:10px;margin:4px 0;">{{ t('onboardingBackendPython') }}<code>{{ setupGuide.runtime_python.executable }}</code></p>
+                <p v-if="setupGuide.cuda_info && setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingDetectedGpu') }}{{ setupGuide.cuda_info.gpu_name }}</p>
+                <p v-else-if="setupGuide.cuda_info && !setupGuide.cuda_info.gpu_name" class="muted" style="font-size:11px;">{{ t('onboardingNoNvidiaGpu') }}</p>
+                <p class="muted" style="font-size:11px;margin-top:8px;">{{ t('onboardingTutorialDoInLauncher') }}</p>
+                <p class="muted" style="font-size:10px;margin-top:6px;">{{ t('onboardingTorchUninstallAlwaysHint') }}</p>
+              </div>
+              <div class="setup-wizard-substep">
+                <div class="setup-wizard-substep-title">2. {{ t('onboardingQwenTtsModelStepTitle') }}</div>
+                <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 8px;" v-html="t('onboardingQwenTtsModelStepLead')"></p>
+                <p class="muted" style="font-size:11px;margin:0 0 8px;">{{ t('onboardingModelsLabel') }}: <code>{{ setupGuide.models_root }}</code></p>
+                <p v-if="setupGuide.tts.qwen3_model_ready && setupGuide.tts.qwen3_model_path" class="ok" style="font-size:11px;line-height:1.45;margin:0 0 8px;">
+                  {{ t('onboardingQwenTtsModelPathReadyLabel') }}<code style="word-break:break-all;">{{ setupGuide.tts.qwen3_model_path }}</code>
+                </p>
+                <p v-if="!setupGuide.qwen_tts_installed" class="warn" style="font-size:12px;">⚠️ {{ t('onboardingQwenTtsNeedDepsFirst') }}</p>
+                <div v-for="b in onboardingTtsBundles" :key="b.id" class="setup-tts-card" style="margin-top:8px;">
+                  <div class="setup-tts-head">
+                    <span class="setup-tts-name">{{ onboardingBundleTitle(b) }}</span>
+                    <span v-if="b.size_hint" class="setup-bundle-size">{{ b.size_hint }}</span>
+                    <span class="setup-bundle-badge" :class="{ installed: b.installed }">{{ b.installed ? t('onboardingInstalled') : t('onboardingNotInstalled') }}</span>
+                  </div>
+                  <p class="setup-tts-desc" v-html="onboardingBundleDesc(b)"></p>
+                  <p class="muted setup-guide-tutorial-dl-tags" style="font-size:11px;margin-top:6px;">
+                    <span v-if="b.repo_id" class="setup-bundle-badge">{{ t('onboardingBtnHfMirror') }}</span>
+                    <span v-if="b.modelscope_repo_id" class="setup-bundle-badge">{{ t('onboardingBtnModelScope') }}</span>
+                    <span v-if="b.direct_url" class="setup-bundle-badge">{{ t('onboardingBtnGitHubDirect') }}</span>
+                  </p>
                 </div>
               </div>
             </div>
           </div>
 
+          <div class="setup-guide-section">
+            <h3 class="setup-guide-h3">{{ t('onboardingSttTitle') }}</h3>
+            <p class="muted" style="font-size:11px;margin-bottom:8px;">{{ t('onboardingSttWhisperDesc') }}</p>
+            <div class="setup-tts-card">
+              <div class="setup-tts-head">
+                <span class="setup-tts-name">SenseVoice</span>
+                <span class="muted" style="font-size:11px;margin-left:6px;">sherpa-onnx</span>
+                <span class="setup-bundle-badge" :class="{ installed: setupGuide.sherpa_onnx_installed && setupGuide.sherpa_sense_voice_ready }">
+                  {{ (setupGuide.sherpa_onnx_installed && setupGuide.sherpa_sense_voice_ready) ? t('onboardingTtsReady') : t('onboardingTtsNotReady') }}
+                </span>
+              </div>
+              <p class="setup-tts-desc">{{ t('onboardingSttSenseVoiceDesc') }}</p>
+              <div class="setup-wizard-substep">
+                <div class="setup-wizard-substep-title">1. {{ t('onboardingSttDepsStepTitle') }}</div>
+                <p v-if="setupGuide.sherpa_onnx_installed" class="ok" style="font-size:12px;">✓ sherpa-onnx {{ t('onboardingInstalled') }}</p>
+                <p v-else class="muted" style="font-size:12px;">{{ t('onboardingSttInstallSherpa') }}</p>
+              </div>
+              <div class="setup-wizard-substep">
+                <div class="setup-wizard-substep-title">2. {{ t('onboardingSttModelStepTitle') }}</div>
+                <p v-if="!setupGuide.sherpa_onnx_installed" class="muted" style="font-size:12px;">⚠️ {{ t('onboardingSttNeedDepsFirst') }}</p>
+                <template v-else>
+                  <p class="setup-tts-check" style="font-size:12px;">
+                    <span :class="setupGuide.sherpa_sense_voice_ready ? 'ok' : 'warn'">{{ setupGuide.sherpa_sense_voice_ready ? '✓' : '○' }} {{ t('onboardingSttModelFiles') }}</span>
+                  </p>
+                  <p v-if="onboardingSttBundle" class="muted setup-guide-tutorial-dl-tags" style="font-size:11px;margin-top:6px;">
+                    <span v-if="onboardingSttBundle.repo_id" class="setup-bundle-badge">{{ t('onboardingBtnHfMirror350') }}</span>
+                    <span v-if="onboardingSttBundle.modelscope_repo_id" class="setup-bundle-badge">{{ t('onboardingBtnModelScope') }}</span>
+                  </p>
+                  <p class="muted" style="font-size:11px;line-height:1.55;margin-top:10px;" v-html="t('setupWizardPickSttModelHint')"></p>
+                  <p v-if="setupGuide.stt_model_path" class="muted" style="font-size:11px;margin-top:6px;">
+                    {{ t('setupWizardSttConfiguredPath') }}: <code style="word-break:break-all;">{{ setupGuide.stt_model_path }}</code>
+                  </p>
+                  <button type="button" class="s-btn s-btn-small s-btn-secondary" style="margin-top:8px;" :disabled="!setupGuide.sherpa_onnx_installed" @click="pickOnboardingSttModelDir">{{ t('setupWizardPickSttModel') }}</button>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55;">{{ t('onboardingDownloadHint') }}</p>
+          <div class="setup-guide-actions" style="margin-top:16px;">
+            <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'profiles'">{{ t('onboardingJumpProfiles') }}</button>
+            <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openProfileWizard">✦ {{ t('onboardingOpenPersonaWizard') }}</button>
+          </div>
         </div>
 
+        <div v-if="setupGuide" class="setup-guide-section">
+          <p class="muted setup-guide-lead" v-html="t('onboardingLauncherRedirect')"></p>
+        </div>
       </div>
 
       <!-- ── Tab: LLM ── -->
@@ -1861,7 +1746,7 @@
         <!-- 子 Tab 导航 -->
         <div class="memory-panel-tabs">
           <button type="button" :class="{ active: ttsSubTab === 'tts' }" @click="ttsSubTab='tts'">{{ t('ttsSubTabTts') }}</button>
-          <button type="button" :class="{ active: ttsSubTab === 'stt' }" @click="ttsSubTab='stt'">{{ t('ttsSubTabStt') }}</button>
+          <button type="button" :class="{ active: ttsSubTab === 'stt' }" @click="ttsSubTab='stt'; loadSttConfig()">{{ t('ttsSubTabStt') }}</button>
         </div>
 
         <!-- ══ TTS 子页 ══ -->
@@ -1887,7 +1772,8 @@
                   <span v-else class="warn">○ {{ t('ttsStatusNotRunning') }}</span>
                 </template>
                 <template v-else-if="ttsForm.engine === 'kokoro'">
-                  <span v-if="setupGuide.tts.kokoro_installed" class="ok">✓ {{ t('ttsStatusInstalled') }}</span>
+                  <span v-if="setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready" class="ok">✓ {{ t('ttsStatusInstalled') }}</span>
+                  <span v-else-if="setupGuide.tts.kokoro_installed && !setupGuide.tts.kokoro_models_ready" class="warn">○ {{ t('onboardingKokoroModels') }}</span>
                   <span v-else class="warn">○ {{ t('ttsStatusNotInstalled') }}</span>
                 </template>
                 <template v-else-if="ttsForm.engine === 'qwen3_tts'">
@@ -2192,6 +2078,14 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('secStt') }}</div>
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintSttDesc') }}</p>
+            <div class="param-row">
+              <span class="param-label">{{ t('lblSttServerEnabled') }}</span>
+              <label class="toggle-switch">
+                <input type="checkbox" :checked="sttConfig.enabled" @change="onSttServerEnabledToggle($event)" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <p class="form-hint" style="margin-bottom:10px;margin-top:-4px;">{{ t('hintSttServerEnabled') }}</p>
             <div class="param-row">
               <span class="param-label">{{ t('lblShowVoiceBtn') }}</span>
               <label class="toggle-switch">
@@ -3223,8 +3117,8 @@
                     <span v-else-if="ttsForm.engine === 'gpt_sovits'" :class="setupGuide.tts.gpt_sovits_port_open ? 'ok' : 'warn'">
                       {{ setupGuide.tts.gpt_sovits_port_open ? ' ✓' : ' ○' }}
                     </span>
-                    <span v-else-if="ttsForm.engine === 'kokoro'" :class="setupGuide.tts.kokoro_installed ? 'ok' : 'warn'">
-                      {{ setupGuide.tts.kokoro_installed ? ' ✓' : ' ○' }}
+                    <span v-else-if="ttsForm.engine === 'kokoro'" :class="(setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? 'ok' : 'warn'">
+                      {{ (setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? ' ✓' : ' ○' }}
                     </span>
                     <span v-else-if="ttsForm.engine === 'qwen3_tts'" :class="setupGuide.tts.qwen3_model_ready ? 'ok' : 'warn'">
                       {{ setupGuide.tts.qwen3_model_ready ? ' ✓' : ' ○' }}
@@ -4377,6 +4271,18 @@
           </div>
         </div>
 
+        <div class="s-card" v-if="isElectron">
+          <div class="s-card-title">{{ t('prefsShowStartupLauncher') }}</div>
+          <p class="form-hint" style="margin-bottom:10px;">{{ t('prefsShowStartupLauncherHint') }}</p>
+          <div class="param-row" style="margin-bottom:0;">
+            <span class="param-label">{{ t('prefsShowStartupLauncher') }}</span>
+            <label class="toggle-switch">
+              <input type="checkbox" v-model="uiPrefsShowLauncher" @change="saveUiPrefsLauncher" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
         <div class="s-card">
           <div class="s-card-title">{{ t('secAppearance') }}</div>
           <div class="theme-picker">
@@ -5124,7 +5030,7 @@
             <div class="param-row" style="margin-top:14px;">
               <span class="param-label">{{ t('lblProfileMaxHistoryTurns') }}</span>
               <input type="number" class="seg-num-input" min="1" max="200"
-                     v-model="memoryProfileForm.max_history_turns" placeholder="20" style="width:64px;" />
+                     v-model="memoryProfileForm.max_history_turns" :placeholder="memoryGlobalForm.max_history_turns ?? 20" style="width:64px;" />
             </div>
             <div class="form-hint">{{ t('hintProfileMaxHistoryTurns') }}</div>
             <div class="settings-param-block" style="margin-top:14px;" :class="{ disabled: !memoryProfileEffectiveEnabled }">
@@ -5151,7 +5057,7 @@
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblProfileRecentFactQuota') }}</span>
                 <input type="number" class="seg-num-input" min="0" max="20"
-                       v-model="memoryProfileForm.recent_fact_quota" placeholder="3" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
+                       v-model="memoryProfileForm.recent_fact_quota" :placeholder="memoryGlobalForm.recent_fact_quota ?? 3" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
               </div>
               <div class="form-hint">{{ t('hintProfileRecentFactQuota') }}</div>
 

@@ -13,7 +13,7 @@ router = APIRouter()
 _PREFS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                            "config", "ui_prefs.json")
 
-_ALLOWED_KEYS = {"locale"}   # whitelist — add keys here as needed
+_ALLOWED_KEYS = {"locale", "show_startup_launcher", "theme"}   # whitelist — add keys here as needed
 
 
 def _read() -> dict:
@@ -42,7 +42,10 @@ async def set_preferences(request: Request):
     body = await request.json()
     prefs = _read()
     for k, v in body.items():
-        if k in _ALLOWED_KEYS:
-            prefs[k] = v
+        if k not in _ALLOWED_KEYS:
+            continue
+        if k == "theme" and not isinstance(v, str):
+            continue
+        prefs[k] = v
     _write(prefs)
     return JSONResponse(prefs)

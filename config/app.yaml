@@ -1,9 +1,9 @@
 # 公开版用 config：仅保留「Gemini」「ollama_local」两个 LLM 预设，新用户不会看到私有配置里的全部模型
 port: 7788
 host: "0.0.0.0"
-log_level: "error"
+log_level: "debug"
 default_llm: "Gemini"
-default_tts: "edge_tts"
+default_tts: "kokoro"
 max_history_turns: 60
 user_name: "用户"
 
@@ -30,7 +30,7 @@ llm_presets:
 
 tts:
   edge_tts:
-    voice: "zh-CN-XiaoyiNeural"
+    voice: "en-US-AriaNeural"
     rate: +0%
   gpt_sovits:
     host: "127.0.0.1"
@@ -66,12 +66,12 @@ tts:
     repetition_penalty: 1.05
 
   kokoro:
-    voice: ''
+    voice: 'em_alex'
     lang: zh
     speed: 1.0
     auto_detect_lang: true
 stt:
-  enabled: false
+  enabled: true
   model_size: "medium"
   model_path: ""
   device: "cpu"
@@ -96,7 +96,7 @@ engines:
 secondary_models:
   analysis:
     enabled: true
-    preset: "Gemini"
+    preset: ""
   reflection:
     enabled: true
     primary_preset: "Gemini"
@@ -106,9 +106,9 @@ secondary_models:
 memory:
   enabled: true
   vector_enabled: true
-  extraction_frequency: 1
+  extraction_frequency: 5
   extraction_weight_threshold: 0.5
-  max_facts_in_prompt: 30
+  max_facts_in_prompt: 20
   day_summary_enabled: true
   day_summary_keep_days: 7
   day_summary_max_messages: 300

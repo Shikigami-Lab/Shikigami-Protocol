@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional
 
 from src.config.prompt_loader import get_prompt, get_locale, render
 from src.utils.debug_logger import log_error
+from src.utils.paths import get_project_root
 from src.utils.persona_context import get_persona_context_for_secondary_llm
 from src.prompt.base import ReflectionBuildContext, targets_reflection
 from src.prompt.segment_config import effective_segment_enabled, load_segment_config
@@ -526,7 +527,7 @@ class ReflectionEngine:
         store = session.conversation_store
         profile_data: Dict[str, Any] = {}
         try:
-            profile_path = os.path.join("profiles", f"{session.profile_id}.json")
+            profile_path = os.path.join(get_project_root(), "profiles", f"{session.profile_id}.json")
             if os.path.exists(profile_path):
                 with open(profile_path, encoding="utf-8") as f:
                     profile_data = json.load(f)
@@ -566,7 +567,7 @@ class ReflectionEngine:
         persona_brief = ""
         pdata: Dict[str, Any] = {}
         try:
-            profile_path = os.path.join("profiles", f"{session.profile_id}.json")
+            profile_path = os.path.join(get_project_root(), "profiles", f"{session.profile_id}.json")
             if os.path.exists(profile_path):
                 with open(profile_path, encoding="utf-8") as f:
                     pdata = json.load(f)
@@ -862,7 +863,7 @@ class ReflectionEngine:
     def _load_emotion(self, profile_id: str) -> Optional[Dict]:
         """Load emotion state from disk (best-effort)."""
         import json, os
-        path = os.path.join("profiles", profile_id, "emotion_state.json")
+        path = os.path.join(get_project_root(), "profiles", profile_id, "emotion_state.json")
         try:
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as f:
@@ -874,7 +875,7 @@ class ReflectionEngine:
     def _load_affinity(self, profile_id: str) -> Optional[Dict]:
         """Load affinity state from disk (best-effort)."""
         import json, os
-        path = os.path.join("profiles", profile_id, "affinity_state.json")
+        path = os.path.join(get_project_root(), "profiles", profile_id, "affinity_state.json")
         try:
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as f:

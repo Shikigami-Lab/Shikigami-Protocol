@@ -4,7 +4,7 @@
 > 人物卡 JSON 字段见 [profile_prompts.zh.md](./profile_prompts.zh.md)。
 > **English:** [GETTING_STARTED.en.md](./GETTING_STARTED.en.md)
 
-**本文假设你已完成环境安装，后端正在运行（浏览器能打开 `http://localhost:7788`）。**
+**请先按 [SETUP_FIRST_RUN.zh.md](./SETUP_FIRST_RUN.zh.md) 完成源码运行环境（Python / Node 等），再按下方两步配置。**
 
 ---
 
@@ -23,6 +23,8 @@
 ---
 
 ## 代理（大陆或受限网络）
+
+> 大多数用户可跳过此节，仅在无法直连 Gemini / OpenAI 等云端 API 时才需要。
 
 后端是 **Python 进程**，系统里「浏览器能翻墙」不等于 Python 已走代理。
 
@@ -47,7 +49,7 @@
 | **模型** | LLM 预设管理、API Key、本地 OpenAI 兼容地址、辅助模型（情感 / 好感等） |
 | **记忆** | 长期事实、向量记忆开关、嵌入模型（云端 Gemini 或本地 BGE 等）、日记与遗忘预览 |
 | **TTS** | 朗读引擎：Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
-| **自省 / ASE** | 角色内心独白、主动发言配置 |
+| **行为 / 自省** | 角色内心独白、主动发言配置 |
 | **VLM** | 屏幕 / 视觉理解：模型与截图策略 |
 | **工具** | 待办、计时器、天气、趋势、网页搜索等工具插件的开关与配置 |
 | **系统** | 主题、代理、HF 镜像、离线开关 |

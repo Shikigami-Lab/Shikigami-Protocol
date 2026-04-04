@@ -8,9 +8,11 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 
+from src.utils.paths import get_project_root
+
 logger = logging.getLogger(__name__)
 
-LOREBOOKS_DIR = "lorebooks"
+LOREBOOKS_DIR = os.path.join(get_project_root(), "lorebooks")
 _ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,80}$")
 
 

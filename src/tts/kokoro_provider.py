@@ -23,6 +23,7 @@ import os
 from typing import Any, Optional
 
 from src.tts.base import TTSProvider
+from src.utils.paths import get_models_root, get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -35,23 +36,35 @@ _DEFAULT_VOICE: dict = {
 }
 
 _kokoro_instance: Optional[Any] = None
-_kokoro_import_warned = False
+_kokoro_warned_import = False
+_kokoro_warned_model_missing = False
 
-# Model file search order: project models/ dir, then project root, then cwd
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_MODEL_SEARCH_DIRS = [
-    os.path.join(_PROJECT_ROOT, "models"),
-    _PROJECT_ROOT,
-    os.getcwd(),
-]
 # New (v1.0) filenames take priority; fall back to old (v0_19) if not found
 _MODEL_CANDIDATES = ["kokoro-v1.0.onnx", "kokoro-v0_19.onnx"]
 _VOICES_CANDIDATES = ["voices-v1.0.bin", "voices-v0_19.bin"]
 
 
+def _kokoro_model_search_dirs() -> list:
+    """与入门下载、STT 一致：含 get_models_root()（含 SHIKIGAMI_MODELS_ROOT），勿仅依赖 project/models。"""
+    r = get_project_root()
+    seen: set = set()
+    out: list = []
+    for d in (get_models_root(), os.path.join(r, "models"), r, os.getcwd()):
+        if not d:
+            continue
+        try:
+            k = os.path.normcase(os.path.normpath(os.path.abspath(d)))
+        except OSError:
+            continue
+        if k not in seen:
+            seen.add(k)
+            out.append(d)
+    return out
+
+
 def _find_model_files() -> Optional[tuple]:
     """Search common directories for kokoro model + voices files. Returns (model_path, voices_path) or None."""
-    for d in _MODEL_SEARCH_DIRS:
+    for d in _kokoro_model_search_dirs():
         for mf in _MODEL_CANDIDATES:
             model_path = os.path.join(d, mf)
             if not os.path.isfile(model_path):
@@ -64,26 +77,27 @@ def _find_model_files() -> Optional[tuple]:
 
 
 def _get_kokoro():
-    global _kokoro_instance, _kokoro_import_warned  # noqa: PLW0603
+    global _kokoro_instance, _kokoro_warned_import, _kokoro_warned_model_missing  # noqa: PLW0603
     if _kokoro_instance is not None:
         return _kokoro_instance
     try:
         from kokoro_onnx import Kokoro
     except ImportError:
-        if not _kokoro_import_warned:
-            _kokoro_import_warned = True
+        if not _kokoro_warned_import:
+            _kokoro_warned_import = True
             logger.warning("[KokoroTTS] kokoro-onnx 未安装，请执行: pip install kokoro-onnx")
         return None
 
     found = _find_model_files()
     if found is None:
-        if not _kokoro_import_warned:
-            _kokoro_import_warned = True
+        if not _kokoro_warned_model_missing:
+            _kokoro_warned_model_missing = True
             logger.warning(
                 "[KokoroTTS] 未找到模型文件 (kokoro-v1.0.onnx + voices-v1.0.bin)，"
-                "请下载并放置到 %s/models/ 目录下。"
+                "请下载并放置到 %s 或 %s/models/ 下。"
                 "下载地址: https://github.com/thewh1teagle/kokoro-onnx/releases",
-                _PROJECT_ROOT,
+                get_models_root(),
+                get_project_root(),
             )
         return None
 
@@ -160,7 +174,15 @@ def _synthesize_sync(text: str, voice: str, lang: str, speed: float) -> bytes:
     else:
         input_text = text
         is_phonemes = False
-        create_lang = lang if lang in ("en-us", "en-gb") else "en-us"
+        # 勿把中文/日文原文当成 en-us 传入，否则 kokoro.create 常立即失败；无音素时交给对应语言。
+        if lang == "zh":
+            create_lang = "zh"
+        elif lang == "ja":
+            create_lang = "ja"
+        elif lang in ("en-us", "en-gb"):
+            create_lang = lang
+        else:
+            create_lang = "en-us"
 
     try:
         import soundfile as sf

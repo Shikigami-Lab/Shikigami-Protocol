@@ -15,10 +15,12 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from src.utils.paths import get_project_root
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_PROFILES_DIR = "profiles"
+_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 def _load_profile(profile_id: str) -> Dict[str, Any]:

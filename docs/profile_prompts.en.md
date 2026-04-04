@@ -5,6 +5,8 @@
 
 Persona files live at `profiles/<profile_id>.json` and define all behavior parameters for one AI persona.
 
+> **Most fields are editable through Settings → Personas without touching JSON. This doc is an advanced field reference for those writing or fine-tuning personas by hand.**
+
 ---
 
 ## Top-level identity
@@ -35,7 +37,7 @@ Controls how emotion classification, energy, and affinity affect reply style.
 "emotion_config": {
   "enabled": true,
   "default_state": "calm",
-  "energy_prompts": { "0": "...", "30": "...", "60": "...", "80": "..." },
+  "energy_prompts": { "0": "...", "10": "...", "30": "...", "60": "...", "80": "..." },
   "affinity_prompts": { "-100": "...", "0": "...", "200": "...", "1000": "..." },
   "emotion_zh_descriptions": { "joyful": "恬静的愉悦", ... },
   "emotion_prompts": { "joyful": ["..."], "sad": ["..."], ... }
@@ -90,7 +92,7 @@ All fields are optional; omitted fields fall back to `config/app.yaml` global de
 
 | Sub-field | Description |
 |---|---|
-| `custom_prompt` | **Single source**: injected into the reflection LLM as persona context. Also shared with emotion classification and affinity LLM adjustments (`src/utils/persona_context.py`, truncated at ~3500 chars). Does **not** include `base_prompt`. Recommended format: open with a ~150-char `【角色要点】你是{name}: {key traits}` block, then first-person introspection instructions written as the character itself. Keep concise — the `thought` output must be ≤30 Chinese chars / ≤20 English words |
+| `custom_prompt` | **Single source**: injected into the reflection LLM as persona context. Also shared with emotion classification and affinity LLM calls (truncated at ~3500 chars). Does **not** include `base_prompt`. Recommended format: open with a ~150-char `【角色要点】你是{name}: {key traits}` block, then first-person introspection instructions written as the character itself. Keep concise — the `thought` output must be ≤30 Chinese chars / ≤20 English words |
 | `chat_inject_topic_hint` | Whether to inject `topic_hint` into the main chat prompt (default: true) |
 | `long_absence_hours` etc. | See engine and segment docs |
 

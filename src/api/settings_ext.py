@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import re
 import shutil
 import time
@@ -27,14 +28,16 @@ from pydantic import BaseModel, Field
 from src.config.emotion_keys import emotion_keys_csv_for_wizard
 from src.llm.registry import get_provider
 from src.lorebooks.entry_utils import normalize_lorebook_entry_for_storage
+from src.utils.paths import get_project_root
 
 _STATIC_AVATARS_DIR = "static/avatars"
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_YAML_PATH = "config/app.yaml"
-_PROFILES_DIR = "profiles"
+_YAML_PATH = os.path.join(get_project_root(), "config", "app.yaml")
+_ENV_FILE_PATH = os.path.join(get_project_root(), ".env")
+_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 @router.get("/settings/emotion_keys")
@@ -66,7 +69,7 @@ def _save_yaml(y, data):
         y.dump(data, f)
 
 
-_ENV_FILE = ".env"
+_ENV_FILE = _ENV_FILE_PATH
 
 
 def _env_key_name(preset_name: str) -> str:
@@ -115,7 +118,7 @@ async def get_llm_presets(request: Request):
             "base_url":               p.get("base_url", ""),
             "model":                  p.get("model", ""),
             "has_key":                bool(p.get("api_key", "")),
-            "temperature":            p.get("temperature", 0.9),
+            "temperature":            p.get("temperature", 1.0),
             "top_p":                  p.get("top_p", 0.95),
             "presence_penalty":       p.get("presence_penalty", 0.0),
             "frequency_penalty":      p.get("frequency_penalty", 0.0),
@@ -133,7 +136,7 @@ class LLMPresetBody(BaseModel):
     api_key: Optional[str] = None          # None = keep existing; "" = clear
     base_url: str = ""
     model: str = ""
-    temperature: float = 0.9
+    temperature: float = 1.0
     top_p: float = 0.95
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
@@ -176,6 +179,11 @@ async def create_llm_preset(request: Request, body: LLMPresetBody):
     # Hot-reload: keep actual key in memory (not the empty YAML value)
     config.llm_presets[body.name] = dict(preset_data)
     config.llm_presets[body.name]["api_key"] = final_api_key
+
+    # Re-register analysis provider in case this preset is used for analysis
+    from src.llm.registry import ensure_analysis_provider
+    ensure_analysis_provider(config)
+
     return {"ok": True, "name": body.name}
 
 
@@ -240,6 +248,10 @@ async def update_llm_preset(name: str, request: Request, body: LLMPresetBody):
     config.llm_presets[name] = dict(preset_data)
     config.llm_presets[name]["api_key"] = final_key
 
+    # Re-register analysis provider in case this preset is used for analysis
+    from src.llm.registry import ensure_analysis_provider
+    ensure_analysis_provider(config)
+
     return {"ok": True, "name": name}
 
 
@@ -279,6 +291,10 @@ async def set_active_llm(request: Request, body: SetActiveBody):
     y, data = _load_yaml()
     data["default_llm"] = body.name
     _save_yaml(y, data)
+
+    # Re-register analysis provider in case it uses the active model (preset = "")
+    from src.llm.registry import ensure_analysis_provider
+    ensure_analysis_provider(config)
 
     return {"ok": True, "active": body.name}
 
@@ -335,13 +351,13 @@ _KOKORO_VOICE_GROUPS = {
     "Other":          ["ff_siwis","ef_dora","em_alex","em_santa","hf_alpha","hf_beta","hm_omega","hm_psi","if_sara","im_nicola","pf_dora","pm_alex","pm_santa"],
 }
 
-_KOKORO_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _KOKORO_VOICES_CANDIDATES = ["voices-v1.0.bin", "voices-v0_19.bin"]
 
 
 def _get_kokoro_voice_groups() -> dict:
     """Try to load actual voice keys from the voices.bin file; fall back to hardcoded list."""
-    search_dirs = [os.path.join(_KOKORO_PROJECT_ROOT, "models"), _KOKORO_PROJECT_ROOT]
+    root = get_project_root()
+    search_dirs = [os.path.join(root, "models"), root]
     for d in search_dirs:
         for fname in _KOKORO_VOICES_CANDIDATES:
             p = os.path.join(d, fname)
@@ -446,6 +462,47 @@ async def get_tts_config(request: Request):
     }
 
 
+class GptSovitsDirBody(BaseModel):
+    dir: str = ""
+
+
+class SttEnabledBody(BaseModel):
+    enabled: bool = True
+
+
+@router.post("/settings/stt/enabled")
+async def save_stt_enabled(request: Request, body: SttEnabledBody):
+    """持久化 ``stt.enabled`` 到 app.yaml 并热更新内存中的 config（设置页「服务端语音识别」开关）。"""
+    config = request.app.state.config
+    y, data = _load_yaml()
+    if "stt" not in data or not isinstance(data.get("stt"), dict):
+        data["stt"] = {}
+    data["stt"]["enabled"] = bool(body.enabled)
+    _save_yaml(y, data)
+    if not isinstance(config.stt, dict):
+        config.stt = {}
+    config.stt["enabled"] = bool(body.enabled)
+    return {"ok": True}
+
+
+@router.post("/settings/tts/gpt-sovits-dir")
+async def save_gpt_sovits_dir_only(request: Request, body: GptSovitsDirBody):
+    """仅更新 ``tts.gpt_sovits.dir``（入门页 / 启动器保存安装路径，无需提交整份 TTS 表单）。"""
+    config = request.app.state.config
+    path = (body.dir or "").strip()
+    y, data = _load_yaml()
+    if "tts" not in data or not isinstance(data.get("tts"), dict):
+        data["tts"] = {}
+    if "gpt_sovits" not in data["tts"] or not isinstance(data["tts"].get("gpt_sovits"), dict):
+        data["tts"]["gpt_sovits"] = {}
+    data["tts"]["gpt_sovits"]["dir"] = path
+    _save_yaml(y, data)
+    if "gpt_sovits" not in config.tts_config or not isinstance(config.tts_config.get("gpt_sovits"), dict):
+        config.tts_config["gpt_sovits"] = {}
+    config.tts_config["gpt_sovits"]["dir"] = path
+    return {"ok": True}
+
+
 @router.post("/settings/tts/save")
 async def save_tts_config(request: Request, body: TTSSaveBody):
     config = request.app.state.config
@@ -541,36 +598,148 @@ async def save_tts_config(request: Request, body: TTSSaveBody):
     return {"ok": True}
 
 
+def _tts_test_cfg_from_saved(config: Any) -> Tuple[str, Dict[str, Any]]:
+    """已写入 config 的引擎与参数 → get_tts_provider 用 dict。"""
+    tts_type = config.default_tts or "edge_tts"
+    tts_cfg: Dict[str, Any] = {"type": tts_type}
+    if tts_type == "edge_tts":
+        tts_cfg["voice"] = config.get_tts_voice()
+        tts_cfg["rate"] = config.tts_config.get("edge_tts", {}).get("rate", "+0%")
+    elif tts_type == "gpt_sovits":
+        tts_cfg.update(config.tts_config.get("gpt_sovits", {}))
+        tts_cfg["type"] = "gpt_sovits"
+    elif tts_type == "kokoro":
+        tts_cfg.update(config.tts_config.get("kokoro", {}))
+        tts_cfg["type"] = "kokoro"
+    elif tts_type == "qwen3_tts":
+        tts_cfg.update(config.tts_config.get("qwen3_tts", {}))
+        tts_cfg["type"] = "qwen3_tts"
+    return tts_type, tts_cfg
+
+
+def _tts_test_cfg_from_form(body: TTSSaveBody) -> Tuple[str, Dict[str, Any]]:
+    """设置页当前表单（未保存也可）→ 与 save 逻辑一致的内存 dict。"""
+    tts_type = (body.engine or "edge_tts").strip() or "edge_tts"
+    rate_str = f"{'+' if body.rate_pct >= 0 else ''}{body.rate_pct}%"
+    tts_cfg: Dict[str, Any] = {"type": tts_type}
+    if tts_type == "edge_tts":
+        tts_cfg["voice"] = body.voice
+        tts_cfg["rate"] = rate_str
+    elif tts_type == "gpt_sovits":
+        tts_cfg.update(
+            {
+                "type": "gpt_sovits",
+                "host": body.gptsovits_host,
+                "port": body.gptsovits_port,
+                "dir": body.gptsovits_dir,
+                "text_lang": body.gptsovits_text_lang,
+                "prompt_lang": body.gptsovits_prompt_lang,
+                "speed_factor": body.gptsovits_speed,
+                "temperature": body.gptsovits_temperature,
+                "top_p": body.gptsovits_top_p,
+                "top_k": body.gptsovits_top_k,
+                "repetition_penalty": body.gptsovits_repetition_penalty,
+                "ref_audio_path": body.gptsovits_ref_audio_path,
+                "prompt_text": body.gptsovits_prompt_text,
+            }
+        )
+    elif tts_type == "kokoro":
+        tts_cfg.update(
+            {
+                "type": "kokoro",
+                "voice": body.kokoro_voice or "",
+                "lang": body.kokoro_lang or "zh",
+                "speed": float(body.kokoro_speed or 1.0),
+                "auto_detect_lang": bool(body.kokoro_auto_detect_lang),
+            }
+        )
+    elif tts_type == "qwen3_tts":
+        tts_cfg.update(
+            {
+                "type": "qwen3_tts",
+                "mode": body.qwen3_mode or "custom_voice",
+                "model_id": body.qwen3_model_id or "",
+                "device": body.qwen3_device or "cuda:0",
+                "dtype": body.qwen3_dtype or "bfloat16",
+                "attn_implementation": body.qwen3_attn_implementation or "eager",
+                "language": body.qwen3_language or "Chinese",
+                "speaker": body.qwen3_speaker or "Vivian",
+                "instruct": body.qwen3_instruct or "",
+                "voice_description": body.qwen3_voice_description or "",
+                "ref_audio_path": body.qwen3_ref_audio_path or "",
+                "ref_text": body.qwen3_ref_text or "",
+                "temperature": float(body.qwen3_temperature or 0.9),
+                "top_p": float(body.qwen3_top_p or 1.0),
+                "top_k": int(body.qwen3_top_k or 50),
+                "repetition_penalty": float(body.qwen3_repetition_penalty or 1.05),
+                "use_torch_compile": bool(body.qwen3_use_torch_compile),
+                "use_sentence_chunking": bool(body.qwen3_use_sentence_chunking),
+                "sentence_max_chars": int(body.qwen3_sentence_max_chars or 0),
+            }
+        )
+    return tts_type, tts_cfg
+
+
 @router.post("/settings/tts/test")
 async def test_tts_config(request: Request):
-    """Synthesize a short test phrase with the current TTS config and return base64 audio."""
+    """合成试听音频。请求体可选：与 ``POST /settings/tts/save`` 相同 JSON，用于「未等自动保存就试听」。"""
     import base64
+
+    form_body: Optional[TTSSaveBody] = None
+    try:
+        ct = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ct:
+            raw = await request.body()
+            if raw and raw.strip():
+                form_body = TTSSaveBody.model_validate_json(raw)
+    except Exception:
+        form_body = None
+
     config = request.app.state.config
-    tts_type = config.default_tts
+    if form_body is not None:
+        tts_type, tts_cfg = _tts_test_cfg_from_form(form_body)
+    else:
+        tts_type, tts_cfg = _tts_test_cfg_from_saved(config)
+
     if not tts_type or tts_type == "none":
         return {"ok": False, "error": "TTS is disabled"}
     try:
         from src.tts.registry import get_tts_provider
-        tts_cfg: dict = {"type": tts_type}
-        if tts_type == "edge_tts":
-            tts_cfg["voice"] = config.get_tts_voice()
-            tts_cfg["rate"] = config.tts_config.get("edge_tts", {}).get("rate", "+0%")
-        elif tts_type == "gpt_sovits":
-            tts_cfg.update(config.tts_config.get("gpt_sovits", {}))
-            tts_cfg["type"] = "gpt_sovits"
-        elif tts_type == "kokoro":
-            tts_cfg.update(config.tts_config.get("kokoro", {}))
-            tts_cfg["type"] = "kokoro"
-        elif tts_type == "qwen3_tts":
-            tts_cfg.update(config.tts_config.get("qwen3_tts", {}))
-            tts_cfg["type"] = "qwen3_tts"
-        else:
+
+        if tts_type not in ("edge_tts", "gpt_sovits", "kokoro", "qwen3_tts"):
             return {"ok": False, "error": f"Unknown TTS type: {tts_type}"}
 
         provider = get_tts_provider(tts_cfg)
-        test_text = "你好，这是一条语音测试。"
+
+        # Pick test text that matches the voice language to avoid synthesis failure
+        _lang = None
+        if tts_type == "edge_tts":
+            _voice = tts_cfg.get("voice", "")
+            _lang = _voice.split("-")[0].lower() if _voice else "zh"
+        elif tts_type == "kokoro":
+            _lang = tts_cfg.get("lang", "zh")
+        elif tts_type == "qwen3_tts":
+            qwl = (tts_cfg.get("language") or "").strip().lower()
+            if "japan" in qwl or qwl.startswith("ja"):
+                _lang = "ja"
+            elif "english" in qwl or qwl in ("en", "en-us", "en-gb"):
+                _lang = "en"
+            else:
+                _lang = "zh"
+        if _lang and _lang.startswith("ja"):
+            test_text = "こんにちは、音声テストです。"
+        elif _lang and not _lang.startswith("zh"):
+            test_text = "Hello, this is a voice test."
+        else:
+            test_text = "你好，这是一条语音测试。"
+
         audio_bytes = await provider.synthesize(test_text)
         if not audio_bytes:
+            if tts_type == "kokoro":
+                raise RuntimeError(
+                    "Kokoro 试听无音频：请确认模型在 models 目录且已选 Kokoro 引擎；"
+                    "中文需 misaki[zh]（打包安装后建议重启）；仍失败请查看服务端日志 [KokoroTTS]。"
+                )
             raise RuntimeError("empty audio returned from provider")
         audio_b64 = base64.b64encode(audio_bytes).decode()
         mime = "audio/mpeg" if tts_type == "edge_tts" else "audio/wav"
@@ -853,7 +1022,7 @@ async def set_profile_load_into_chat(profile_id: str, body: LoadIntoChatBody, re
     return {"ok": True}
 
 
-_PROJECT_ROOT = _KOKORO_PROJECT_ROOT   # 复用已有常量，避免重复定义
+_PROJECT_ROOT = get_project_root()  # 与 Kokoro 等共用项目根（打包时依赖 SHIKIGAMI_APP_ROOT）
 
 # ── Voice Design 参数提示词（拼接到声音描述后送给模型）────────────────────────
 _SPEED_HINTS: dict = {"slow": "用较慢的语速说。", "fast": "用较快的语速说。", "normal": ""}
@@ -907,8 +1076,9 @@ def _generate_voice_design_sync(
         import torch
         import soundfile as sf
         from qwen_tts import Qwen3TTSModel
-        from src.tts.qwen3_tts_provider import _resolve_model_path
+        from src.tts.qwen3_tts_provider import _resolve_model_path, _safe_device
 
+        device = _safe_device(device)
         dtype = torch.bfloat16
         if dtype_name and "float32" in dtype_name.lower():
             dtype = torch.float32
@@ -919,14 +1089,13 @@ def _generate_voice_design_sync(
 
         attn_impl = "flash_attention_2" if attn == "flash_attention_2" else "eager"
         load_path = _resolve_model_path(model_id)
-        device_map_arg: Any = {"": device} if device != "cpu" else "cpu"
+        # CPU: don't pass device_map to avoid requiring accelerate (transformers ≥4.38
+        # raises ImportError for any device_map value when accelerate is absent).
+        fp_kwargs: dict = {"dtype": dtype, "attn_implementation": attn_impl}
+        if device != "cpu":
+            fp_kwargs["device_map"] = {"": device}
 
-        model = Qwen3TTSModel.from_pretrained(
-            load_path,
-            device_map=device_map_arg,
-            dtype=dtype,
-            attn_implementation=attn_impl,
-        )
+        model = Qwen3TTSModel.from_pretrained(load_path, **fp_kwargs)
         wavs, sr = model.generate_voice_design(
             text=(text or "").strip() or "你好，我是你的专属助手，很高兴认识你。",
             language=language or "Auto",
@@ -2483,9 +2652,58 @@ class TestEmbeddingBody(BaseModel):
     device: Optional[str] = None
 
 
+def _embedding_test_error_hint(exc: Exception) -> str:
+    """打包版常见问题：torch 缺失 / 损坏，或移动安装目录后 user_packages 内 transformers 残缺。"""
+    msg = str(exc)
+    low = msg.lower()
+    if "pretrainedmodel" not in low and "could not import module" not in low:
+        return msg
+
+    # Check whether torch is the missing piece — most common cause.
+    try:
+        import torch  # type: ignore[import]  # noqa: F401
+        torch_ok = True
+    except Exception:
+        torch_ok = False
+
+    if not torch_ok:
+        return (
+            "本地 embedding 无法初始化：torch 不可用。\n\n"
+            "sentence-transformers 需要 PyTorch 才能加载 transformer 模型。\n"
+            "请在「启动器」或「设置 → 入门 → Qwen3-TTS」中安装 PyTorch（CPU 或 GPU 版均可），"
+            "重启应用后再重新测试 embedding。"
+        )
+
+    if not getattr(sys, "frozen", False):
+        return msg
+    root = get_project_root()
+    return (
+        f"{msg}\n\n"
+        "[打包版提示] transformers / sentence_transformers 加载异常。"
+        "若最近移动/复制过安装目录或升级过 PyTorch，请关闭应用后删除 user_packages 下的 "
+        "transformers、sentence_transformers 相关目录（及对应 *.dist-info），"
+        "再在入门向导中重新安装「向量记忆」依赖。\n"
+        f"app root: {root!r}"
+    )
+
+
 def _run_embedding_test(config: dict) -> tuple:
     """同步执行：创建 EmbeddingProvider 并 embed 一句测试文本。返回 (ok, latency_ms, error)。"""
-    from src.memory.embedding import EmbeddingProvider
+    from src.memory.embedding import EmbeddingProvider, _ensure_pretrained_model_on_transformers, _torch_importable
+
+    # Local embedding requires torch. Fail fast with an actionable message instead of
+    # the cryptic "Could not import module 'PreTrainedModel'" that comes from
+    # sentence_transformers when torch is absent or broken in user_packages.
+    if config.get("provider") == "local" and not _torch_importable():
+        return (
+            False, 0.0,
+            "本地 embedding 需要 PyTorch。"
+            "当前 torch 不可用（未安装或安装失败）。"
+            "请先在「启动器」或「设置 → 入门 → Qwen3-TTS」中安装 PyTorch（CPU 或 GPU 版均可），"
+            "再重新测试 embedding。",
+        )
+
+    _ensure_pretrained_model_on_transformers()
     try:
         provider = EmbeddingProvider(config)
         if not provider.is_available():
@@ -2498,7 +2716,7 @@ def _run_embedding_test(config: dict) -> tuple:
         return True, latency_ms, None
     except Exception as e:
         logger.warning("[settings] embedding 测试失败: %s", e, exc_info=True)
-        return False, 0.0, str(e)
+        return False, 0.0, _embedding_test_error_hint(e)
 
 
 # embedding 测试最长等待时间（秒），超时后返回错误，避免永远「正在测试」
