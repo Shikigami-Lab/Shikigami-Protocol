@@ -4,7 +4,7 @@
 > Persona JSON fields: [profile_prompts.en.md](./profile_prompts.en.md).
 > **中文：** [GETTING_STARTED.zh.md](./GETTING_STARTED.zh.md)
 
-**Using a release installer (.exe / .dmg / .AppImage)? No Python needed — just follow the two steps below. Running from source? Read [SETUP_FIRST_RUN.en.md](./SETUP_FIRST_RUN.en.md) first.**
+**Set up Python / Node and run from source first:** [SETUP_FIRST_RUN.en.md](./SETUP_FIRST_RUN.en.md). Then use the two steps below.
 
 ---
 

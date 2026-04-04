@@ -598,30 +598,115 @@ async def save_tts_config(request: Request, body: TTSSaveBody):
     return {"ok": True}
 
 
+def _tts_test_cfg_from_saved(config: Any) -> Tuple[str, Dict[str, Any]]:
+    """已写入 config 的引擎与参数 → get_tts_provider 用 dict。"""
+    tts_type = config.default_tts or "edge_tts"
+    tts_cfg: Dict[str, Any] = {"type": tts_type}
+    if tts_type == "edge_tts":
+        tts_cfg["voice"] = config.get_tts_voice()
+        tts_cfg["rate"] = config.tts_config.get("edge_tts", {}).get("rate", "+0%")
+    elif tts_type == "gpt_sovits":
+        tts_cfg.update(config.tts_config.get("gpt_sovits", {}))
+        tts_cfg["type"] = "gpt_sovits"
+    elif tts_type == "kokoro":
+        tts_cfg.update(config.tts_config.get("kokoro", {}))
+        tts_cfg["type"] = "kokoro"
+    elif tts_type == "qwen3_tts":
+        tts_cfg.update(config.tts_config.get("qwen3_tts", {}))
+        tts_cfg["type"] = "qwen3_tts"
+    return tts_type, tts_cfg
+
+
+def _tts_test_cfg_from_form(body: TTSSaveBody) -> Tuple[str, Dict[str, Any]]:
+    """设置页当前表单（未保存也可）→ 与 save 逻辑一致的内存 dict。"""
+    tts_type = (body.engine or "edge_tts").strip() or "edge_tts"
+    rate_str = f"{'+' if body.rate_pct >= 0 else ''}{body.rate_pct}%"
+    tts_cfg: Dict[str, Any] = {"type": tts_type}
+    if tts_type == "edge_tts":
+        tts_cfg["voice"] = body.voice
+        tts_cfg["rate"] = rate_str
+    elif tts_type == "gpt_sovits":
+        tts_cfg.update(
+            {
+                "type": "gpt_sovits",
+                "host": body.gptsovits_host,
+                "port": body.gptsovits_port,
+                "dir": body.gptsovits_dir,
+                "text_lang": body.gptsovits_text_lang,
+                "prompt_lang": body.gptsovits_prompt_lang,
+                "speed_factor": body.gptsovits_speed,
+                "temperature": body.gptsovits_temperature,
+                "top_p": body.gptsovits_top_p,
+                "top_k": body.gptsovits_top_k,
+                "repetition_penalty": body.gptsovits_repetition_penalty,
+                "ref_audio_path": body.gptsovits_ref_audio_path,
+                "prompt_text": body.gptsovits_prompt_text,
+            }
+        )
+    elif tts_type == "kokoro":
+        tts_cfg.update(
+            {
+                "type": "kokoro",
+                "voice": body.kokoro_voice or "",
+                "lang": body.kokoro_lang or "zh",
+                "speed": float(body.kokoro_speed or 1.0),
+                "auto_detect_lang": bool(body.kokoro_auto_detect_lang),
+            }
+        )
+    elif tts_type == "qwen3_tts":
+        tts_cfg.update(
+            {
+                "type": "qwen3_tts",
+                "mode": body.qwen3_mode or "custom_voice",
+                "model_id": body.qwen3_model_id or "",
+                "device": body.qwen3_device or "cuda:0",
+                "dtype": body.qwen3_dtype or "bfloat16",
+                "attn_implementation": body.qwen3_attn_implementation or "eager",
+                "language": body.qwen3_language or "Chinese",
+                "speaker": body.qwen3_speaker or "Vivian",
+                "instruct": body.qwen3_instruct or "",
+                "voice_description": body.qwen3_voice_description or "",
+                "ref_audio_path": body.qwen3_ref_audio_path or "",
+                "ref_text": body.qwen3_ref_text or "",
+                "temperature": float(body.qwen3_temperature or 0.9),
+                "top_p": float(body.qwen3_top_p or 1.0),
+                "top_k": int(body.qwen3_top_k or 50),
+                "repetition_penalty": float(body.qwen3_repetition_penalty or 1.05),
+                "use_torch_compile": bool(body.qwen3_use_torch_compile),
+                "use_sentence_chunking": bool(body.qwen3_use_sentence_chunking),
+                "sentence_max_chars": int(body.qwen3_sentence_max_chars or 0),
+            }
+        )
+    return tts_type, tts_cfg
+
+
 @router.post("/settings/tts/test")
 async def test_tts_config(request: Request):
-    """Synthesize a short test phrase with the current TTS config and return base64 audio."""
+    """合成试听音频。请求体可选：与 ``POST /settings/tts/save`` 相同 JSON，用于「未等自动保存就试听」。"""
     import base64
+
+    form_body: Optional[TTSSaveBody] = None
+    try:
+        ct = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ct:
+            raw = await request.body()
+            if raw and raw.strip():
+                form_body = TTSSaveBody.model_validate_json(raw)
+    except Exception:
+        form_body = None
+
     config = request.app.state.config
-    tts_type = config.default_tts
+    if form_body is not None:
+        tts_type, tts_cfg = _tts_test_cfg_from_form(form_body)
+    else:
+        tts_type, tts_cfg = _tts_test_cfg_from_saved(config)
+
     if not tts_type or tts_type == "none":
         return {"ok": False, "error": "TTS is disabled"}
     try:
         from src.tts.registry import get_tts_provider
-        tts_cfg: dict = {"type": tts_type}
-        if tts_type == "edge_tts":
-            tts_cfg["voice"] = config.get_tts_voice()
-            tts_cfg["rate"] = config.tts_config.get("edge_tts", {}).get("rate", "+0%")
-        elif tts_type == "gpt_sovits":
-            tts_cfg.update(config.tts_config.get("gpt_sovits", {}))
-            tts_cfg["type"] = "gpt_sovits"
-        elif tts_type == "kokoro":
-            tts_cfg.update(config.tts_config.get("kokoro", {}))
-            tts_cfg["type"] = "kokoro"
-        elif tts_type == "qwen3_tts":
-            tts_cfg.update(config.tts_config.get("qwen3_tts", {}))
-            tts_cfg["type"] = "qwen3_tts"
-        else:
+
+        if tts_type not in ("edge_tts", "gpt_sovits", "kokoro", "qwen3_tts"):
             return {"ok": False, "error": f"Unknown TTS type: {tts_type}"}
 
         provider = get_tts_provider(tts_cfg)
@@ -634,7 +719,13 @@ async def test_tts_config(request: Request):
         elif tts_type == "kokoro":
             _lang = tts_cfg.get("lang", "zh")
         elif tts_type == "qwen3_tts":
-            _lang = config.tts_config.get("qwen3_tts", {}).get("lang", "zh")
+            qwl = (tts_cfg.get("language") or "").strip().lower()
+            if "japan" in qwl or qwl.startswith("ja"):
+                _lang = "ja"
+            elif "english" in qwl or qwl in ("en", "en-us", "en-gb"):
+                _lang = "en"
+            else:
+                _lang = "zh"
         if _lang and _lang.startswith("ja"):
             test_text = "こんにちは、音声テストです。"
         elif _lang and not _lang.startswith("zh"):
@@ -644,6 +735,11 @@ async def test_tts_config(request: Request):
 
         audio_bytes = await provider.synthesize(test_text)
         if not audio_bytes:
+            if tts_type == "kokoro":
+                raise RuntimeError(
+                    "Kokoro 试听无音频：请确认模型在 models 目录且已选 Kokoro 引擎；"
+                    "中文需 misaki[zh]（打包安装后建议重启）；仍失败请查看服务端日志 [KokoroTTS]。"
+                )
             raise RuntimeError("empty audio returned from provider")
         audio_b64 = base64.b64encode(audio_bytes).decode()
         mime = "audio/mpeg" if tts_type == "edge_tts" else "audio/wav"

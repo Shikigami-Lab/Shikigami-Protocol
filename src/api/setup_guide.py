@@ -532,10 +532,10 @@ def _tts_status(config) -> Dict[str, Any]:
         result["kokoro_misaki_zh"] = _user_pkg_has("misaki")
     except Exception:
         result["kokoro_misaki_zh"] = _user_pkg_has("misaki")
-    # Check if Kokoro model files are present（与 kokoro_provider 一致：用项目根，勿依赖 cwd）
+    # Check if Kokoro model files are present（与 kokoro_provider 一致：含 get_models_root）
     _kokoro_model_found = False
     _kr = get_project_root()
-    for _search_dir in [os.path.join(_kr, "models"), _kr]:
+    for _search_dir in [get_models_root(), os.path.join(_kr, "models"), _kr]:
         for _mf in ["kokoro-v1.0.onnx", "kokoro-v0_19.onnx"]:
             for _vf in ["voices-v1.0.bin", "voices-v0_19.bin"]:
                 if os.path.isfile(os.path.join(_search_dir, _mf)) and \

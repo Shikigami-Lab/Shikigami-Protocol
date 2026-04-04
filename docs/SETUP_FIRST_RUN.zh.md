@@ -9,16 +9,9 @@
 
 ## 快速路径
 
-### 直接使用（推荐）
+**已不再发布预编译桌面安装包（.exe / .dmg / .AppImage）。** 请使用下方 **源码运行**，或 **Docker**。[Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 仅作版本标签与说明，附件为 GitHub 默认提供的**源码压缩包**；桌面端打包与发行形态**正在开发中**。
 
-前往 [GitHub Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 下载对应平台的安装包：
-- **Windows**: `Shikigami-Protocol-Setup-x.y.z.exe` (一键安装)
-- **macOS**: `Shikigami-Protocol-x.y.z.dmg`
-- **Linux**: `Shikigami-Protocol-x.y.z.AppImage`
-
-> **注意**：下载 Release 版本无需安装 Python 或 Node.js，但 AI 向量记忆、本地语音识别/合成等大型组件仍需在 UI 中按需下载模型。
-
-### 源码运行（开发者/高级用户）
+### 源码运行
 
 #### Windows
 ```bat

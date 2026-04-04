@@ -1522,49 +1522,54 @@ const SettingsMixin = {
       }
     },
 
+    /** 与 POST /settings/tts/save、/settings/tts/test 共用，避免试听仍用未保存的旧 default_tts */
+    buildTtsSavePayload() {
+      return {
+        engine:                      this.ttsForm.engine,
+        voice:                       this.ttsForm.voice,
+        rate_pct:                    parseInt(this.ttsForm.rate_pct, 10) || 0,
+        language:                    this.ttsForm.language,
+        gptsovits_host:              this.ttsForm.gptsovits_host,
+        gptsovits_port:              parseInt(this.ttsForm.gptsovits_port, 10) || 9880,
+        gptsovits_dir:               this.ttsForm.gptsovits_dir || '',
+        gptsovits_text_lang:         this.ttsForm.gptsovits_text_lang,
+        gptsovits_prompt_lang:       this.ttsForm.gptsovits_prompt_lang,
+        gptsovits_speed:             parseFloat(this.ttsForm.gptsovits_speed) || 1.0,
+        gptsovits_temperature:       parseFloat(this.ttsForm.gptsovits_temperature) || 1.0,
+        gptsovits_top_p:             parseFloat(this.ttsForm.gptsovits_top_p) || 1.0,
+        gptsovits_top_k:             parseInt(this.ttsForm.gptsovits_top_k, 10) || 15,
+        gptsovits_repetition_penalty: parseFloat(this.ttsForm.gptsovits_repetition_penalty) || 1.35,
+        gptsovits_ref_audio_path: this.ttsForm.gptsovits_ref_audio_path || '',
+        gptsovits_prompt_text: this.ttsForm.gptsovits_prompt_text || '',
+        qwen3_mode:                  this.ttsForm.qwen3_mode || 'custom_voice',
+        qwen3_model_id:              this.ttsForm.qwen3_model_id || '',
+        qwen3_device:                this.ttsForm.qwen3_device || 'cuda:0',
+        qwen3_dtype:                 this.ttsForm.qwen3_dtype || 'bfloat16',
+        qwen3_language:              this.ttsForm.qwen3_language || 'Chinese',
+        qwen3_speaker:               this.ttsForm.qwen3_speaker || 'Vivian',
+        qwen3_instruct:              this.ttsForm.qwen3_instruct || '',
+        qwen3_voice_description:     this.ttsForm.qwen3_voice_description || '',
+        qwen3_ref_audio_path:        this.ttsForm.qwen3_ref_audio_path || '',
+        qwen3_ref_text:              this.ttsForm.qwen3_ref_text || '',
+        qwen3_temperature:           parseFloat(this.ttsForm.qwen3_temperature) || 0.9,
+        qwen3_top_p:                 parseFloat(this.ttsForm.qwen3_top_p) || 1.0,
+        qwen3_top_k:                 parseInt(this.ttsForm.qwen3_top_k, 10) || 50,
+        qwen3_repetition_penalty:    parseFloat(this.ttsForm.qwen3_repetition_penalty) || 1.05,
+        qwen3_attn_implementation:   this.ttsForm.qwen3_attn_implementation || 'eager',
+        qwen3_use_torch_compile:    !!this.ttsForm.qwen3_use_torch_compile,
+        qwen3_use_sentence_chunking: !!this.ttsForm.qwen3_use_sentence_chunking,
+        qwen3_sentence_max_chars:    parseInt(this.ttsForm.qwen3_sentence_max_chars, 10) || 0,
+        kokoro_voice:               this.ttsForm.kokoro_voice || '',
+        kokoro_lang:                this.ttsForm.kokoro_lang || 'zh',
+        kokoro_speed:               parseFloat(this.ttsForm.kokoro_speed) || 1.0,
+        kokoro_auto_detect_lang:    !!this.ttsForm.kokoro_auto_detect_lang,
+      };
+    },
+
     async saveTTSConfig(silent = false) {
       this.ttsSaveState = 'saving';
       try {
-        const body = {
-          engine:                      this.ttsForm.engine,
-          voice:                       this.ttsForm.voice,
-          rate_pct:                    parseInt(this.ttsForm.rate_pct, 10) || 0,
-          language:                    this.ttsForm.language,
-          gptsovits_host:              this.ttsForm.gptsovits_host,
-          gptsovits_port:              parseInt(this.ttsForm.gptsovits_port, 10) || 9880,
-          gptsovits_dir:               this.ttsForm.gptsovits_dir || '',
-          gptsovits_text_lang:         this.ttsForm.gptsovits_text_lang,
-          gptsovits_prompt_lang:       this.ttsForm.gptsovits_prompt_lang,
-          gptsovits_speed:             parseFloat(this.ttsForm.gptsovits_speed) || 1.0,
-          gptsovits_temperature:       parseFloat(this.ttsForm.gptsovits_temperature) || 1.0,
-          gptsovits_top_p:             parseFloat(this.ttsForm.gptsovits_top_p) || 1.0,
-          gptsovits_top_k:             parseInt(this.ttsForm.gptsovits_top_k, 10) || 15,
-          gptsovits_repetition_penalty: parseFloat(this.ttsForm.gptsovits_repetition_penalty) || 1.35,
-          gptsovits_ref_audio_path: this.ttsForm.gptsovits_ref_audio_path || '',
-          gptsovits_prompt_text: this.ttsForm.gptsovits_prompt_text || '',
-          qwen3_mode:                  this.ttsForm.qwen3_mode || 'custom_voice',
-          qwen3_model_id:              this.ttsForm.qwen3_model_id || '',
-          qwen3_device:                this.ttsForm.qwen3_device || 'cuda:0',
-          qwen3_dtype:                 this.ttsForm.qwen3_dtype || 'bfloat16',
-          qwen3_language:              this.ttsForm.qwen3_language || 'Chinese',
-          qwen3_speaker:               this.ttsForm.qwen3_speaker || 'Vivian',
-          qwen3_instruct:              this.ttsForm.qwen3_instruct || '',
-          qwen3_voice_description:     this.ttsForm.qwen3_voice_description || '',
-          qwen3_ref_audio_path:        this.ttsForm.qwen3_ref_audio_path || '',
-          qwen3_ref_text:              this.ttsForm.qwen3_ref_text || '',
-          qwen3_temperature:           parseFloat(this.ttsForm.qwen3_temperature) || 0.9,
-          qwen3_top_p:                 parseFloat(this.ttsForm.qwen3_top_p) || 1.0,
-          qwen3_top_k:                 parseInt(this.ttsForm.qwen3_top_k, 10) || 50,
-          qwen3_repetition_penalty:    parseFloat(this.ttsForm.qwen3_repetition_penalty) || 1.05,
-          qwen3_attn_implementation:   this.ttsForm.qwen3_attn_implementation || 'eager',
-          qwen3_use_torch_compile:    !!this.ttsForm.qwen3_use_torch_compile,
-          qwen3_use_sentence_chunking: !!this.ttsForm.qwen3_use_sentence_chunking,
-          qwen3_sentence_max_chars:    parseInt(this.ttsForm.qwen3_sentence_max_chars, 10) || 0,
-          kokoro_voice:               this.ttsForm.kokoro_voice || '',
-          kokoro_lang:                this.ttsForm.kokoro_lang || 'zh',
-          kokoro_speed:               parseFloat(this.ttsForm.kokoro_speed) || 1.0,
-          kokoro_auto_detect_lang:    !!this.ttsForm.kokoro_auto_detect_lang,
-        };
+        const body = this.buildTtsSavePayload();
         const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsSave(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1593,7 +1598,11 @@ const SettingsMixin = {
     async testTTSVoice() {
       this.ttsTestState = 'loading';
       try {
-        const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsTest(), { method: 'POST' });
+        const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsTest(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.buildTtsSavePayload()),
+        });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || 'synthesis failed');
         const audio = new Audio(`data:${data.mime};base64,${data.audio}`);
@@ -1602,6 +1611,8 @@ const SettingsMixin = {
       } catch (e) {
         this.ttsTestState = 'error';
         console.error('[testTTS]', e);
+        const msg = (e && e.message) ? String(e.message) : String(e);
+        if (this.showToast) this.showToast(msg, 'error');
       }
       setTimeout(() => { this.ttsTestState = null; }, 3000);
     },

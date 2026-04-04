@@ -4,7 +4,7 @@
 > 人物卡 JSON 字段见 [profile_prompts.zh.md](./profile_prompts.zh.md)。
 > **English:** [GETTING_STARTED.en.md](./GETTING_STARTED.en.md)
 
-**使用官方安装包（.exe / .dmg / .AppImage）？无需安装 Python，直接看下方两步。从源码运行？先读 [SETUP_FIRST_RUN.zh.md](./SETUP_FIRST_RUN.zh.md) 完成环境配置。**
+**请先按 [SETUP_FIRST_RUN.zh.md](./SETUP_FIRST_RUN.zh.md) 完成源码运行环境（Python / Node 等），再按下方两步配置。**
 
 ---
 

@@ -13,7 +13,6 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/Shikigami-Lab/Shikigami-Protocol)
 [![Release](https://img.shields.io/github/v/release/Shikigami-Lab/Shikigami-Protocol)](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Shikigami-Lab/Shikigami-Protocol/total)](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)
 
 <a href="README.md">English</a>
 
@@ -75,7 +74,7 @@
 
 - **自省 + 主动破冰 (ASE)**：**后台自省 (Reflection)** 在你离线或安静时生成内心活动；**ASE** 将其转化为真实 outreach——关心、打趣或「你今天晚了」一类语境化开口，达标触发而非无脑定时。
 - **群聊**：多人格共室对话，各角色流式回复、署名清晰，一体化支持而非每人开一窗硬凑。
-- **开箱即用的桌面端**：[Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 提供 **Windows `.exe`、macOS `.dmg`、Linux `.AppImage`**，图形化引导，无需先搭 Python/Node 环境。
+- **桌面端 + Web UI**：Electron 壳或浏览器连接本地 FastAPI 服务——从[源码运行](#cn-quick-start)或使用 Docker 跑无头服务 + 网页界面。
 - **跨设备 Web UI**：内置响应式网页界面，手机/平板连同一局域网即可直接访问，无需单独 App。
 - **情绪与好感度引擎**：情绪状态机 × 能量衰减 × 8 段关系阶梯，不是单轮重置的假脾气。
 - **长短时记忆流水线**：事实提取、向量检索、日记摘要、艾宾浩斯遗忘曲线，全部内置。
@@ -114,15 +113,9 @@
 
 ## 快速开始
 
-### 方式一：📥 下载安装包（推荐新手）
+> **说明**：GitHub Releases **不再提供**预编译桌面安装包，请使用下方 **源码** 或 **Docker**。版本仍以 `v*` 标签与 Release 页面为准，附件仅为 GitHub 默认的**源码压缩包**。桌面端打包与面向最终用户的发行形态**正在开发中**。
 
-前往 [Releases 页面](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest) 按系统下载：**Windows** `Shikigami Protocol Setup vX.X.X.exe`，**macOS** `.dmg`，**Linux** `.AppImage`。安装或运行后跟随图形化引导，**这些安装包本身不要求预装 Python 或 Node.js**。
-
-启动后需配置大模型（云端 API Key 和/或本地栈，如 Gemini / OpenAI / Ollama 等），App 内引导会逐步说明。
-
----
-
-### 方式二：源码运行
+### 方式一：源码运行
 
 **环境要求**
 
@@ -150,7 +143,7 @@ bash launch.sh
 
 ---
 
-### 方式三：Docker（服务器 / NAS）
+### 方式二：Docker（服务器 / NAS）
 
 ```bash
 git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git

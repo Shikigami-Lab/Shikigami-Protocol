@@ -9,16 +9,9 @@ This doc covers: **Python / Node installation, `init.bat` / `init.sh`, Docker de
 
 ## Quick paths
 
-### Pre-built release (Recommended)
+**Pre-built desktop installers (.exe / .dmg / .AppImage) are no longer published.** Clone the repo and use **Run from source** below, or **Docker**. [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) are version tags with auto-generated notes plus GitHub’s default **source code** archives only; desktop packaging is **under active development**.
 
-Go to [GitHub Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) and download the installer for your platform:
-- **Windows**: `Shikigami-Protocol-Setup-x.y.z.exe` (One-click installer)
-- **macOS**: `Shikigami-Protocol-x.y.z.dmg`
-- **Linux**: `Shikigami-Protocol-x.y.z.AppImage`
-
-> **Note**: Pre-built releases do not require Python or Node.js. Large components like AI memory vectors and local TTS/STT still require on-demand model downloads via the UI.
-
-### Run from source (Developers/Advanced)
+### Run from source
 
 #### Windows
 ```bat
