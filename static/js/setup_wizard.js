@@ -1,6 +1,8 @@
 /* global Vue */
 (function () {
   const api = window.electronAPI;
+  /** 官方整合包发布页（最新版）；包体较大，由用户在浏览器中自选 zip/7z。 */
+  const GPTSOVITS_RELEASES_LATEST = 'https://github.com/RVC-Boss/GPT-SoVITS/releases/latest';
 
   function tw(key, locale) {
     const loc = (locale === 'en' || locale === 'zh') ? locale
@@ -285,6 +287,14 @@
       },
       pipQwen() {
         this.pipInstall(['qwen-tts>=0.0.1', 'soundfile>=0.12.0'], 'qwen_tts', '');
+      },
+      openGptsovitsReleases() {
+        const url = GPTSOVITS_RELEASES_LATEST;
+        if (api && typeof api.openExternal === 'function') {
+          api.openExternal(url);
+        } else {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
       },
       async saveGptsovitsDir() {
         this.gptsovitsSaveMsg = '';

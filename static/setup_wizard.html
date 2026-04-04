@@ -442,7 +442,11 @@
           <details class="setup-wizard-details">
             <summary>{{ tw('onboardingTtsGptSoVitsHowToGet') }}</summary>
             <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">① {{ tw('onboardingTtsGptSoVitsStep1') }}</span><br/>
-              <span style="font-size:11px;">{{ tw('onboardingTtsGptSoVitsStep1Hint') }}</span></p>
+              <span style="font-size:11px;">{{ tw('onboardingTtsGptSoVitsStep1Hint') }}</span><br/>
+              <a href="#" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block;text-decoration:underline;" @click.prevent="openGptsovitsReleases">{{ tw('onboardingTtsGptSoVitsReleaseLinkText') }}</a></p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;">
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="openGptsovitsReleases">{{ tw('onboardingTtsGptSoVitsOpenReleasesBtn') }}</button>
+            </div>
             <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">② {{ tw('onboardingTtsGptSoVitsStep2') }}</span><br/>
               {{ tw('onboardingTtsGptSoVitsStep2Hint') }}</p>
             <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">③ {{ tw('onboardingTtsGptSoVitsStep3') }}</span><br/>

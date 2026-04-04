@@ -148,18 +148,16 @@ def _get_model(model_id: str, device: str, dtype_name: str, attn: str, use_torch
         dtype = torch.float32
 
     load_path = _resolve_model_path(model_id)
-    # Use a dict device_map ({"": device}) instead of a plain string.
-    # A plain string like "cuda:0" triggers accelerate's big-model dispatch path which
-    # calls model.to(device) on a meta-device model and raises NotImplementedError.
-    # A dict form bypasses that code path and places all layers on the target device correctly.
-    device_map_arg: Any = {"": device} if device != "cpu" else "cpu"
+    # For GPU: use dict device_map to bypass accelerate's meta-device dispatch path.
+    # For CPU: pass device_map=None — model defaults to CPU, no accelerate required.
+    #   Passing device_map="cpu" (string) triggers the accelerate import check in
+    #   transformers ≥4.38 even for CPU, causing ImportError when accelerate is absent.
+    device_map_arg: Any = {"": device} if device != "cpu" else None
+    fp_kwargs: dict = {"dtype": dtype, "attn_implementation": attn_impl}
+    if device_map_arg is not None:
+        fp_kwargs["device_map"] = device_map_arg
     try:
-        _qwen_model = Qwen3TTSModel.from_pretrained(
-            load_path,
-            device_map=device_map_arg,
-            dtype=dtype,
-            attn_implementation=attn_impl,
-        )
+        _qwen_model = Qwen3TTSModel.from_pretrained(load_path, **fp_kwargs)
         if use_torch_compile and device != "cpu":
             try:
                 _qwen_model = torch.compile(_qwen_model, mode="reduce-overhead")

@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import re
 import shutil
 import time
@@ -973,14 +974,13 @@ def _generate_voice_design_sync(
 
         attn_impl = "flash_attention_2" if attn == "flash_attention_2" else "eager"
         load_path = _resolve_model_path(model_id)
-        device_map_arg: Any = {"": device} if device != "cpu" else "cpu"
+        # CPU: don't pass device_map to avoid requiring accelerate (transformers ≥4.38
+        # raises ImportError for any device_map value when accelerate is absent).
+        fp_kwargs: dict = {"dtype": dtype, "attn_implementation": attn_impl}
+        if device != "cpu":
+            fp_kwargs["device_map"] = {"": device}
 
-        model = Qwen3TTSModel.from_pretrained(
-            load_path,
-            device_map=device_map_arg,
-            dtype=dtype,
-            attn_implementation=attn_impl,
-        )
+        model = Qwen3TTSModel.from_pretrained(load_path, **fp_kwargs)
         wavs, sr = model.generate_voice_design(
             text=(text or "").strip() or "你好，我是你的专属助手，很高兴认识你。",
             language=language or "Auto",
@@ -2537,9 +2537,58 @@ class TestEmbeddingBody(BaseModel):
     device: Optional[str] = None
 
 
+def _embedding_test_error_hint(exc: Exception) -> str:
+    """打包版常见问题：torch 缺失 / 损坏，或移动安装目录后 user_packages 内 transformers 残缺。"""
+    msg = str(exc)
+    low = msg.lower()
+    if "pretrainedmodel" not in low and "could not import module" not in low:
+        return msg
+
+    # Check whether torch is the missing piece — most common cause.
+    try:
+        import torch  # type: ignore[import]  # noqa: F401
+        torch_ok = True
+    except Exception:
+        torch_ok = False
+
+    if not torch_ok:
+        return (
+            "本地 embedding 无法初始化：torch 不可用。\n\n"
+            "sentence-transformers 需要 PyTorch 才能加载 transformer 模型。\n"
+            "请在「启动器」或「设置 → 入门 → Qwen3-TTS」中安装 PyTorch（CPU 或 GPU 版均可），"
+            "重启应用后再重新测试 embedding。"
+        )
+
+    if not getattr(sys, "frozen", False):
+        return msg
+    root = get_project_root()
+    return (
+        f"{msg}\n\n"
+        "[打包版提示] transformers / sentence_transformers 加载异常。"
+        "若最近移动/复制过安装目录或升级过 PyTorch，请关闭应用后删除 user_packages 下的 "
+        "transformers、sentence_transformers 相关目录（及对应 *.dist-info），"
+        "再在入门向导中重新安装「向量记忆」依赖。\n"
+        f"app root: {root!r}"
+    )
+
+
 def _run_embedding_test(config: dict) -> tuple:
     """同步执行：创建 EmbeddingProvider 并 embed 一句测试文本。返回 (ok, latency_ms, error)。"""
-    from src.memory.embedding import EmbeddingProvider
+    from src.memory.embedding import EmbeddingProvider, _ensure_pretrained_model_on_transformers, _torch_importable
+
+    # Local embedding requires torch. Fail fast with an actionable message instead of
+    # the cryptic "Could not import module 'PreTrainedModel'" that comes from
+    # sentence_transformers when torch is absent or broken in user_packages.
+    if config.get("provider") == "local" and not _torch_importable():
+        return (
+            False, 0.0,
+            "本地 embedding 需要 PyTorch。"
+            "当前 torch 不可用（未安装或安装失败）。"
+            "请先在「启动器」或「设置 → 入门 → Qwen3-TTS」中安装 PyTorch（CPU 或 GPU 版均可），"
+            "再重新测试 embedding。",
+        )
+
+    _ensure_pretrained_model_on_transformers()
     try:
         provider = EmbeddingProvider(config)
         if not provider.is_available():
@@ -2552,7 +2601,7 @@ def _run_embedding_test(config: dict) -> tuple:
         return True, latency_ms, None
     except Exception as e:
         logger.warning("[settings] embedding 测试失败: %s", e, exc_info=True)
-        return False, 0.0, str(e)
+        return False, 0.0, _embedding_test_error_hint(e)
 
 
 # embedding 测试最长等待时间（秒），超时后返回错误，避免永远「正在测试」

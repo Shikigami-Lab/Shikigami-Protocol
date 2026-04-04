@@ -467,7 +467,9 @@ def _sherpa_onnx_installed() -> bool:
         import sherpa_onnx  # noqa: F401
         return True
     except ImportError:
-        return False
+        return _user_pkg_has("sherpa_onnx")
+    except Exception:
+        return _user_pkg_has("sherpa_onnx")
 
 
 _SHERPA_SENSE_VOICE_SEARCH_DIRS = [
@@ -538,12 +540,18 @@ def _tts_status(config) -> Dict[str, Any]:
         import kokoro_onnx  # noqa: F401
         result["kokoro_installed"] = True
     except ImportError:
-        pass
+        # Frozen exe: C-extension DLLs may fail to load even if package is installed.
+        # Fall back to file-system check so the wizard doesn't mislead users.
+        result["kokoro_installed"] = _user_pkg_has("kokoro_onnx")
+    except Exception:
+        result["kokoro_installed"] = _user_pkg_has("kokoro_onnx")
     try:
         from misaki import zh  # noqa: F401
         result["kokoro_misaki_zh"] = True
     except ImportError:
-        pass
+        result["kokoro_misaki_zh"] = _user_pkg_has("misaki")
+    except Exception:
+        result["kokoro_misaki_zh"] = _user_pkg_has("misaki")
     # Check if Kokoro model files are present
     _kokoro_model_found = False
     for _search_dir in [os.path.join(os.getcwd(), "models"), os.getcwd()]:
@@ -1320,6 +1328,9 @@ def wizard_apply_stt_model_cli(model_path: str) -> int:
     if "stt" not in data:
         data["stt"] = {}
     data["stt"]["model_path"] = path
+    # Also enable STT — the wizard only reaches here when the user explicitly
+    # sets a model path, so enabling is always the intended outcome.
+    data["stt"]["enabled"] = True
     _save_yaml(y, data)
     return 0
 
@@ -1972,7 +1983,7 @@ class ApplySttModelBody(BaseModel):
 
 @router.post("/apply-stt-model")
 async def apply_stt_model(request: Request, body: ApplySttModelBody) -> Dict[str, Any]:
-    """Write stt.model_path to app.yaml and hot-reload config."""
+    """Write stt.model_path (and enable STT) to app.yaml and hot-reload config."""
     from src.api.settings_ext import _load_yaml, _save_yaml
     config = request.app.state.config
     path = normalize_stt_model_path_for_config(body.model_path)
@@ -1980,10 +1991,12 @@ async def apply_stt_model(request: Request, body: ApplySttModelBody) -> Dict[str
     if "stt" not in data:
         data["stt"] = {}
     data["stt"]["model_path"] = path
+    data["stt"]["enabled"] = True
     _save_yaml(y, data)
     stt_cfg = config.get_stt_config()
     if isinstance(stt_cfg, dict):
         stt_cfg["model_path"] = path
+        stt_cfg["enabled"] = True
     return {"ok": True, "model_path": path}
 
 
