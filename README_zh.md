@@ -113,7 +113,7 @@
 
 ## 快速开始
 
-> **说明**：GitHub Releases **不再提供**预编译桌面安装包，请使用下方 **源码** 或 **Docker**。版本仍以 `v*` 标签与 Release 页面为准，附件仅为 GitHub 默认的**源码压缩包**。桌面端打包与面向最终用户的发行形态**正在开发中**。
+> **说明**：GitHub Releases **不提供**预编译桌面安装包，请使用下方 **源码** 或 **Docker**。
 
 ### 方式一：源码运行
 
@@ -123,20 +123,27 @@
 - Node.js 18+（仅 Electron 桌面版需要）
 - 一个 LLM API：Gemini / OpenAI / Ollama / 任意 OpenAI 兼容接口
 
-**Windows（原生 / Electron）**
+**推荐：下载最新 Release 压缩包**
+
+前往 [Releases](https://github.com/Shikigami-Labs/Shikigami-Protocol/releases/latest)，下载 **Source code (zip)**，解压后在解压目录内执行下方命令。
+
+**或使用 git clone（跟踪 main 分支最新提交）**
+
+```bash
+git clone https://github.com/Shikigami-Labs/Shikigami-Protocol.git
+cd Shikigami-Protocol
+```
+
+**Windows**
 
 ```bat
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
-cd Shikigami-Protocol
 init.bat
 launch.bat
 ```
 
-**macOS / Linux（原生 / Electron）**
+**macOS / Linux**
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
-cd Shikigami-Protocol
 bash init.sh
 bash launch.sh
 ```
