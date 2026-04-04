@@ -351,13 +351,13 @@ _KOKORO_VOICE_GROUPS = {
     "Other":          ["ff_siwis","ef_dora","em_alex","em_santa","hf_alpha","hf_beta","hm_omega","hm_psi","if_sara","im_nicola","pf_dora","pm_alex","pm_santa"],
 }
 
-_KOKORO_PROJECT_ROOT = get_project_root()
 _KOKORO_VOICES_CANDIDATES = ["voices-v1.0.bin", "voices-v0_19.bin"]
 
 
 def _get_kokoro_voice_groups() -> dict:
     """Try to load actual voice keys from the voices.bin file; fall back to hardcoded list."""
-    search_dirs = [os.path.join(_KOKORO_PROJECT_ROOT, "models"), _KOKORO_PROJECT_ROOT]
+    root = get_project_root()
+    search_dirs = [os.path.join(root, "models"), root]
     for d in search_dirs:
         for fname in _KOKORO_VOICES_CANDIDATES:
             p = os.path.join(d, fname)
@@ -907,7 +907,7 @@ async def set_profile_load_into_chat(profile_id: str, body: LoadIntoChatBody, re
     return {"ok": True}
 
 
-_PROJECT_ROOT = _KOKORO_PROJECT_ROOT   # 复用已有常量，避免重复定义
+_PROJECT_ROOT = get_project_root()  # 与 Kokoro 等共用项目根（打包时依赖 SHIKIGAMI_APP_ROOT）
 
 # ── Voice Design 参数提示词（拼接到声音描述后送给模型）────────────────────────
 _SPEED_HINTS: dict = {"slow": "用较慢的语速说。", "fast": "用较快的语速说。", "normal": ""}

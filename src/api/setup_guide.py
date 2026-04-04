@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.llm.registry import get_provider
-from src.utils.paths import get_project_root
+from src.utils.paths import get_models_root, get_project_root, resolve_sense_voice_model_dir
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,7 @@ _pip_install_state: Dict[str, Any] = {
 
 
 def _models_root() -> str:
-    env = (os.environ.get("SHIKIGAMI_MODELS_ROOT") or "").strip()
-    if env and os.path.isdir(env):
-        return os.path.abspath(env)
-    root = os.path.join(os.getcwd(), "models")
-    return os.path.abspath(root)
+    return get_models_root()
 
 
 def _load_bundle_list() -> List[Dict[str, Any]]:
@@ -475,20 +471,7 @@ _SHERPA_SENSE_VOICE_SEARCH_DIRS = [
 
 
 def _sherpa_sense_voice_ready(cfg_model_path: str = "") -> bool:
-    if cfg_model_path and os.path.isdir(cfg_model_path):
-        model_f = os.path.join(cfg_model_path, "model.int8.onnx")
-        tokens_f = os.path.join(cfg_model_path, "tokens.txt")
-        return os.path.isfile(tokens_f) and (os.path.isfile(model_f) or
-               os.path.isfile(os.path.join(cfg_model_path, "model.onnx")))
-    cwd = os.getcwd()
-    for rel in _SHERPA_SENSE_VOICE_SEARCH_DIRS:
-        fp = os.path.join(cwd, rel)
-        if os.path.isfile(os.path.join(fp, "tokens.txt")) and (
-            os.path.isfile(os.path.join(fp, "model.int8.onnx")) or
-            os.path.isfile(os.path.join(fp, "model.onnx"))
-        ):
-            return True
-    return False
+    return bool(resolve_sense_voice_model_dir(cfg_model_path))
 
 
 def _stt_ready(stt_cfg: Dict[str, Any]) -> Tuple[bool, str]:
@@ -549,9 +532,10 @@ def _tts_status(config) -> Dict[str, Any]:
         result["kokoro_misaki_zh"] = _user_pkg_has("misaki")
     except Exception:
         result["kokoro_misaki_zh"] = _user_pkg_has("misaki")
-    # Check if Kokoro model files are present
+    # Check if Kokoro model files are present（与 kokoro_provider 一致：用项目根，勿依赖 cwd）
     _kokoro_model_found = False
-    for _search_dir in [os.path.join(os.getcwd(), "models"), os.getcwd()]:
+    _kr = get_project_root()
+    for _search_dir in [os.path.join(_kr, "models"), _kr]:
         for _mf in ["kokoro-v1.0.onnx", "kokoro-v0_19.onnx"]:
             for _vf in ["voices-v1.0.bin", "voices-v0_19.bin"]:
                 if os.path.isfile(os.path.join(_search_dir, _mf)) and \
@@ -573,7 +557,7 @@ def _tts_status(config) -> Dict[str, Any]:
     elif model_id and os.path.isabs(model_id):
         qwen_paths.insert(0, model_id)
     for p in qwen_paths:
-        fp = p if os.path.isabs(p) else os.path.join(os.getcwd(), p)
+        fp = p if os.path.isabs(p) else os.path.join(get_project_root(), p)
         if _dir_looks_downloaded(fp):
             result["qwen3_model_ready"] = True
             result["qwen3_model_path"] = p
@@ -618,7 +602,7 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
     cfg_ok, cfg_reason = _llm_preset_looks_configured(preset)
 
     local_model = (emb.get("local_model") or "all-MiniLM-L6-v2").strip()
-    lp = local_model if os.path.isabs(local_model) else os.path.join(os.getcwd(), local_model.replace("/", os.sep))
+    lp = local_model if os.path.isabs(local_model) else os.path.join(get_project_root(), local_model.replace("/", os.sep))
     local_on_disk = bool(os.path.isfile(lp)) or (_dir_looks_downloaded(lp) if os.path.isdir(lp) else False)
 
     _known_embed_dirs = [
@@ -627,7 +611,7 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
     ]
     embed_installed: dict = {}
     for eid, rel in _known_embed_dirs:
-        fp = os.path.join(os.getcwd(), rel)
+        fp = os.path.join(get_project_root(), rel)
         embed_installed[eid] = _dir_looks_downloaded(fp)
 
     _stt_cfg_dict = stt_cfg if isinstance(stt_cfg, dict) else {}
@@ -635,7 +619,7 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
     sv_cfg_path = (_stt_cfg_dict.get("model_path") or "").strip()
     sherpa_installed_dirs: dict = {}
     for rel in _SHERPA_SENSE_VOICE_SEARCH_DIRS:
-        sherpa_installed_dirs[rel] = _dir_looks_downloaded(os.path.join(os.getcwd(), rel))
+        sherpa_installed_dirs[rel] = _dir_looks_downloaded(os.path.join(get_project_root(), rel))
 
     with _download_lock:
         dl = dict(_download_state)
@@ -1755,8 +1739,9 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
             cmd = [embed_python, "-m", "pip", "install", "--upgrade", "--target", target_dir] + packages
             if index_url:
                 cmd += ["--index-url", index_url]
-                if "download.pytorch.org" in index_url:
-                    cmd += ["--extra-index-url", "https://pypi.org/simple"]
+                # 勿对 download.pytorch.org/whl/cu* 再加 --extra-index-url PyPI：
+                # PyPI 上 CPU 版 torch 版本号常高于 CUDA 轮，pip 会跨索引选「最高版」→ 装成 +cpu。
+                # 与 scripts/setup_wizard_helper.py 中 frozen pip 行为一致；cu 索引自含 torch/vision/audio。
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
             ok = result.returncode == 0
             err_pkg, err_tgt, err_out = packages, install_target, result
@@ -1808,8 +1793,7 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
         cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + packages
         if index_url:
             cmd += ["--index-url", index_url]
-            if "download.pytorch.org" in index_url:
-                cmd += ["--extra-index-url", "https://pypi.org/simple"]
+            # 同上：CUDA 索引时不要并列 PyPI，否则易解析到 CPU torch。
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         ok = result.returncode == 0
         err_pkg, err_tgt, err_out = packages, install_target, result

@@ -38,21 +38,20 @@ _DEFAULT_VOICE: dict = {
 _kokoro_instance: Optional[Any] = None
 _kokoro_import_warned = False
 
-# Model file search order: project models/ dir, then project root, then cwd
-_PROJECT_ROOT = get_project_root()
-_MODEL_SEARCH_DIRS = [
-    os.path.join(_PROJECT_ROOT, "models"),
-    _PROJECT_ROOT,
-    os.getcwd(),
-]
 # New (v1.0) filenames take priority; fall back to old (v0_19) if not found
 _MODEL_CANDIDATES = ["kokoro-v1.0.onnx", "kokoro-v0_19.onnx"]
 _VOICES_CANDIDATES = ["voices-v1.0.bin", "voices-v0_19.bin"]
 
 
+def _kokoro_model_search_dirs() -> list:
+    """与入门直链下载目录一致；每次调用 get_project_root()，避免模块 import 时 cwd 尚未 chdir。"""
+    r = get_project_root()
+    return [os.path.join(r, "models"), r, os.getcwd()]
+
+
 def _find_model_files() -> Optional[tuple]:
     """Search common directories for kokoro model + voices files. Returns (model_path, voices_path) or None."""
-    for d in _MODEL_SEARCH_DIRS:
+    for d in _kokoro_model_search_dirs():
         for mf in _MODEL_CANDIDATES:
             model_path = os.path.join(d, mf)
             if not os.path.isfile(model_path):
@@ -84,7 +83,7 @@ def _get_kokoro():
                 "[KokoroTTS] 未找到模型文件 (kokoro-v1.0.onnx + voices-v1.0.bin)，"
                 "请下载并放置到 %s/models/ 目录下。"
                 "下载地址: https://github.com/thewh1teagle/kokoro-onnx/releases",
-                _PROJECT_ROOT,
+                get_project_root(),
             )
         return None
 

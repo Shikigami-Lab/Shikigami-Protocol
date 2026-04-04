@@ -17,16 +17,14 @@ from typing import Optional
 from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from src.utils.paths import resolve_sense_voice_model_dir
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── sherpa-onnx SenseVoice 单例 ───────────────────────────────────────────────
 _sherpa_recognizer = None
 _sherpa_recognizer_config = None
-
-_SHERPA_SENSE_VOICE_SEARCH_DIRS = [
-    "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue",
-]
 
 # SenseVoice 情绪/语言标签，如 <|HAPPY|><|zh|> — 转写后去掉
 _SENSE_VOICE_TAG_RE = re.compile(r"<\|[^|]+\|>")
@@ -37,14 +35,7 @@ _NOISE_HALLUCINATIONS = frozenset(["그", "그.", "그리", "네", "あ", "え",
 
 def _resolve_sherpa_model_dir(cfg_model_path: str) -> str:
     """返回可用的 sherpa-onnx SenseVoice 模型目录（绝对路径），未找到返回空串。"""
-    if cfg_model_path and os.path.isdir(cfg_model_path):
-        return os.path.abspath(cfg_model_path)
-    cwd = os.getcwd()
-    for rel in _SHERPA_SENSE_VOICE_SEARCH_DIRS:
-        fp = os.path.join(cwd, rel)
-        if os.path.isdir(fp):
-            return fp
-    return ""
+    return resolve_sense_voice_model_dir(cfg_model_path or "")
 
 
 def _get_sherpa_recognizer(request: Request):
