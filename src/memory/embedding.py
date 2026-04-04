@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def _torch_importable() -> bool:
-    “””Quick check: can torch be imported right now?”””
+    """Quick check: can torch be imported right now?"""
     try:
         import torch  # noqa: F401
         return True
@@ -20,33 +20,33 @@ def _torch_importable() -> bool:
 
 
 def _ensure_pretrained_model_on_transformers() -> None:
-    “””把 PreTrainedModel 挂到 transformers 包顶，兼容 sentence_transformers 的 `from transformers import PreTrainedModel`。
+    """把 PreTrainedModel 挂到 transformers 包顶，兼容 sentence_transformers 的 `from transformers import PreTrainedModel`。
 
-    切勿使用 ``hasattr(transformers, “PreTrainedModel”)``：在 transformers≥4.5 的 LazyModule 上
+    切勿使用 ``hasattr(transformers, "PreTrainedModel")``：在 transformers≥4.5 的 LazyModule 上
     这会触发与 ``from transformers import PreTrainedModel`` 相同的延迟加载；若子模块导入失败
     会抛出 ModuleNotFoundError（而非 AttributeError），导致整段补丁被 ``except: pass`` 吃掉，
-    随后 sentence_transformers 仍报 “Could not import module 'PreTrainedModel'…”。
+    随后 sentence_transformers 仍报 "Could not import module 'PreTrainedModel'…"。
 
     正确做法：直接 ``import transformers.modeling_utils`` 再 setattr；失败时打日志便于排查
     （如打包版 user_packages 内残缺/版本混装的 transformers）。
-    “””
+    """
     try:
         import transformers  # noqa: F401
         import transformers.modeling_utils as _mutils  # noqa: F401
-        setattr(transformers, “PreTrainedModel”, _mutils.PreTrainedModel)
+        setattr(transformers, "PreTrainedModel", _mutils.PreTrainedModel)
     except Exception as ex:
         # Diagnose the most common cause: torch absent or broken in user_packages.
         if not _torch_importable():
             logger.warning(
-                “[embedding] PreTrainedModel 绑定失败：torch 不可用。”
-                “sentence-transformers 需要 torch 才能加载本地 transformer 模型。”
-                “请在「启动器 → Qwen3-TTS」或「设置 → 入门」中先安装 PyTorch，再重新测试 embedding。”
-                “（原始错误: %s）”,
+                "[embedding] PreTrainedModel 绑定失败：torch 不可用。"
+                "sentence-transformers 需要 torch 才能加载本地 transformer 模型。"
+                "请在「启动器 → Qwen3-TTS」或「设置 → 入门」中先安装 PyTorch，再重新测试 embedding。"
+                "（原始错误: %s）",
                 ex,
             )
         else:
             logger.warning(
-                “[embedding] PreTrainedModel 绑定失败（torch 存在但 transformers.modeling_utils 加载异常）: %s”,
+                "[embedding] PreTrainedModel 绑定失败（torch 存在但 transformers.modeling_utils 加载异常）: %s",
                 ex,
             )
 
