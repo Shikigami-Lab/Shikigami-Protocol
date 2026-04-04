@@ -172,7 +172,9 @@ async def stt_transcribe(
     if not stt_cfg.get("enabled"):
         return JSONResponse(
             status_code=503,
-            content={"error": "STT 未启用，请在 config/app.yaml 中设置 stt.enabled: true"},
+            content={
+                "error": "STT 未启用：请在「设置 → 语音 → 语音识别」打开「服务端语音识别」，或于 config/app.yaml 设置 stt.enabled: true",
+            },
         )
 
     body = None

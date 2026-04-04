@@ -66,6 +66,20 @@ function getAppRoot() {
 }
 
 /**
+ * 打包版：用户若在系统环境变量里误设 SHIKIGAMI_MODELS_ROOT / SHIKIGAMI_APP_ROOT，
+ * 子进程会继承，导致 Python 读写的 models、user_packages 与 Electron resourcesPath 不一致。
+ * 启动 server / 向导子进程前剥掉，再由本进程显式设置 SHIKIGAMI_APP_ROOT。
+ */
+function stripConflictingPackagedPathEnv(baseEnv) {
+  const env = { ...(baseEnv || process.env) };
+  if (app.isPackaged) {
+    delete env.SHIKIGAMI_MODELS_ROOT;
+    delete env.SHIKIGAMI_APP_ROOT;
+  }
+  return env;
+}
+
+/**
  * Parse host and port from config/app.yaml without a full YAML parser.
  * Falls back to 127.0.0.1:8000 if the file is missing or malformed.
  */
@@ -116,7 +130,7 @@ function readEnvFileProxy(appRoot) {
 /** Environment for setup-wizard subprocesses (status JSON, pip helper, wizard-download, …). */
 function envForWizardChild(appRoot, extra) {
   const env = {
-    ...process.env,
+    ...stripConflictingPackagedPathEnv(process.env),
     PYTHONUTF8: '1',
     PYTHONIOENCODING: 'utf-8',
     PYTHONUNBUFFERED: '1',
@@ -484,7 +498,7 @@ function startServer() {
     cwd: appRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
-      ...process.env,
+      ...stripConflictingPackagedPathEnv(process.env),
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
       PYTHONUNBUFFERED: '1',

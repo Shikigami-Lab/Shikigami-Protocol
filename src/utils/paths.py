@@ -1,6 +1,15 @@
 import os
 import sys
 
+
+def _frozen_exe_dir() -> str:
+    """PyInstaller onefile/onedir：可执行文件所在目录（realpath 消解符号链接）。"""
+    try:
+        return os.path.dirname(os.path.realpath(os.path.abspath(sys.executable)))
+    except OSError:
+        return os.path.dirname(os.path.abspath(sys.executable))
+
+
 def get_project_root() -> str:
     """
     获取项目根目录绝对路径。
@@ -9,18 +18,29 @@ def get_project_root() -> str:
 
     打包运行时 Electron 会设置 ``SHIKIGAMI_APP_ROOT``，须与此保持一致，否则 ``user_packages/`` 会装在一处、
     主服务进程却在另一处解析，表现为向导显示已安装但 server 内 Kokoro/embedding/Qwen/STT 等全部 import 失败。
+
+    若环境变量指向了存在但错误的目录（无 ``config/``），会回退到 ``sys.executable`` 所在目录，减轻误配。
     """
     if getattr(sys, 'frozen', False):
+        exe_root = _frozen_exe_dir()
+        candidates: list = []
         env_root = (os.environ.get('SHIKIGAMI_APP_ROOT') or '').strip()
         if env_root:
             try:
-                resolved = os.path.abspath(env_root)
-                if os.path.isdir(resolved):
-                    return resolved
+                er = os.path.realpath(os.path.abspath(env_root))
+                if os.path.isdir(er):
+                    candidates.append(er)
             except OSError:
                 pass
-        # PyInstaller 打包模式：sys.executable 是 .exe 的完整路径
-        return os.path.dirname(os.path.abspath(sys.executable))
+        if exe_root not in candidates:
+            candidates.append(exe_root)
+        for root in candidates:
+            try:
+                if os.path.isdir(os.path.join(root, "config")):
+                    return root
+            except OSError:
+                continue
+        return candidates[0] if candidates else exe_root
     
     # 源码模式：基于此文件位置向上推 2 级 (src/utils/paths.py -> src/utils -> src -> root)
     # 注意：如果 server.py 在根目录，此处应推 2 级
@@ -39,11 +59,15 @@ def get_resource_path(relative_path: str) -> str:
 
 
 def get_models_root() -> str:
-    """模型根目录：环境变量 SHIKIGAMI_MODELS_ROOT（若存在且为目录）否则 <项目根>/models。"""
+    """模型根目录：环境变量 SHIKIGAMI_MODELS_ROOT（若存在且为目录）否则 <项目根>/models。
+
+    注意：用户若在系统环境变量里误设 ``SHIKIGAMI_MODELS_ROOT``，会导致下载与运行时都去该目录，
+    与安装目录下 ``resources/models`` 不一致；打包版 Electron 启动时会清除该变量。
+    """
     env = (os.environ.get("SHIKIGAMI_MODELS_ROOT") or "").strip()
     if env:
         try:
-            resolved = os.path.abspath(env)
+            resolved = os.path.realpath(os.path.abspath(env))
             if os.path.isdir(resolved):
                 return resolved
         except OSError:

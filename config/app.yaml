@@ -71,7 +71,7 @@ tts:
     speed: 1.0
     auto_detect_lang: true
 stt:
-  enabled: false
+  enabled: true
   model_size: "medium"
   model_path: ""
   device: "cpu"

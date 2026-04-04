@@ -67,10 +67,21 @@ def cmd_pip_install(spec: dict) -> int:
         _emit({"type": "pip", "phase": "error", "target": target, "error": "no packages"})
         return 1
     py, mode = _pip_python(root)
+    _cuda_idx = bool(index_url and "download.pytorch.org" in index_url)
+    _repair_qwen = target == "qwen_tts_repair"
+    _use_isolated = _cuda_idx or _repair_qwen
+
     if mode == "frozen":
         target_dir = os.path.join(root, "user_packages")
         os.makedirs(target_dir, exist_ok=True)
-        cmd = [py, "-m", "pip", "install", "--upgrade", "--target", target_dir] + list(packages)
+        cmd = [py, "-m", "pip", "install"]
+        if _use_isolated:
+            cmd.append("--isolated")
+        cmd.append("--upgrade")
+        if _repair_qwen:
+            cmd.append("--no-deps")
+        cmd += ["--target", target_dir]
+        cmd += list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
             # Do NOT add --extra-index-url https://pypi.org/simple here:
@@ -80,7 +91,13 @@ def cmd_pip_install(spec: dict) -> int:
             # the user explicitly requested a CUDA index-url.
             # download.pytorch.org/whl/cuXXX is self-contained for torch/torchvision/torchaudio.
     else:
-        cmd = [py, "-m", "pip", "install", "--upgrade"] + list(packages)
+        cmd = [py, "-m", "pip", "install"]
+        if _use_isolated:
+            cmd.append("--isolated")
+        cmd.append("--upgrade")
+        if _repair_qwen:
+            cmd.append("--no-deps")
+        cmd += list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
             # Same reason: no --extra-index-url for pytorch CUDA installs.

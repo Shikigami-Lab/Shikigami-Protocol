@@ -88,7 +88,8 @@ tts:
 
 # ── STT (Speech to Text) ─────────────────────────────────────────────────────
 stt:
-  enabled: false
+  # 服务端 /stt 是否接受请求；关闭后麦克风会提示未启用。需 SenseVoice 模型与 sherpa-onnx 才真正可识别。
+  enabled: true
   model_size: "medium"
   model_path: "" # Local path to faster-whisper model
   device: "cpu"

@@ -1746,7 +1746,7 @@
         <!-- 子 Tab 导航 -->
         <div class="memory-panel-tabs">
           <button type="button" :class="{ active: ttsSubTab === 'tts' }" @click="ttsSubTab='tts'">{{ t('ttsSubTabTts') }}</button>
-          <button type="button" :class="{ active: ttsSubTab === 'stt' }" @click="ttsSubTab='stt'">{{ t('ttsSubTabStt') }}</button>
+          <button type="button" :class="{ active: ttsSubTab === 'stt' }" @click="ttsSubTab='stt'; loadSttConfig()">{{ t('ttsSubTabStt') }}</button>
         </div>
 
         <!-- ══ TTS 子页 ══ -->
@@ -2078,6 +2078,14 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('secStt') }}</div>
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintSttDesc') }}</p>
+            <div class="param-row">
+              <span class="param-label">{{ t('lblSttServerEnabled') }}</span>
+              <label class="toggle-switch">
+                <input type="checkbox" :checked="sttConfig.enabled" @change="onSttServerEnabledToggle($event)" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <p class="form-hint" style="margin-bottom:10px;margin-top:-4px;">{{ t('hintSttServerEnabled') }}</p>
             <div class="param-row">
               <span class="param-label">{{ t('lblShowVoiceBtn') }}</span>
               <label class="toggle-switch">

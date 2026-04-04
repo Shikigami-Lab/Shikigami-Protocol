@@ -220,7 +220,7 @@ class AppConfig:
     def get_stt_config(self) -> Dict[str, Any]:
         """返回 STT 配置，含默认值（SenseVoice / sherpa-onnx）。"""
         defaults = {
-            "enabled": False,
+            "enabled": True,
             "model_path": "",
             "language": "zh",  # zh | en | ja | ko | auto
             "num_threads": 4,

@@ -91,6 +91,7 @@ window.API_PATHS = {
   settingsTtsGptSovitsDir: () => '/settings/tts/gpt-sovits-dir',
   settingsTtsSave: () => '/settings/tts/save',
   settingsTtsTest: () => '/settings/tts/test',
+  settingsSttEnabled: () => '/settings/stt/enabled',
   settingsSystem: () => '/settings/system',
   settingsSystemEnv: () => '/settings/system/env',
   settingsEngines: () => '/settings/engines',

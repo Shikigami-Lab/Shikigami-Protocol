@@ -239,7 +239,7 @@ const App = {
       _timerRefreshId: null,
 
       // STT 语音输入（方案 B：服务端 faster-whisper）
-      sttConfig: { enabled: false, language: 'zh' },
+      sttConfig: { enabled: true, language: 'zh' },
       voiceRecording: false,
       _mediaRecorder: null,
       _voiceStream: null,
@@ -1822,7 +1822,32 @@ const App = {
           this.sttConfig = { enabled: !!d.enabled, language: d.language || 'zh' };
         }
       } catch (e) {
-        this.sttConfig = { enabled: false, language: 'zh' };
+        this.sttConfig = { enabled: true, language: 'zh' };
+      }
+    },
+
+    async onSttServerEnabledToggle(ev) {
+      const enabled = !!(ev && ev.target && ev.target.checked);
+      const prev = !!this.sttConfig.enabled;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.settingsSttEnabled(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.ok === false) {
+          if (ev && ev.target) ev.target.checked = prev;
+          const msg = (j.detail || j.error || res.statusText || 'Save failed');
+          if (this.showToast) this.showToast(String(msg), 'error');
+          return;
+        }
+        await this.loadSttConfig();
+        if (ev && ev.target) ev.target.checked = !!this.sttConfig.enabled;
+        if (this.showToast) this.showToast(this.t('toastSttEnabledSaved'), 'success');
+      } catch (e) {
+        if (ev && ev.target) ev.target.checked = prev;
+        if (this.showToast) this.showToast(String(e.message || e), 'error');
       }
     },
 

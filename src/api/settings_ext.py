@@ -466,6 +466,25 @@ class GptSovitsDirBody(BaseModel):
     dir: str = ""
 
 
+class SttEnabledBody(BaseModel):
+    enabled: bool = True
+
+
+@router.post("/settings/stt/enabled")
+async def save_stt_enabled(request: Request, body: SttEnabledBody):
+    """持久化 ``stt.enabled`` 到 app.yaml 并热更新内存中的 config（设置页「服务端语音识别」开关）。"""
+    config = request.app.state.config
+    y, data = _load_yaml()
+    if "stt" not in data or not isinstance(data.get("stt"), dict):
+        data["stt"] = {}
+    data["stt"]["enabled"] = bool(body.enabled)
+    _save_yaml(y, data)
+    if not isinstance(config.stt, dict):
+        config.stt = {}
+    config.stt["enabled"] = bool(body.enabled)
+    return {"ok": True}
+
+
 @router.post("/settings/tts/gpt-sovits-dir")
 async def save_gpt_sovits_dir_only(request: Request, body: GptSovitsDirBody):
     """仅更新 ``tts.gpt_sovits.dir``（入门页 / 启动器保存安装路径，无需提交整份 TTS 表单）。"""

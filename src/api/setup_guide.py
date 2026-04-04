@@ -638,6 +638,17 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
     tts_st = _tts_status(config)
     torch_load = _torch_load_info()
 
+    _pr = get_project_root()
+    _mr = get_models_root()
+    _up = os.path.join(_pr, "user_packages")
+    try:
+        _up_nc = os.path.normcase(os.path.normpath(_up))
+        _user_pkg_on_syspath = any(
+            bool(p) and os.path.normcase(os.path.normpath(p)) == _up_nc for p in sys.path
+        )
+    except OSError:
+        _user_pkg_on_syspath = False
+
     return {
         "models_root": _models_root(),
         "hf_endpoint": os.environ.get("HF_ENDPOINT", ""),
@@ -677,6 +688,18 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
             "purelib": sysconfig.get_path("purelib"),
         },
         "torch_load": torch_load,
+        # 便于排查「exe 是否读错目录」：与 models_root 对照；打包版勿在系统环境变量里残留 SHIKIGAMI_MODELS_ROOT。
+        "path_resolution": {
+            "project_root": _pr,
+            "models_root": _mr,
+            "user_packages_dir": _up,
+            "config_dir_exists": os.path.isdir(os.path.join(_pr, "config")),
+            "models_dir_exists": os.path.isdir(_mr),
+            "user_packages_dir_exists": os.path.isdir(_up),
+            "user_packages_on_syspath": _user_pkg_on_syspath,
+            "env_SHIKIGAMI_APP_ROOT": (os.environ.get("SHIKIGAMI_APP_ROOT") or "").strip(),
+            "env_SHIKIGAMI_MODELS_ROOT": (os.environ.get("SHIKIGAMI_MODELS_ROOT") or "").strip(),
+        },
     }
 
 
@@ -1736,7 +1759,13 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
                 return
             target_dir = os.path.join(app_root, "user_packages")
             os.makedirs(target_dir, exist_ok=True)
-            cmd = [embed_python, "-m", "pip", "install", "--upgrade", "--target", target_dir] + packages
+            # --isolated：忽略用户 pip.conf / PIP_EXTRA_INDEX_URL 等，否则即使用 --index-url cu* 仍可能并列 PyPI 解析到 CPU torch。
+            _cuda_idx = bool(index_url and "download.pytorch.org" in index_url)
+            cmd = [embed_python, "-m", "pip", "install"]
+            if _cuda_idx:
+                cmd.append("--isolated")
+            cmd += ["--upgrade", "--target", target_dir]
+            cmd += list(packages)
             if index_url:
                 cmd += ["--index-url", index_url]
                 # 勿对 download.pytorch.org/whl/cu* 再加 --extra-index-url PyPI：
@@ -1745,13 +1774,17 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
             ok = result.returncode == 0
             err_pkg, err_tgt, err_out = packages, install_target, result
-            if ok and (install_target or "").strip() == "torch_cuda":
+            # 切勿在「刚装好 CUDA torch」后无条件 pip install qwen-tts（默认 PyPI）：会拉 CPU torch 覆盖 user_packages。
+            # 仅当磁盘上已有 qwen-tts 时用 --no-deps 刷新 wheel，不触碰 torch/torchvision/torchaudio。
+            if ok and (install_target or "").strip() == "torch_cuda" and _qwen_tts_installed():
                 rcmd = [
                     embed_python,
                     "-m",
                     "pip",
                     "install",
+                    "--isolated",
                     "--upgrade",
+                    "--no-deps",
                     "--target",
                     target_dir,
                     "qwen-tts>=0.0.1",
@@ -1790,20 +1823,26 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
                     )
             return
 
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + packages
+        _cuda_idx_src = bool(index_url and "download.pytorch.org" in index_url)
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade"]
+        if _cuda_idx_src:
+            cmd.append("--isolated")
+        cmd += list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
             # 同上：CUDA 索引时不要并列 PyPI，否则易解析到 CPU torch。
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         ok = result.returncode == 0
         err_pkg, err_tgt, err_out = packages, install_target, result
-        if ok and (install_target or "").strip() == "torch_cuda":
+        if ok and (install_target or "").strip() == "torch_cuda" and _qwen_tts_installed():
             rcmd = [
                 sys.executable,
                 "-m",
                 "pip",
                 "install",
+                "--isolated",
                 "--upgrade",
+                "--no-deps",
                 "qwen-tts>=0.0.1",
                 "soundfile>=0.12.0",
             ]
