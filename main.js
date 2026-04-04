@@ -25,6 +25,7 @@ const {
   dialog,
 } = require('electron');
 const { spawn, exec } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -119,6 +120,8 @@ function envForWizardChild(appRoot, extra) {
     PYTHONUTF8: '1',
     PYTHONIOENCODING: 'utf-8',
     PYTHONUNBUFFERED: '1',
+    // 与主 server 进程一致，保证 Python 内 get_project_root()/user_packages 与 Electron resourcesPath 对齐
+    SHIKIGAMI_APP_ROOT: appRoot,
     ...(extra || {}),
   };
   const px = readEnvFileProxy(appRoot);
@@ -262,10 +265,14 @@ function runWizardStatusJson(appRoot) {
     });
     let out = '';
     let err = '';
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.stderr.on('data', (d) => { err += d.toString(); });
+    const outDec = new StringDecoder('utf8');
+    const errDec = new StringDecoder('utf8');
+    child.stdout.on('data', (d) => { out += outDec.write(d); });
+    child.stderr.on('data', (d) => { err += errDec.write(d); });
     child.on('error', (e) => reject(e));
     child.on('close', (code) => {
+      out += outDec.end();
+      err += errDec.end();
       if (code !== 0) {
         reject(new Error(err.trim() || `status subprocess exited ${code}`));
         return;
@@ -305,9 +312,11 @@ function attachWizardStdoutParser(child, onEventLine) {
   if (!child || !child.stdout) return;
   // Line-buffer: Node stdout data events don't guarantee one line per chunk.
   // A SETUP_EVENT/SETUP_RESULT split across two chunks would silently fail to parse.
+  // StringDecoder: 避免 UTF-8 多字节汉字被 chunk 边界切断后 toString 乱码。
   let lineBuf = '';
+  const decoder = new StringDecoder('utf8');
   child.stdout.on('data', (buf) => {
-    lineBuf += buf.toString();
+    lineBuf += decoder.write(buf);
     const lines = lineBuf.split('\n');
     lineBuf = lines.pop(); // keep the potentially incomplete last fragment
     lines.forEach((line) => {
@@ -326,6 +335,7 @@ function attachWizardStdoutParser(child, onEventLine) {
     });
   });
   child.stdout.on('end', () => {
+    lineBuf += decoder.end();
     // Flush any remaining buffered content when the stream closes
     if (lineBuf.trim()) {
       const s = lineBuf.trim();
@@ -473,7 +483,13 @@ function startServer() {
   serverProcess = spawn(pythonCmd, args, {
     cwd: appRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', PYTHONUNBUFFERED: '1' },
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      PYTHONUNBUFFERED: '1',
+      SHIKIGAMI_APP_ROOT: appRoot,
+    },
   });
 
   serverProcess.stdout.on('data', (d) => {
@@ -895,10 +911,12 @@ ipcMain.handle('setup-wizard:save-gptsovits-dir', async (_event, dirStr) => {
       child.stdin.end();
     }
     let out = '';
-    child.stdout.on('data', (d) => { out += d.toString(); });
+    const outDec = new StringDecoder('utf8');
+    child.stdout.on('data', (d) => { out += outDec.write(d); });
     child.stderr.on('data', (d) => { process.stderr.write(d); });
     child.on('error', () => resolve({ ok: false, error: 'spawn failed' }));
     child.on('close', () => {
+      out += outDec.end();
       const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       for (let i = lines.length - 1; i >= 0; i -= 1) {
         const s = lines[i];

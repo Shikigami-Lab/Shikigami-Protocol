@@ -114,8 +114,7 @@ def _user_pkg_has(pkg_name: str) -> bool:
     用于 import 失败时的文件系统 fallback，避免 ABI 不兼容导致误报"未安装"。"""
     if not getattr(sys, "frozen", False):
         return False
-    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-    user_pkg = os.path.join(exe_dir, "user_packages")
+    user_pkg = os.path.join(get_project_root(), "user_packages")
     if not os.path.isdir(user_pkg):
         return False
     safe = pkg_name.replace("-", "_").lower()
@@ -160,8 +159,7 @@ def _torch_scan_roots() -> List[str]:
     except Exception:
         pass
     if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        up = os.path.join(exe_dir, "user_packages")
+        up = os.path.join(get_project_root(), "user_packages")
         if os.path.isdir(up):
             roots.append(os.path.abspath(up))
     out: List[str] = []
@@ -288,8 +286,7 @@ def _torch_load_info() -> Dict[str, Any]:
                 except Exception:
                     pass
             if getattr(sys, "frozen", False) and not out["under_purelib"]:
-                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-                up = os.path.abspath(os.path.join(exe_dir, "user_packages"))
+                up = os.path.abspath(os.path.join(get_project_root(), "user_packages"))
                 try:
                     out["under_purelib"] = os.path.normcase(ap).startswith(os.path.normcase(up + os.sep))
                 except Exception:
@@ -1185,9 +1182,21 @@ async def download_status() -> Dict[str, Any]:
         return dict(_download_state)
 
 
+def _write_setup_stdout_line_utf8(line: str) -> None:
+    """向 Electron 管道写一行 UTF-8。Windows 打包 exe 下 TextIO 常用 GBK，直接 write 会乱码。"""
+    try:
+        sys.stdout.buffer.write(line.encode("utf-8"))
+        sys.stdout.buffer.flush()
+    except (AttributeError, OSError, BrokenPipeError, ValueError):
+        try:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+
 def _emit_setup_event(obj: Dict[str, Any]) -> None:
-    sys.stdout.write("SETUP_EVENT:" + json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    _write_setup_stdout_line_utf8("SETUP_EVENT:" + json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 def run_wizard_download_cli(bundle_id: str, source: str) -> int:
@@ -1368,8 +1377,7 @@ def wizard_launch_gptsovits_cli(config: Any) -> int:
 
 def run_wizard_pip_uninstall_cli(packages: List[str], dirs: List[str]) -> int:
     r = run_pip_uninstall_sync(packages, dirs)
-    sys.stdout.write("SETUP_RESULT:" + json.dumps(r, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    _write_setup_stdout_line_utf8("SETUP_RESULT:" + json.dumps(r, ensure_ascii=False) + "\n")
     return 0 if r.get("ok") else 1
 
 
@@ -1730,8 +1738,8 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
             # Windows 安装包内附带了 python_embed/python.exe（独立 Python 3.10），用它来
             # 安装包到 user_packages/，与用户系统 Python 完全隔离。
             # Mac/Linux 回退到 PATH 里的 python3。
-            exe_dir = os.path.dirname(sys.executable)
-            embed_python = os.path.join(exe_dir, "python_embed", "python.exe")
+            app_root = get_project_root()
+            embed_python = os.path.join(app_root, "python_embed", "python.exe")
             if not os.path.isfile(embed_python):
                 # Mac / Linux fallback
                 import shutil
@@ -1742,7 +1750,7 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
                     _pip_install_state["message"] = "安装失败"
                     _pip_install_state["error"] = "Python interpreter not found"
                 return
-            target_dir = os.path.join(exe_dir, "user_packages")
+            target_dir = os.path.join(app_root, "user_packages")
             os.makedirs(target_dir, exist_ok=True)
             cmd = [embed_python, "-m", "pip", "install", "--upgrade", "--target", target_dir] + packages
             if index_url:
@@ -1775,8 +1783,13 @@ def _pip_install_worker(packages: List[str], index_url: str = "", install_target
                 # 使 _xxx_installed() 检查能在同一 session 里立即返回 True，
                 # 前端才能显示"安装完成"提示。
                 import importlib
+                import site
                 if target_dir not in sys.path:
                     sys.path.insert(0, target_dir)
+                try:
+                    site.addsitedir(target_dir)
+                except Exception:
+                    pass
                 importlib.invalidate_caches()
             with _pip_install_lock:
                 if ok:
@@ -1873,13 +1886,13 @@ def run_pip_uninstall_sync(packages: List[str], dirs: List[str]) -> Dict[str, An
 
     if names:
         if getattr(sys, "frozen", False):
-            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-            target_dir = os.path.join(exe_dir, "user_packages")
+            app_root = get_project_root()
+            target_dir = os.path.join(app_root, "user_packages")
             _clear_sys_modules_for_packages(packages)
             gc.collect()
             fs_err = _remove_frozen_target_packages(target_dir, packages)
             errors.extend(fs_err)
-            embed_python = os.path.join(exe_dir, "python_embed", "python.exe")
+            embed_python = os.path.join(app_root, "python_embed", "python.exe")
             if not os.path.isfile(embed_python):
                 embed_python = _shutil.which("python3") or _shutil.which("python") or ""
             if embed_python:

@@ -51,13 +51,21 @@ if not getattr(sys, 'frozen', False):
     if _root not in sys.path:
         sys.path.insert(0, _root)
 
-# 打包模式下，把 user_packages/ 注入 sys.path，使通过 UI 安装的可选依赖可被导入
-if getattr(sys, 'frozen', False):
-    _user_pkg = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'user_packages')
-    if os.path.isdir(_user_pkg) and _user_pkg not in sys.path:
-        sys.path.insert(0, _user_pkg)
-
 from src.utils.paths import get_project_root, get_resource_path
+
+# 打包：可选依赖装在 user_packages/；须与 get_project_root()（含 SHIKIGAMI_APP_ROOT）一致，并处理 pip --target 生成的 .pth
+if getattr(sys, 'frozen', False):
+    _user_pkg = os.path.join(get_project_root(), 'user_packages')
+    if os.path.isdir(_user_pkg):
+        try:
+            import site
+            if _user_pkg not in sys.path:
+                sys.path.insert(0, _user_pkg)
+            # addsitedir：执行目录内 .pth，否则部分 wheel 的子路径不会被加入 sys.path
+            site.addsitedir(_user_pkg)
+        except Exception:
+            if _user_pkg not in sys.path:
+                sys.path.insert(0, _user_pkg)
 
 # 固定工作目录为项目根，确保所有相对路径（profiles/, groups/, lorebooks/ 等）在打包 exe 下也能正确解析
 os.chdir(get_project_root())
@@ -422,6 +430,18 @@ if os.path.exists(static_dir):
 
 if __name__ == "__main__":
     # ── Electron 启动器：在常驻服务启动前跑一次性子任务（与主进程隔离，减轻 Windows 文件锁问题）
+
+    def _wizard_stdout_utf8_line(line: str) -> None:
+        try:
+            sys.stdout.buffer.write(line.encode("utf-8"))
+            sys.stdout.buffer.flush()
+        except (AttributeError, OSError, BrokenPipeError, ValueError):
+            try:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            except Exception:
+                pass
+
     if "--setup-status-json" in sys.argv:
         import json as _json
 
@@ -463,7 +483,7 @@ if __name__ == "__main__":
         try:
             _body = _json.loads(_raw)
         except _json.JSONDecodeError:
-            print("SETUP_RESULT:" + _json.dumps({"ok": False, "errors": ["invalid json stdin"]}))
+            _wizard_stdout_utf8_line("SETUP_RESULT:" + _json.dumps({"ok": False, "errors": ["invalid json stdin"]}) + "\n")
             raise SystemExit(1)
         raise SystemExit(
             run_wizard_pip_uninstall_cli(_body.get("packages") or [], _body.get("dirs") or [])
@@ -477,7 +497,7 @@ if __name__ == "__main__":
         try:
             _body = _json.loads(_raw)
         except _json.JSONDecodeError:
-            print("SETUP_RESULT:" + _json.dumps({"ok": False, "error": "invalid json stdin"}))
+            _wizard_stdout_utf8_line("SETUP_RESULT:" + _json.dumps({"ok": False, "error": "invalid json stdin"}) + "\n")
             raise SystemExit(1)
         _dir = (_body.get("dir") or "").strip()
         y, data = _load_yaml()
@@ -487,7 +507,7 @@ if __name__ == "__main__":
             data["tts"]["gpt_sovits"] = {}
         data["tts"]["gpt_sovits"]["dir"] = _dir
         _save_yaml(y, data)
-        print("SETUP_RESULT:" + _json.dumps({"ok": True}, ensure_ascii=False))
+        _wizard_stdout_utf8_line("SETUP_RESULT:" + _json.dumps({"ok": True}, ensure_ascii=False) + "\n")
         raise SystemExit(0)
 
     config = AppConfig.load()

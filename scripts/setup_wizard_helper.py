@@ -12,9 +12,21 @@ import subprocess
 import sys
 
 
+def _write_stdout_utf8_line(line: str) -> None:
+    """管道输出固定 UTF-8，避免 Windows 控制台代码页导致 Electron 侧中文乱码。"""
+    try:
+        sys.stdout.buffer.write(line.encode("utf-8"))
+        sys.stdout.buffer.flush()
+    except (AttributeError, OSError, BrokenPipeError, ValueError):
+        try:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+
 def _emit(obj: dict) -> None:
-    sys.stdout.write("SETUP_EVENT:" + json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    _write_stdout_utf8_line("SETUP_EVENT:" + json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 def _app_root() -> str:
@@ -61,14 +73,17 @@ def cmd_pip_install(spec: dict) -> int:
         cmd = [py, "-m", "pip", "install", "--upgrade", "--target", target_dir] + list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
-            if "download.pytorch.org" in index_url:
-                cmd += ["--extra-index-url", "https://pypi.org/simple"]
+            # Do NOT add --extra-index-url https://pypi.org/simple here:
+            # PyPI publishes CPU-only torch wheels with higher version numbers than the
+            # CUDA wheels on download.pytorch.org. pip's resolver picks the highest version
+            # across all indices, so adding PyPI causes it to install CPU torch even when
+            # the user explicitly requested a CUDA index-url.
+            # download.pytorch.org/whl/cuXXX is self-contained for torch/torchvision/torchaudio.
     else:
         cmd = [py, "-m", "pip", "install", "--upgrade"] + list(packages)
         if index_url:
             cmd += ["--index-url", index_url]
-            if "download.pytorch.org" in index_url:
-                cmd += ["--extra-index-url", "https://pypi.org/simple"]
+            # Same reason: no --extra-index-url for pytorch CUDA installs.
     _emit({"type": "pip", "phase": "running", "target": target, "message": "pip install…"})
     tail: list[str] = []
     try:
@@ -200,8 +215,7 @@ def cmd_pip_uninstall(spec: dict) -> int:
 
     ok = len(errors) == 0
     result = {"ok": ok, "errors": errors}
-    sys.stdout.write("SETUP_RESULT:" + json.dumps(result, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    _write_stdout_utf8_line("SETUP_RESULT:" + json.dumps(result, ensure_ascii=False) + "\n")
     _emit({
         "type": "pip",
         "phase": "success" if ok else "error",
