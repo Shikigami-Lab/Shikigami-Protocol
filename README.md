@@ -113,7 +113,7 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 
 ## Quick start
 
-> **Note:** Pre-built desktop installers are **not** published on GitHub Releases anymore — use **source** or **Docker** below. Tags still mark versions; each release includes GitHub’s default **source archives** only. Desktop packaging and the end-user release story are **under active development**.
+> **Note:** Pre-built desktop installers are **not** published on GitHub Releases — use **source** or **Docker** below.
 
 ### Option 1: Run from source
 
@@ -123,20 +123,27 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 - Node.js 18+ (Electron desktop only)
 - An LLM API — Gemini / OpenAI / Ollama / any OpenAI-compatible endpoint
 
-**Windows (native / Electron)**
+**Recommended: download the latest release archive**
+
+Go to [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest), download **Source code (zip)**, extract it, then follow the steps below inside the extracted folder.
+
+**Or clone with git (tracks latest commits on main)**
+
+```bash
+git clone https://github.com/Shikigami-Labs/Shikigami-Protocol.git
+cd Shikigami-Protocol
+```
+
+**Windows**
 
 ```bat
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
-cd Shikigami-Protocol
 init.bat
 launch.bat
 ```
 
-**macOS / Linux (native / Electron)**
+**macOS / Linux**
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
-cd Shikigami-Protocol
 bash init.sh
 bash launch.sh
 ```
