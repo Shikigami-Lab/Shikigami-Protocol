@@ -280,7 +280,7 @@ def _build_heartbeat_ctx(
     from datetime import datetime
     locale = get_locale()
     thought    = reflection_state.get("thought", "")
-    topic_hint = reflection_state.get("topic_hint", "")
+    topic_anchor = reflection_state.get("topic_anchor", "")
     hour = datetime.now().hour
     time_ctx = _get_time_ctx(hour, locale)
 
@@ -315,6 +315,9 @@ def _build_heartbeat_ctx(
                             time_ctx=time_ctx))
 
     # 场景上下文
+    speak_reason = reflection_state.get("speak_reason", "none")
+    trend_items  = reflection_state.get("trend_items", [])
+
     if vlm_description:
         parts.append(render("ase.vlm_notice", locale=locale,
                             default=("You notice on their screen — $vlm_description" if locale == "en" else "你注意到对方的屏幕上——$vlm_description"),
@@ -327,14 +330,29 @@ def _build_heartbeat_ctx(
         parts.append(render("ase.thought_alone", locale=locale,
                             default=("You've been keeping in mind: $thought" if locale == "en" else "你一直留意着：$thought"),
                             thought=thought))
-        if topic_hint:
+        if topic_anchor:
             parts.append(render("ase.topic_with_thought", locale=locale,
-                                default=("Last time you also talked about \"$topic_hint\"." if locale == "en" else "你们上次还聊到了「$topic_hint」。"),
-                                topic_hint=topic_hint))
-    elif topic_hint:
+                                default=("Last time you also talked about \"$topic_anchor\"." if locale == "en" else "你们上次还聊到了「$topic_anchor」。"),
+                                topic_anchor=topic_anchor))
+    elif speak_reason == "trend_share" and trend_items:
+        # Use actual trend content so the AI knows what to talk about
+        if locale == "en":
+            lines = ["You came across some recent news and want to share it with them:"]
+            for item in trend_items[:2]:
+                label = item.get("source", "")
+                title = item.get("title", "")
+                lines.append(f"· {title}" + (f" (via {label})" if label else ""))
+        else:
+            lines = ["你注意到了一些近期动态，想和主人聊聊："]
+            for item in trend_items[:2]:
+                label = item.get("source", "")
+                title = item.get("title", "")
+                lines.append(f"· {title}" + (f"（{label}）" if label else ""))
+        parts.append("\n".join(lines))
+    elif topic_anchor:
         parts.append(render("ase.topic_alone", locale=locale,
-                            default=("You recall a previous conversation about \"$topic_hint\"." if locale == "en" else "你想起了之前关于「$topic_hint」的对话。"),
-                            topic_hint=topic_hint))
+                            default=("You recall a previous conversation about \"$topic_anchor\"." if locale == "en" else "你想起了之前关于「$topic_anchor」的对话。"),
+                            topic_anchor=topic_anchor))
     else:
         parts.append(render("ase.silence_generic", locale=locale,
                             default=("It's $time_ctx now, and it's quiet around." if locale == "en" else "现在是$time_ctx，四周很静。"),
@@ -378,7 +396,7 @@ def _build_stage_trigger(reflection_state: Dict, vlm_description: str = "") -> s
     Character-agnostic: no physical traits or species-specific stage business.
     """
     thought    = reflection_state.get("thought", "")
-    topic_hint = reflection_state.get("topic_hint", "")
+    topic_anchor = reflection_state.get("topic_anchor", "")
 
     locale = get_locale()
     triggers = get_raw("ase.stage_triggers") or {}
@@ -394,7 +412,7 @@ def _build_stage_trigger(reflection_state: Dict, vlm_description: str = "") -> s
         return _pick("vlm", ["You noticed something on the screen and have something to say."] if locale == "en" else ["你注意到了屏幕上的一些东西，心里有话想说。"])
     if thought:
         return _pick("thought", ["You feel like speaking up."] if locale == "en" else ["你有点想开口了。"])
-    if topic_hint:
+    if topic_anchor:
         entry = triggers.get("topic", {})
         val = entry.get(locale) or entry.get("zh") or ("You recall something unfinished from before, and you have something to say." if locale == "en" else "你想起了之前没说完的事，心里有话想说。")
         return str(val)
@@ -872,10 +890,10 @@ class AseEngine:
                 )
             # Write proactive_log entry for topic deduplication in reflection
             speak_reason = reflection_state.get("speak_reason", "none") if reflection_state else "none"
-            topic_hint = reflection_state.get("topic_hint", "") if reflection_state else ""
+            topic_anchor = reflection_state.get("topic_anchor", "") if reflection_state else ""
             log_entry = {
                 "timestamp": time.time(),
-                "topic_hint": topic_hint[:80],
+                "topic_anchor": topic_anchor[:80],
                 "speak_reason": speak_reason,
                 "urgency": reflection_state.get("urgency", 0.0) if reflection_state else 0.0,
             }
