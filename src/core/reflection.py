@@ -4,7 +4,7 @@ Runs a background asyncio loop that periodically calls a lightweight LLM
 to produce a per-session "inner state":
     - thought: what the AI is currently thinking about
     - urgency: 0.0–1.0 indicating desire to speak proactively
-    - topic_hint: brief label for the current context
+    - topic_anchor: specific content fragment from inputs, or empty string
 
 Key design principles:
     - Completely independent of ASE: reflection continues even if ASE is disabled
@@ -57,9 +57,9 @@ def _reflection_user_instruction(locale: str = None) -> str:
                       default=(
                           "What are you thinking right now? Feel first, then fill in the JSON. "
                           "Output only one JSON object with exactly these five English keys: "
-                          "thought, style_hint, urgency, topic_hint, next_reflection_in. Nothing else, no non-English key names."
+                          "thought, style_hint, urgency, topic_anchor, next_reflection_in. Nothing else, no non-English key names."
                           if locale == "en"
-                          else "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这五个英文键：thought, style_hint, urgency, topic_hint, next_reflection_in。不要其他内容、不要中文键名。"
+                          else "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这五个英文键：thought, style_hint, urgency, topic_anchor, next_reflection_in。不要其他内容、不要中文键名。"
                       ))
 
 
@@ -202,7 +202,7 @@ def _build_reflection_prompt(
     # 【你上一轮自省】便于连贯与校准 urgency，减少无依据的跳变
     if prev_reflection:
         urgency = prev_reflection.get("urgency")
-        topic = (prev_reflection.get("topic_hint") or "").strip()
+        topic = (prev_reflection.get("topic_anchor") or "").strip()
         updated_at = prev_reflection.get("updated_at") or 0
         if topic or urgency is not None:
             line = get_prompt("reflection.prev_reflection_header", locale=locale,
@@ -328,7 +328,7 @@ def _build_reflection_prompt(
 
 
 # 合法 reflection JSON 的键（仅此六种，否则视为错误格式）
-_REFLECTION_KEYS = frozenset({"thought", "style_hint", "urgency", "topic_hint", "next_reflection_in", "speak_reason"})
+_REFLECTION_KEYS = frozenset({"thought", "style_hint", "urgency", "topic_anchor", "next_reflection_in", "speak_reason"})
 _VALID_SPEAK_REASONS = frozenset({"memory_recall", "trend_share", "emotional_overflow", "silence_concern", "none"})
 
 
@@ -342,15 +342,15 @@ async def _parse_reflection_response(text: str) -> Dict[str, Any]:
     try:
         data = json.loads(text)
         if not isinstance(data, dict):
-            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": ""}
+            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": ""}
         # 若模型输出了错误 schema（如 情感/认知/意图/担忧/期待），拒绝使用并回退默认
         extra = set(data.keys()) - _REFLECTION_KEYS
         if extra and not data.get("thought"):
             logger.warning(
-                "[reflection] 忽略错误 JSON 格式（含非预期键 %s），请模型只输出 thought/style_hint/urgency/topic_hint",
+                "[reflection] 忽略错误 JSON 格式（含非预期键 %s），请模型只输出 thought/style_hint/urgency/topic_anchor",
                 list(extra)[:5],
             )
-            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": ""}
+            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": ""}
         raw_nri = data.get("next_reflection_in")
         next_reflection_in = None
         if isinstance(raw_nri, (int, float)) and raw_nri > 0:
@@ -361,12 +361,12 @@ async def _parse_reflection_response(text: str) -> Dict[str, Any]:
             "thought": str(data.get("thought", "")).strip(),
             "style_hint": str(data.get("style_hint", "")).strip(),
             "urgency": float(max(0.0, min(1.0, data.get("urgency", 0.0)))),
-            "topic_hint": str(data.get("topic_hint", "")).strip(),
+            "topic_anchor": str(data.get("topic_anchor", "")).strip(),
             "next_reflection_in": next_reflection_in,
             "speak_reason": speak_reason,
         }
     except Exception:
-        return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": "", "next_reflection_in": None}
+        return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": "", "next_reflection_in": None}
 
 
 # ── ReflectionEngine ─────────────────────────────────────────────────────────
@@ -804,14 +804,20 @@ class ReflectionEngine:
         from src.utils.engine_warnings import clear_warning
         clear_warning(self._app, "reflection")
 
+        # If speak_reason is trend_share, carry the actual trend items forward for ASE
+        trend_items_for_ase = []
+        if result.get("speak_reason") == "trend_share":
+            trend_items_for_ase = getattr(ctx, "trend_items", [])
+
         # Store in session and persist to disk
         session.reflection_state = {
             "thought": result["thought"],
             "style_hint": result["style_hint"],
             "urgency": result["urgency"],
-            "topic_hint": result["topic_hint"],
+            "topic_anchor": result["topic_anchor"],
             "next_reflection_in": result.get("next_reflection_in"),
             "speak_reason": result.get("speak_reason", "none"),
+            "trend_items": trend_items_for_ase,
             "updated_at": time.time(),
         }
         session.save_runtime_state()
@@ -822,7 +828,7 @@ class ReflectionEngine:
             thought=result["thought"],
             style_hint=result["style_hint"],
             urgency=result["urgency"],
-            topic_hint=result["topic_hint"],
+            topic_anchor=result["topic_anchor"],
             model=model_name,
             used_fallback=used_fallback,
             recent_turns_used=len(recent),
