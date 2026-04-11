@@ -286,6 +286,12 @@ def _build_heartbeat_ctx(
 
     parts = []
 
+    # 风格倾向（优先注入，为后续内容定调）
+    if style_hint and style_hint.strip():
+        parts.append(render("ase.style_hint_prefix", locale=locale,
+                            default=("Current tendency: $style_hint" if locale == "en" else "角色此刻倾向：$style_hint"),
+                            style_hint=style_hint.strip()))
+
     # 接续上次主动发言
     if last_ase_content and last_ase_content.strip():
         raw = last_ase_content.strip()
@@ -317,6 +323,18 @@ def _build_heartbeat_ctx(
     # 场景上下文
     speak_reason = reflection_state.get("speak_reason", "none")
     trend_items  = reflection_state.get("trend_items", [])
+
+    # 发言动机标签
+    if speak_reason and speak_reason != "none":
+        labels = (get_raw("ase.speak_reason_labels") or {}).get(locale) or \
+                 (get_raw("ase.speak_reason_labels") or {}).get("zh") or {}
+        reason_label = labels.get(speak_reason, "")
+        if reason_label:
+            parts.append(render("ase.speak_reason_context", locale=locale,
+                                default=("You feel like speaking because: $reason_label"
+                                         if locale == "en"
+                                         else "你此刻想开口，是因为：$reason_label"),
+                                reason_label=reason_label))
 
     if vlm_description:
         parts.append(render("ase.vlm_notice", locale=locale,
@@ -365,11 +383,6 @@ def _build_heartbeat_ctx(
                                 else "当前日期与节日见上方时间上下文；若自然可带出节日或日期相关的一句。"
                             )))
 
-    if style_hint and style_hint.strip():
-        parts.append(render("ase.style_hint_prefix", locale=locale,
-                            default=("Current tendency: $style_hint" if locale == "en" else "角色此刻倾向：$style_hint"),
-                            style_hint=style_hint.strip()))
-
     parts.append(get_prompt("ase.behavioral_guidance", locale=locale,
                             default=(
                                 "[You are initiating proactively, not answering a question]\n"
@@ -389,13 +402,18 @@ def _build_heartbeat_ctx(
 
 
 def _build_stage_trigger(reflection_state: Dict, vlm_description: str = "") -> str:
-    """Build a context-derived trigger user message for ASE proactive speech.
+    """Build a content-anchored trigger user message for ASE proactive speech.
 
-    Uses explicit second-person "你" to signal this is context about the AI,
-    not user speech — same mechanism as effective AI-directed user messages.
-    Character-agnostic: no physical traits or species-specific stage business.
+    Decision tree (priority order):
+      1. VLM available          → stage_triggers.vlm (unchanged)
+      2. thought present        → inline: "你想着：{thought}。"
+      3. topic_anchor present   → inline: "你挂念着：{topic_anchor}。"
+      4. fallback               → stage_triggers.default (random)
+
+    Posture (how to say it) comes from style_hint in extra_system + ase_initiation_frame segment.
+    This trigger carries only the content anchor (what to say).
     """
-    thought    = reflection_state.get("thought", "")
+    thought      = reflection_state.get("thought", "")
     topic_anchor = reflection_state.get("topic_anchor", "")
 
     locale = get_locale()
@@ -409,14 +427,21 @@ def _build_stage_trigger(reflection_state: Dict, vlm_description: str = "") -> s
         return str(options)
 
     if vlm_description:
-        return _pick("vlm", ["You noticed something on the screen and have something to say."] if locale == "en" else ["你注意到了屏幕上的一些东西，心里有话想说。"])
+        return _pick("vlm", (["You noticed something on the screen and have something to say."]
+                              if locale == "en" else ["你注意到了屏幕上的一些东西，心里有话想说。"]))
+
     if thought:
-        return _pick("thought", ["You feel like speaking up."] if locale == "en" else ["你有点想开口了。"])
+        if locale == "en":
+            return f"You're thinking: {thought}."
+        return f"你想着：{thought}。"
+
     if topic_anchor:
-        entry = triggers.get("topic", {})
-        val = entry.get(locale) or entry.get("zh") or ("You recall something unfinished from before, and you have something to say." if locale == "en" else "你想起了之前没说完的事，心里有话想说。")
-        return str(val)
-    return _pick("default", ["You've been quiet for a while, and you have something to say now."] if locale == "en" else ["你沉默了一段时间，此刻有话想说。"])
+        if locale == "en":
+            return f"You keep thinking about: {topic_anchor}."
+        return f"你挂念着：{topic_anchor}。"
+
+    return _pick("default", (["You've been quiet for a while, and you have something to say now."]
+                              if locale == "en" else ["你沉默了一段时间，此刻有话想说。"]))
 
 
 class AseEngine:
@@ -817,8 +842,7 @@ class AseEngine:
             if not (m["role"] == "user" and not m["content"].strip())
         ]
         # Append stage-direction as final user message (not saved)
-        #messages.append({"role": "user", "content": trigger_msg})extra_system
-        messages.append({"role": "user", "content": extra_system})
+        messages.append({"role": "user", "content": trigger_msg})
 
         llm = get_provider(preset)
         gen_kwargs = {
