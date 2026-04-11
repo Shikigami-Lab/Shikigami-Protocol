@@ -42,12 +42,12 @@ ase:
     en: "You've been keeping this in mind: $thought"
 
   topic_with_thought:
-    zh: "你们上次还聊到了「$topic_hint」。"
-    en: "You were also talking about \"$topic_hint\" last time."
+    zh: "你们上次还聊到了「$topic_anchor」。"
+    en: "You were also talking about \"$topic_anchor\" last time."
 
   topic_alone:
-    zh: "你想起了之前关于「$topic_hint」的对话。"
-    en: "You're thinking back to the conversation about \"$topic_hint\"."
+    zh: "你想起了之前关于「$topic_anchor」的对话。"
+    en: "You're thinking back to the conversation about \"$topic_anchor\"."
 
   silence_generic:
     zh: "现在是$time_ctx，四周很静。"
@@ -66,6 +66,28 @@ ase:
   behavioral_guidance:
     zh: "【此刻你是主动开口，不是在回应对方的提问】\n- 直接说你想说的，不要以「有什么我能帮你的吗」或「我想问你……」之类的开头\n- 简短、自然，说完就够，不需要展开成长篇\n- 不要主动提起对方「不在」「不说话了」之类的话题\n- 如果此刻真的没有值得说的话，可以只回复「（静默）」"
     en: "[You are speaking proactively — not responding to a question]\n- Say what you want to say directly; don't open with \"Is there anything I can help you with?\" or \"I wanted to ask you...\"\n- Brief and natural — say it and that's enough, no need to expand into a long message\n- Don't bring up that they're \"not here\" or \"not talking\"\n- If there's genuinely nothing worth saying right now, you may reply with just \"(silence)\""
+
+  initiation_frame:
+    zh: "此刻是你主动开口，不是在回应。你选择了这个时机，你有想说的。说短，留空间。"
+    en: "You are initiating, not responding. You chose this moment. Say less, leave room."
+
+  speak_reason_labels:
+    zh:
+      memory_recall:      "你想起了某件事"
+      trend_share:        "你看到了一些新鲜事"
+      emotional_overflow: "你有些话憋着"
+      silence_concern:    "你等了很久了"
+      none:               ""
+    en:
+      memory_recall:      "something came to mind"
+      trend_share:        "you came across something new"
+      emotional_overflow: "you have something pent up"
+      silence_concern:    "you've been waiting a while"
+      none:               ""
+
+  speak_reason_context:
+    zh: "你此刻想开口，是因为：$reason_label"
+    en: "You feel like speaking because: $reason_label"
 
 # ── Stage trigger 消息（_build_stage_trigger，随机选一）─────────────────────
 

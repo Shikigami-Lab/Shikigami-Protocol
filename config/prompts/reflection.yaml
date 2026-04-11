@@ -16,11 +16,12 @@ reflection:
         "thought": "此刻脑中那句话（不超过30字，第一人称）",
         "style_hint": "行为风格倾向（不超过30字，第三方视角描述语气与态度，不用第一人称）",
         "urgency": 0.0,
-        "topic_hint": "当前话题关键词（不超过20字）",
+        "topic_anchor": "来自当前输入（记忆/趋势/VLM）的具体内容片段；无可引用内容时留空字符串",
         "next_reflection_in": 180,
         "speak_reason": "none"
       }
-      **格式强制**：只允许且必须包含以上六个键（键名必须为英文 thought, style_hint, urgency, topic_hint, next_reflection_in, speak_reason）。禁止使用「情感」「认知」「意图」「担忧」「期待」等中文键名或任何其他格式，否则输出无法被解析。
+      **格式强制**：只允许且必须包含以上六个键（键名必须为英文 thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason）。禁止使用「情感」「认知」「意图」「担忧」「期待」等中文键名或任何其他格式，否则输出无法被解析。
+      **topic_anchor 约束**：必须引用本次输入中真实存在的内容（facts 列表里的某条事实、趋势条目标题、VLM 描述片段）。禁止凭空生成话题关键词。若当前输入中没有值得引用的具体内容，topic_anchor 留空字符串，并将 urgency 设为 0.0~0.2。
       **next_reflection_in**：整数秒，表示你认为下次自省应在多久后触发。对话活跃或 urgency 高时给 20~60，平常给 60~300，用户长时间沉默时给 300~1800。
 
       【thought 写作要求】
@@ -65,11 +66,12 @@ reflection:
         "thought": "that one thought passing through right now (max ~20 words, first-person)",
         "style_hint": "behavioral style tendency (max ~30 words, described from a third-party perspective, do not use first-person)",
         "urgency": 0.0,
-        "topic_hint": "current topic keyword (max 20 chars)",
+        "topic_anchor": "a specific content fragment from the current inputs (facts/trends/VLM); empty string if nothing to reference",
         "next_reflection_in": 180,
         "speak_reason": "none"
       }
-      **Format enforcement**: The output must contain exactly these six keys (in English: thought, style_hint, urgency, topic_hint, next_reflection_in, speak_reason). Do not use any other key names or formats — the output will fail to parse.
+      **Format enforcement**: The output must contain exactly these six keys (in English: thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason). Do not use any other key names or formats — the output will fail to parse.
+      **topic_anchor constraint**: Must reference content that actually exists in the current inputs (a fact from the facts list, a trend item title, or a VLM description fragment). Do not invent topic keywords. If there is nothing concrete to reference in the current inputs, leave topic_anchor as an empty string and set urgency to 0.0–0.2.
       **next_reflection_in**: integer seconds until the next reflection should fire. Give 20~60 when conversation is active or urgency is high, 60~300 for normal state, 300~1800 when user has been silent for a long time.
 
       [thought writing requirements]
@@ -156,18 +158,18 @@ reflection:
 # ── 自省结果注入 user instruction ────────────────────────────────────────────
 
   user_instruction:
-    zh: "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这六个英文键：thought, style_hint, urgency, topic_hint, next_reflection_in, speak_reason。不要其他内容、不要中文键名。"
-    en: "What are you thinking right now? Feel first, then fill in the JSON. Output only one JSON object with exactly these six English keys: thought, style_hint, urgency, topic_hint, next_reflection_in, speak_reason. Nothing else, no non-English key names."
+    zh: "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这六个英文键：thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason。不要其他内容、不要中文键名。"
+    en: "What are you thinking right now? Feel first, then fill in the JSON. Output only one JSON object with exactly these six English keys: thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason. Nothing else, no non-English key names."
 
 # ── Prompt Segments (reflection_state.py) ────────────────────────────────────
 
   style_hint_segment:
-    zh: "[当前行为倾向]\n$style_hint\n（此刻的情绪自然流露在言行中，无需直接提及。）"
-    en: "[Current Behavioral Tendency]\n$style_hint\n(Let this emotional state naturally come through in speech and action — no need to mention it directly.)"
+    zh: "[本次回复行为指令]\n请在这次回复中，以此作为你的语气与态度基调：$style_hint"
+    en: "[Behavioral Directive for This Reply]\nAdopt this as your tone and attitude baseline for this reply: $style_hint"
 
   topic_hint_segment:
-    zh: "最近话题：$topic_hint。（可自然提及，不必硬接。）"
-    en: "Recent topic: $topic_hint. (May be naturally mentioned — no need to force it.)"
+    zh: "你近期心里挂着的话题：$topic_hint。若时机合适，可自然引入。"
+    en: "A topic on your mind recently: $topic_hint. Bring it in naturally if the moment fits."
 
   speak_reason_memory_recall:
     zh: "【主动发言动机】memory_recall — 你想起了某件过去的事，以此为出发点自然展开话题。"
