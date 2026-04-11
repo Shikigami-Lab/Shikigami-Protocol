@@ -2755,13 +2755,13 @@ const SettingsMixin = {
         if (!res.ok) return;
         const data = await res.json();
         this.segmentList = (data.segments || []).filter(s =>
-            ['chat', 'chat_reflection', 'chat_ase', 'all'].includes(s.inject_into)
+            s.inject_into === 'chat'
         ).map(s => ({ ...s }));
         this.reflectionSegmentList = (data.segments || []).filter(s =>
             s.inject_into === 'reflection' && !s.is_core
         ).map(s => ({ ...s }));
         this.customSegmentList = (data.custom_segments || []).filter(c =>
-            ['chat', 'chat_reflection', 'chat_ase', 'all'].includes(c.inject_into)
+            c.inject_into === 'chat'
         ).map(c => ({ ...c }));
       } catch (e) {
         console.error('[settings] loadSegmentConfig:', e);

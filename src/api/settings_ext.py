@@ -1894,12 +1894,16 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
     """Persist segment configuration overrides + custom segments for a profile."""
     from src.prompt.segment_config import (
         CustomSegmentDef,
-        SegmentConfig,
         SegmentMeta,
+        load_segment_config,
         save_segment_config,
     )
+    from src.prompt.base import targets_reflection, targets_ase
 
-    cfg = SegmentConfig()
+    # Load existing config to preserve ASE/reflection overrides written by the
+    # reflection_config endpoint — overwriting with a fresh object would wipe them.
+    cfg = load_segment_config(profile_id)
+
     for s in body.segments:
         cfg.set_meta(SegmentMeta(
             segment_id=s.segment_id,
@@ -1910,7 +1914,9 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
             content=s.content,
             trigger_keywords=s.trigger_keywords,
         ))
-    cfg.custom_segments = [
+
+    # Replace only chat-scoped custom segments; keep reflection/ASE custom segments intact.
+    chat_customs = [
         CustomSegmentDef(
             segment_id=c.segment_id,
             label=c.label,
@@ -1924,6 +1930,12 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
         )
         for c in body.custom_segments
     ]
+    preserved = [
+        c for c in cfg.custom_segments
+        if targets_reflection(c.inject_into) or targets_ase(c.inject_into)
+    ]
+    cfg.custom_segments = chat_customs + preserved
+
     save_segment_config(profile_id, cfg)
     return {"ok": True}
 
@@ -2449,7 +2461,7 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
             else:
                 # Custom: add to custom_segments with inject_into
                 inject = (s.get("inject_into") or "reflection_ase").strip().lower()
-                valid_injects = ("chat", "reflection", "ase", "reflection_ase", "chat_reflection", "chat_ase", "all")
+                valid_injects = ("chat", "reflection", "ase", "reflection_ase")
                 if inject not in valid_injects:
                     inject = "reflection_ase"
                 seg_cfg.custom_segments.append(CustomSegmentDef(

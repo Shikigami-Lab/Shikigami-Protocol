@@ -2775,7 +2775,7 @@
 
                       <!-- 自省 sub-tab -->
                       <div v-show="activeReflectionSegTab === 'reflection'">
-                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase','chat_reflection','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
                             <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                             <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;">🔒</span>
@@ -2834,9 +2834,6 @@
                                 <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                                 <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                                 <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                                <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                                <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                                <option value="all">{{ t('optInjectAll') }}</option>
                               </select>
                             </template>
                           </div>
@@ -2886,9 +2883,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                             <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                             <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -2902,7 +2896,7 @@
 
                       <!-- ASE sub-tab -->
                       <div v-show="activeReflectionSegTab === 'ase'">
-                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase','chat_ase','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
                             <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                             <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
@@ -2960,9 +2954,6 @@
                                 <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                                 <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                                 <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                                <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                                <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                                <option value="all">{{ t('optInjectAll') }}</option>
                               </select>
                             </template>
                           </div>
@@ -3015,9 +3006,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                             <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                             <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -3470,7 +3458,7 @@
 
                     <!-- 自省 sub-tab -->
                     <div v-show="activeReflectionSegTab === 'reflection'">
-                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase','chat_reflection','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
                           <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                           <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;">🔒</span>
@@ -3529,9 +3517,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                           </template>
                         </div>
@@ -3581,9 +3566,6 @@
                             <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                             <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                             <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                            <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                            <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                            <option value="all">{{ t('optInjectAll') }}</option>
                           </select>
                           <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                           <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -3597,7 +3579,7 @@
 
                     <!-- ASE sub-tab -->
                     <div v-show="activeReflectionSegTab === 'ase'">
-                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase','chat_ase','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
                           <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                           <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
@@ -3655,9 +3637,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                           </template>
                         </div>
@@ -3710,9 +3689,6 @@
                             <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                             <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                             <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                            <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                            <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                            <option value="all">{{ t('optInjectAll') }}</option>
                           </select>
                           <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                           <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>

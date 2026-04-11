@@ -51,6 +51,14 @@ class TrendContextReflectionSegment(PromptSegment):
         if not items:
             return SegmentResult(fired=False)
 
+        # Store fetched items in ctx so _reflect() can include them in reflection_state
+        # for ASE to use when speak_reason == "trend_share"
+        if hasattr(ctx, "trend_items"):
+            ctx.trend_items = [
+                {"title": item.title, "source": item.source_label}
+                for item in items
+            ]
+
         lines = ["[近期网络动态（供自省参考，可自主决定是否引用）]"]
         for item in items:
             label = item.source_label
