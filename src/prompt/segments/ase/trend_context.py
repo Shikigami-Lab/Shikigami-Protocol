@@ -20,7 +20,9 @@ class AseTrendContextSegment(PromptSegment):
     is_core = False
     is_readonly = True
     label = "趋势热点感知"
+    label_en = "Trend Awareness"
     description = "将近期网络热点注入 ASE prompt，供 AI 在主动发言时自然引用"
+    description_en = "Injects unused trend items into ASE for topic-driven proactive speech"
     default_trigger_mode = "cooldown"
     default_trigger_param = 120.0   # 分钟，默认 2h
 

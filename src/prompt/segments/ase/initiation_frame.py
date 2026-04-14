@@ -17,7 +17,9 @@ class AseInitiationFrameSegment(PromptSegment):
     is_core = True
     priority = -1
     label = "主动开口姿态"
+    label_en = "Initiation Posture"
     description = '在 persona 之前注入姿态重置，建立"主动开口"而非"回应"的基准框架'
+    description_en = "Injects posture reset before persona to establish 'initiating' rather than 'responding' frame"
     default_trigger_mode = "always"
 
     def build(self, ctx) -> SegmentResult:
