@@ -42,6 +42,7 @@ window.API_PATHS = {
   profilePersonaEvolution: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution`,
   profilePersonaEvolutionAnchor: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/extract_anchor`,
   profilePersonaEvolutionRollback: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/rollback`,
+  profilePersonaEvolutionTrigger: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/trigger`,
   /** POST: AI 补全人格 Prompt 空白字段（与分析模型同通道） */
   profilePromptAutofill: () => '/profiles/prompt_autofill',
   lorebooks: () => '/lorebooks',

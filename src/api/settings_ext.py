@@ -3127,7 +3127,7 @@ async def set_special_dates(profile_id: str, body: SpecialDatesBody):
 
 @router.get("/profiles/{profile_id}/persona_evolution")
 async def get_persona_evolution(profile_id: str):
-    """返回当前人格演化状态：原件、演化版、core_anchor。"""
+    """返回当前人格演化状态：原件、演化版、core_anchor、距下次演化轮数。"""
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
@@ -3135,11 +3135,27 @@ async def get_persona_evolution(profile_id: str):
         card = json.load(f)
     storage_root = os.path.join(_PROFILES_DIR, profile_id)
     from src.core.persona_evolution import get_changelog
+
+    # 读取 turn_counter 计算距下次演化轮数
+    evolved = card.get("persona_evolved") or {}
+    interval = int(evolved.get("min_interval_turns", 200))
+    turn_counter = 0
+    meta_path = os.path.join(storage_root, "memory_meta.json")
+    try:
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as mf:
+                turn_counter = int(json.load(mf).get("turn_counter", 0))
+    except Exception:
+        pass
+    turns_until_next = interval - (turn_counter % interval) if interval > 0 else 0
+
     return {
         "base_prompt_original": card.get("base_prompt", ""),
         "style_constraint_original": card.get("style_constraint", ""),
-        "persona_evolved": card.get("persona_evolved") or {},
+        "persona_evolved": evolved,
         "changelog": get_changelog(storage_root),
+        "turn_counter": turn_counter,
+        "turns_until_next": turns_until_next,
     }
 
 
@@ -3223,3 +3239,17 @@ async def rollback_persona_evolution(profile_id: str, body: PersonaRollbackBody)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Version {body.version} not found in changelog")
     return {"ok": True}
+
+
+@router.post("/profiles/{profile_id}/persona_evolution/trigger")
+async def trigger_persona_evolution_manual(profile_id: str, request: Request):
+    """手动触发一次人格演化。"""
+    storage_root = os.path.join(_PROFILES_DIR, profile_id)
+    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.persona_evolution import trigger_evolution
+    entry = await trigger_evolution(profile_id, storage_root, request.app)
+    if entry is None:
+        return {"ok": False, "reason": "evolution skipped (no facts, anchor init, or disabled)"}
+    return {"ok": True, "entry": entry}

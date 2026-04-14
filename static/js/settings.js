@@ -494,6 +494,7 @@ const SettingsMixin = {
       _personaEvolutionFormLoaded: false,
       personaEvolutionOpen: false,
       personaEvolutionExtracting: false,
+      personaEvolutionTriggering: false,
       newCustomRefaseSeg: null,
       activeReflectionSegTab: 'reflection',  // 'reflection' | 'ase'
     };
@@ -4300,6 +4301,8 @@ const SettingsMixin = {
           changelog: data.changelog || [],
           enabled: ev.enabled !== false,
           min_interval_turns: ev.min_interval_turns ?? 200,
+          turns_until_next: data.turns_until_next ?? null,
+          turn_counter: data.turn_counter ?? 0,
         };
         this.$nextTick(() => { this._personaEvolutionFormLoaded = true; });
       } catch (e) {
@@ -4374,6 +4377,31 @@ const SettingsMixin = {
         }
       } catch (e) {
         this.showToast(`回滚失败: ${e.message}`, 'error');
+      }
+    },
+
+    async triggerPersonaEvolution() {
+      const profileId = this.selectedProfileId;
+      if (!profileId || this.personaEvolutionTriggering) return;
+      this.personaEvolutionTriggering = true;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolutionTrigger(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (data && data.ok) {
+          this.showToast('✓ ' + (this.locale === 'en' ? 'Evolution complete' : '演化完成'), 'success');
+          await this.loadPersonaEvolution(profileId);
+        } else {
+          const reason = (data && data.reason) || (this.locale === 'en' ? 'Evolution skipped' : '演化被跳过');
+          this.showToast(reason, 'error');
+        }
+      } catch (e) {
+        this.showToast((this.locale === 'en' ? 'Evolution failed: ' : '演化失败：') + e.message, 'error');
+      } finally {
+        this.personaEvolutionTriggering = false;
       }
     },
 

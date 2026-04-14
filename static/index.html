@@ -2392,6 +2392,16 @@
                         · {{ t('lblEvolutionLastAt').replace('$date', fmtEvolutionDate(personaEvolutionForm.evolved_at)) }}
                       </span>
                     </div>
+                    <div v-if="personaEvolutionForm.enabled && personaEvolutionForm.turns_until_next != null"
+                         style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
+                      {{ t('lblTurnsUntilNext').replace('$n', personaEvolutionForm.turns_until_next) }}
+                    </div>
+                    <button class="s-btn s-btn-secondary" style="font-size:12px;margin-bottom:10px;"
+                            v-if="personaEvolutionForm.enabled"
+                            @click="triggerPersonaEvolution"
+                            :disabled="personaEvolutionTriggering">
+                      {{ personaEvolutionTriggering ? t('btnTriggeringEvolution') : t('btnTriggerEvolution') }}
+                    </button>
                     <textarea class="form-input" rows="5" v-model="personaEvolutionForm.base_prompt_evolved"
                               style="font-size:12px;resize:vertical;"></textarea>
                     <textarea class="form-input" rows="3" v-model="personaEvolutionForm.style_constraint_evolved"
