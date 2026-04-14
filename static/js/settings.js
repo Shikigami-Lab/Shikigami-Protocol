@@ -469,7 +469,7 @@ const SettingsMixin = {
       reflectionProfileForm: {
         custom_prompt: '',
         source: '',
-        chat_inject_topic_hint: true,
+        chat_inject_topic_anchor: true,
         long_absence_hours: 48,
         segments: [],  // 统一列表（与人格 Prompt 同构）：内置 + 自定义，含 trigger_mode/trigger_param
       },
@@ -4226,7 +4226,7 @@ const SettingsMixin = {
         this.reflectionProfileForm = {
           custom_prompt: data.custom_prompt || '',
           source: data.source || 'reflection_config',
-          chat_inject_topic_hint: data.chat_inject_topic_hint !== false,
+          chat_inject_topic_anchor: data.chat_inject_topic_anchor !== false,
           long_absence_hours: typeof data.long_absence_hours === 'number' ? data.long_absence_hours : 48,
           segments,
         };
@@ -4260,7 +4260,7 @@ const SettingsMixin = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               custom_prompt: this.reflectionProfileForm.custom_prompt || '',
-              chat_inject_topic_hint: this.reflectionProfileForm.chat_inject_topic_hint,
+              chat_inject_topic_anchor: this.reflectionProfileForm.chat_inject_topic_anchor,
               long_absence_hours: this.reflectionProfileForm.long_absence_hours,
               segments,
             }),

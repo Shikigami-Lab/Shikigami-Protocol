@@ -2308,7 +2308,7 @@ async def get_profile_reflection_config(profile_id: str):
         source = "base_prompt"
     else:
         source = "reflection_config"
-    chat_inject_topic_hint = ref.get("chat_inject_topic_hint", True)
+    chat_inject_topic_anchor = ref.get("chat_inject_topic_anchor", ref.get("chat_inject_topic_hint", True))
     long_absence_hours = ref.get("long_absence_hours", 48)
 
     seg_cfg = load_segment_config(profile_id)
@@ -2359,7 +2359,7 @@ async def get_profile_reflection_config(profile_id: str):
     return {
         "custom_prompt": custom_prompt,
         "source": source,
-        "chat_inject_topic_hint": chat_inject_topic_hint,
+        "chat_inject_topic_anchor": chat_inject_topic_anchor,
         "long_absence_hours": long_absence_hours,
         "segments": segments,
     }
@@ -2367,7 +2367,7 @@ async def get_profile_reflection_config(profile_id: str):
 
 class ProfileReflectionConfigBody(BaseModel):
     custom_prompt: Optional[str] = None
-    chat_inject_topic_hint: Optional[bool] = None
+    chat_inject_topic_anchor: Optional[bool] = None
     long_absence_hours: Optional[int] = None
     segments: Optional[List[Dict[str, Any]]] = None  # unified reflection+ASE segments
     # Keep for backward compat but no longer write to profile.json:
@@ -2423,8 +2423,8 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
     ref = card["reflection_config"]
     if body.custom_prompt is not None:
         ref["custom_prompt"] = (body.custom_prompt or "").strip()
-    if body.chat_inject_topic_hint is not None:
-        ref["chat_inject_topic_hint"] = bool(body.chat_inject_topic_hint)
+    if body.chat_inject_topic_anchor is not None:
+        ref["chat_inject_topic_anchor"] = bool(body.chat_inject_topic_anchor)
     if body.long_absence_hours is not None:
         ref["long_absence_hours"] = max(1, min(720, int(body.long_absence_hours)))
     with open(path, "w", encoding="utf-8") as f:

@@ -290,7 +290,7 @@ async def get_ase_status(session_id: str, request: Request):
     reflection_out = {
         "thought": reflection_state.get("thought", ""),
         "urgency": urgency,
-        "topic_hint": reflection_state.get("topic_hint", ""),
+        "topic_anchor": reflection_state.get("topic_anchor", ""),
         "updated_ago": refl_updated_ago,
         "next_in": refl_next_in,           # 距下次自省的真实剩余秒数
         "interval": effective_refl_interval,

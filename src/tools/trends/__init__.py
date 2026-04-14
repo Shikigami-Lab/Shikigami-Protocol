@@ -3,7 +3,7 @@
 趋势走 Reflection → ASE 路径：
   TrendFetcher 抓取 → trend_cache.json
   → TrendContextReflectionSegment 在反省时取 get_unused(3) 并标记已读
-  → Reflection LLM 生成 topic_hint
+  → Reflection LLM 生成 topic_anchor
   → ASE 在用户沉默时主动发言引用该话题
 
 趋势不注入聊天 pipeline，不会在对话中途突然出现。

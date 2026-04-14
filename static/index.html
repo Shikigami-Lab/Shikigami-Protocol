@@ -477,9 +477,9 @@
                       {{ t('aseReflectionNextIn').replace('{n}', aseStatus.reflection.next_in) }}
                     </span>
                   </div>
-                  <div v-if="aseStatus.reflection && aseStatus.reflection.topic_hint"
+                  <div v-if="aseStatus.reflection && aseStatus.reflection.topic_anchor"
                        style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">
-                    {{ t('aseReflectionTopic') }}{{ aseStatus.reflection.topic_hint }}
+                    {{ t('aseReflectionTopic') }}{{ aseStatus.reflection.topic_anchor }}
                   </div>
                   <div v-if="aseStatus.reflection && aseStatus.reflection.thought"
                        class="ase-thought-box">
@@ -2722,7 +2722,7 @@
                     <div class="param-row">
                       <span class="param-label">{{ t('lblChatInjectTopicHint') }}</span>
                       <label class="toggle-switch">
-                        <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_hint" />
+                        <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_anchor" />
                         <span class="toggle-slider"></span>
                       </label>
                     </div>
@@ -3405,7 +3405,7 @@
                   <div class="param-row">
                     <span class="param-label">{{ t('lblChatInjectTopicHint') }}</span>
                     <label class="toggle-switch">
-                      <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_hint" />
+                      <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_anchor" />
                       <span class="toggle-slider"></span>
                     </label>
                   </div>

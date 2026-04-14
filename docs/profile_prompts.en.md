@@ -93,7 +93,7 @@ All fields are optional; omitted fields fall back to `config/app.yaml` global de
 | Sub-field | Description |
 |---|---|
 | `custom_prompt` | **Single source**: injected into the reflection LLM as persona context. Also shared with emotion classification and affinity LLM calls (truncated at ~3500 chars). Does **not** include `base_prompt`. Recommended format: open with a ~150-char `【角色要点】你是{name}: {key traits}` block, then first-person introspection instructions written as the character itself. Keep concise — the `thought` output must be ≤30 Chinese chars / ≤20 English words |
-| `chat_inject_topic_hint` | Whether to inject `topic_hint` into the main chat prompt (default: true) |
+| `chat_inject_topic_anchor` | Whether to inject `topic_anchor` into the main chat prompt (default: true) |
 | `long_absence_hours` etc. | See engine and segment docs |
 
 If `custom_prompt` is absent, reflection still runs but without persona context; emotion/affinity auxiliary calls will also lack the persona block.

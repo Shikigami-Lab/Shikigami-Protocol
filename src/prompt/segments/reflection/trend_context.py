@@ -1,7 +1,7 @@
 """趋势感知 → Reflection 注入段落。
 
 targets_into="reflection"，从 TrendStore.get_unused() 取未读条目注入 reflection prompt，
-让 Reflection LLM 在生成 topic_hint 时能自主引用网络动态。
+让 Reflection LLM 在生成 topic_anchor 时能自主引用网络动态。
 
 条目标记为 used 后 3 天清理，防止重复提及。
 trend_context=None（没有数据或功能未启用）时行为与现在完全一致。
@@ -21,7 +21,7 @@ class TrendContextReflectionSegment(PromptSegment):
     segment_id = "reflection_trend_context"
     priority = 55          # 在 reflection 各段落中较靠后，persona 相关段落在前
     label = "趋势感知（自省）"
-    description = "将未读趋势条目注入自省 prompt，辅助生成 topic_hint"
+    description = "将未读趋势条目注入自省 prompt，辅助生成 topic_anchor"
     is_core = False
     inject_into = "reflection"
     is_readonly = True

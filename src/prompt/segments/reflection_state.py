@@ -7,14 +7,14 @@ model's tone and attitude are subtly influenced without explicit self-awareness.
 Uses style_hint (third-person behavioral description) rather than thought
 (first-person inner monologue) to avoid the AI "performing" a scripted state.
 
-When chat_inject_topic_hint is enabled (per-profile reflection_config), also
-injects topic_hint as a weak hint: "最近话题：…（可自然提及，不必硬接。）"
+When chat_inject_topic_anchor is enabled (per-profile reflection_config), also
+injects topic_anchor as a weak hint: "最近话题：…（可自然提及，不必硬接。）"
 
 Format injected (system block):
     [当前行为倾向]
     {style_hint}
     （此刻的情绪自然流露在言行中，无需直接提及。）
-    [若启用] 最近话题：{topic_hint}。（可自然提及，不必硬接。）
+    [若启用] 最近话题：{topic_anchor}。（可自然提及，不必硬接。）
 """
 import logging
 import time
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _profile_reflection_config(profile_id: str) -> dict:
-    """Per-profile reflection_config (e.g. chat_inject_topic_hint, long_absence_hours)."""
+    """Per-profile reflection_config (e.g. chat_inject_topic_anchor, long_absence_hours)."""
     try:
         from src.config.effective_config import _load_profile_card
         card = _load_profile_card(profile_id)
@@ -69,10 +69,10 @@ class ReflectionStateSegment(PromptSegment):
             return SegmentResult(fired=False)
 
         style_hint = state.get("style_hint", "").strip()
-        topic_hint = state.get("topic_hint", "").strip()
+        topic_anchor = state.get("topic_anchor", "").strip()
         speak_reason = state.get("speak_reason", "").strip()
         profile_ref = _profile_reflection_config(getattr(session, "profile_id", "") or "")
-        chat_inject_topic = profile_ref.get("chat_inject_topic_hint", True)
+        chat_inject_topic = profile_ref.get("chat_inject_topic_anchor", profile_ref.get("chat_inject_topic_hint", True))
 
         locale = get_locale()
         parts = []
@@ -85,14 +85,14 @@ class ReflectionStateSegment(PromptSegment):
                                     else "[当前行为倾向]\n$style_hint\n（此刻的情绪自然流露在言行中，无需直接提及。）"
                                 ),
                                 style_hint=style_hint))
-        if chat_inject_topic and topic_hint:
-            parts.append(render("reflection.topic_hint_segment", locale=locale,
+        if chat_inject_topic and topic_anchor:
+            parts.append(render("reflection.topic_anchor_segment", locale=locale,
                                 default=(
-                                    "Recent topic: $topic_hint. (May be naturally mentioned — no need to force it.)"
+                                    "Recent topic: $topic_anchor. (May be naturally mentioned — no need to force it.)"
                                     if locale == "en"
-                                    else "最近话题：$topic_hint。（可自然提及，不必硬接。）"
+                                    else "最近话题：$topic_anchor。（可自然提及，不必硬接。）"
                                 ),
-                                topic_hint=topic_hint))
+                                topic_anchor=topic_anchor))
 
         # Inject speak_reason motivation hint (relevant when ASE fires proactively)
         if speak_reason and speak_reason != "none":

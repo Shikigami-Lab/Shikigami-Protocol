@@ -1,6 +1,6 @@
 """reflection_prev_thought — Previous reflection result injection.
 
-Injects the last reflection output (thought/urgency/topic_hint/elapsed time)
+Injects the last reflection output (thought/urgency/topic_anchor/elapsed time)
 into the current reflection prompt to provide continuity and help calibrate
 urgency changes over time.
 """
@@ -19,7 +19,7 @@ class ReflectionPrevThoughtSegment(PromptSegment):
     is_core = False
     priority = 20
     label = "上一轮自省"
-    description = "上次自省输出（thought/urgency/topic_hint），帮助连贯与校准 urgency"
+    description = "上次自省输出（thought/urgency/topic_anchor），帮助连贯与校准 urgency"
 
     def build(self, ctx) -> SegmentResult:  # ctx: ReflectionBuildContext
         if not isinstance(ctx, ReflectionBuildContext):
@@ -29,7 +29,7 @@ class ReflectionPrevThoughtSegment(PromptSegment):
             return SegmentResult(messages=[])
         locale = ctx.locale or get_locale()
         urgency = prev.get("urgency")
-        topic = (prev.get("topic_hint") or "").strip()
+        topic = (prev.get("topic_anchor") or prev.get("topic_hint") or "").strip()
         updated_at = prev.get("updated_at") or 0
         if not topic and urgency is None:
             return SegmentResult(messages=[])
