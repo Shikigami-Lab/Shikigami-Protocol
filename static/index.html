@@ -2356,7 +2356,18 @@
                       <input type="number" class="seg-num-input" min="10" max="1000" step="10" style="width:72px;"
                              v-model.number="personaEvolutionForm.min_interval_turns" />
                     </div>
-                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintEvolutionInterval') }}</p>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:8px;">{{ t('hintEvolutionInterval') }}</p>
+                    <div class="param-row" style="margin-top:4px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblMaxEvolutionFacts') }}</span>
+                      <input type="number" class="seg-num-input" min="5" max="500" step="5" style="width:72px;"
+                             v-model.number="personaEvolutionForm.max_evolution_facts" />
+                    </div>
+                    <div class="param-row" style="margin-top:4px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblMaxEvolutionConvTurns') }}</span>
+                      <input type="number" class="seg-num-input" min="0" max="200" step="5" style="width:72px;"
+                             v-model.number="personaEvolutionForm.max_evolution_conv_turns" />
+                    </div>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintEvolutionContext') }}</p>
 
                     <!-- 核心锚点 -->
                     <div class="section-divider">{{ t('lblCoreAnchor') }}</div>

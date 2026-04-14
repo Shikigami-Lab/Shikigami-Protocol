@@ -4301,6 +4301,8 @@ const SettingsMixin = {
           changelog: data.changelog || [],
           enabled: ev.enabled !== false,
           min_interval_turns: ev.min_interval_turns ?? 200,
+          max_evolution_facts: ev.max_evolution_facts ?? 50,
+          max_evolution_conv_turns: ev.max_evolution_conv_turns ?? 40,
           turns_until_next: data.turns_until_next ?? null,
           turn_counter: data.turn_counter ?? 0,
         };
@@ -4324,6 +4326,8 @@ const SettingsMixin = {
             style_constraint: this.personaEvolutionForm.style_constraint_evolved || '',
             enabled: this.personaEvolutionForm.enabled,
             min_interval_turns: this.personaEvolutionForm.min_interval_turns,
+            max_evolution_facts: this.personaEvolutionForm.max_evolution_facts,
+            max_evolution_conv_turns: this.personaEvolutionForm.max_evolution_conv_turns,
           }),
         });
         if (res.ok) {

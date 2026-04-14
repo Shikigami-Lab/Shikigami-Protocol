@@ -198,15 +198,24 @@ def _get_affinity_status(storage_root: str) -> str:
     return "陌生"
 
 
-def _get_recent_facts_text(storage_root: str, max_facts: int = 15) -> str:
-    """从 LongTermStore 取最近 N 条高权重事实，格式化为文本。"""
+def _get_recent_facts_text(storage_root: str, max_facts: int = 50,
+                           since_ts: float = 0.0) -> str:
+    """从 LongTermStore 取上次演化以来的高权重事实，格式化为文本。
+
+    Args:
+        max_facts: 最大条数上限
+        since_ts: 只取 updated_at >= since_ts 的事实（0 表示不限）
+    """
     try:
         from src.memory.long_term_store import LongTermStore
         store = LongTermStore(storage_root)
         facts = store.all_facts()
-        # 按 updated_at 降序，取权重较高的前 N 条
+        # 按 updated_at 降序，过滤权重和时间
         facts = sorted(facts, key=lambda f: getattr(f, "updated_at", 0), reverse=True)
-        facts = [f for f in facts if getattr(f, "weight", 0) > 0.3][:max_facts]
+        facts = [f for f in facts
+                 if getattr(f, "weight", 0) > 0.3
+                 and (since_ts <= 0 or getattr(f, "updated_at", 0) >= since_ts)]
+        facts = facts[:max_facts]
         if not facts:
             return ""
         lines = []
@@ -218,6 +227,32 @@ def _get_recent_facts_text(storage_root: str, max_facts: int = 15) -> str:
         return "\n".join(lines)
     except Exception as e:
         logger.warning("[PersonaEvolution] 读取 facts 失败: %s", e)
+        return ""
+
+
+def _get_recent_conversation_text(storage_root: str, max_turns: int = 40) -> str:
+    """从 ConversationStore 取最近 N 轮对话，格式化为文本。"""
+    try:
+        from src.memory.conversation_store import ConversationStore
+        store = ConversationStore(storage_root, max_turns=0)
+        turns = store.get_recent(max_turns)
+        if not turns:
+            return ""
+        lines = []
+        for turn in turns:
+            role = turn.get("role", "")
+            content = (turn.get("content") or "").strip()
+            sender = turn.get("sender", "")
+            if not content:
+                continue
+            if role == "user":
+                label = sender if sender else "用户"
+            else:
+                label = sender if sender else "AI"
+            lines.append(f"{label}: {content}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning("[PersonaEvolution] 读取对话失败: %s", e)
         return ""
 
 
@@ -278,11 +313,16 @@ async def trigger_evolution(
     current_style = (evolved.get("style_constraint") or style_constraint_original).strip()
     evolution_count = int(evolved.get("evolution_count", 0))
 
-    memory_facts = _get_recent_facts_text(storage_root)
+    max_facts = int(evolved.get("max_evolution_facts", 50))
+    max_conv_turns = int(evolved.get("max_evolution_conv_turns", 40))
+    since_ts = float(evolved.get("evolved_at", 0))
+
+    memory_facts = _get_recent_facts_text(storage_root, max_facts=max_facts, since_ts=since_ts)
     if not memory_facts:
         logger.info("[PersonaEvolution] 无足够记忆事实，跳过演化 profile=%s", profile_id)
         return None
 
+    conversation_text = _get_recent_conversation_text(storage_root, max_turns=max_conv_turns)
     affinity_status = _get_affinity_status(storage_root)
 
     locale = get_locale()
@@ -297,6 +337,7 @@ async def trigger_evolution(
         current_base_prompt=current_base,
         current_style_constraint=current_style,
         memory_facts=memory_facts,
+        conversation_context=conversation_text or ("（无近期对话）" if locale == "zh" else "(no recent conversation)"),
         affinity_status=affinity_status,
         evolution_count=str(evolution_count),
     )

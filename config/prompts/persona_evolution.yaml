@@ -81,6 +81,9 @@ persona_evolution:
       ━━ 触发本次演化的记忆依据 ━━
       $memory_facts
 
+      ━━ 近期对话（感受互动模式与语气）━━
+      $conversation_context
+
       ━━ 关系背景 ━━
       好感度阶段：$affinity_status
       已演化次数：$evolution_count 次
@@ -122,6 +125,9 @@ persona_evolution:
 
       ━━ Memory Evidence Triggering This Evolution ━━
       $memory_facts
+
+      ━━ Recent Conversation (observe interaction style and tone) ━━
+      $conversation_context
 
       ━━ Relationship Context ━━
       Affinity stage: $affinity_status

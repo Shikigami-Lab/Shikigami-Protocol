@@ -3198,6 +3198,8 @@ class PersonaEvolutionSaveBody(BaseModel):
     style_constraint: Optional[str] = None
     enabled: Optional[bool] = None
     min_interval_turns: Optional[int] = None
+    max_evolution_facts: Optional[int] = None
+    max_evolution_conv_turns: Optional[int] = None
 
 
 @router.put("/profiles/{profile_id}/persona_evolution")
@@ -3220,6 +3222,10 @@ async def save_persona_evolution(profile_id: str, body: PersonaEvolutionSaveBody
         card["persona_evolved"]["enabled"] = body.enabled
     if body.min_interval_turns is not None:
         card["persona_evolved"]["min_interval_turns"] = max(10, body.min_interval_turns)
+    if body.max_evolution_facts is not None:
+        card["persona_evolved"]["max_evolution_facts"] = max(5, body.max_evolution_facts)
+    if body.max_evolution_conv_turns is not None:
+        card["persona_evolved"]["max_evolution_conv_turns"] = max(0, body.max_evolution_conv_turns)
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(card, f, ensure_ascii=False, indent=2)
