@@ -24,7 +24,7 @@ _last_build_timings: Dict[str, Any] = {}
 from src.config.profile_loader import ProfileLoader
 from src.core.session import Session
 from src.memory.conversation_store import ConversationStore
-from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat
+from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat, targets_ase
 from src.prompt.registry import get_registered
 from src.prompt.segment_config import CustomSegmentDef, SegmentMeta, effective_segment_enabled, load_segment_config
 
@@ -56,6 +56,9 @@ import src.prompt.segments.reflection.recent_dialogue # noqa: F401
 import src.prompt.segments.ase.morning_greeting      # noqa: F401
 import src.prompt.segments.ase.long_silence_check_in # noqa: F401
 import src.prompt.segments.ase.trend_context         # noqa: F401  (AseTrendContextSegment, cooldown 2h)
+import src.prompt.segments.ase.initiation_frame      # noqa: F401
+import src.prompt.segments.ase.behavioral_guidance   # noqa: F401
+import src.prompt.segments.ase.scene_context         # noqa: F401
 import src.prompt.segments.health_mode               # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -95,9 +98,16 @@ def build_messages(
     out_extras: Optional[Dict[str, Any]] = None,
     current_group_id: Optional[str] = None,
     current_group_gname: Optional[str] = None,
+    pipeline_mode: str = "chat",
+    extra_context: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, str]]:
     """Assemble the full message list for the LLM.
 
+    pipeline_mode: "chat" (default), "ase", or "reflection" — controls which
+                   segments are included based on their inject_into value.
+    extra_context: additional key-value pairs merged into BuildContext.extras
+                   (used by ASE to pass vlm_description, last_ase_content, etc.
+                   to ASE-specific segments).
     extra_system: if non-empty, appended to the merged system message (used by
                   ASE heartbeat_speak to inject heartbeat context without adding
                   a second system message).
@@ -146,6 +156,8 @@ def build_messages(
     if current_group_gname is not None:
         extras["current_group_gname"] = current_group_gname
     extras["current_hour"] = datetime.fromtimestamp(time.time()).hour
+    if extra_context:
+        extras.update(extra_context)
 
     ctx = BuildContext(
         session=session,
@@ -162,9 +174,16 @@ def build_messages(
     prefix_non_system: List[Dict[str, str]] = []
     suffix_non_system: List[Dict[str, str]] = []
     history_msgs: List[Dict[str, str]] = []
+    # Segments with target="user": (priority, content_str) — appended to final user message
+    user_seg_parts: List[tuple] = []
 
     # ── Registered segments ───────────────────────────────────────────────────
-    for seg_cls in [cls for cls in get_registered() if targets_chat(cls.inject_into)]:
+    def _seg_matches_mode(inject_into: str) -> bool:
+        if pipeline_mode == "ase":
+            return targets_ase(inject_into) or targets_chat(inject_into)
+        return targets_chat(inject_into)
+
+    for seg_cls in [cls for cls in get_registered() if _seg_matches_mode(cls.inject_into)]:
         seg = _get_instance(seg_cls, session.profile_id)
         meta: Optional[SegmentMeta] = seg_cfg.get_meta(seg_cls.segment_id)
 
@@ -207,7 +226,10 @@ def build_messages(
             session.set_segment_last_fired_date(seg.segment_id, datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d"))
 
         for m in result.messages:
-            if m.get("role") == "system":
+            if getattr(result, "target", "system") == "user":
+                # Segment requests its content go into the final user message
+                user_seg_parts.append((eff_priority, m.get("content", "")))
+            elif m.get("role") == "system":
                 sys_with_priority.append((eff_priority, m))
             elif eff_priority < HISTORY_PRIORITY:
                 prefix_non_system.append(m)
@@ -218,7 +240,7 @@ def build_messages(
 
     # ── Custom (user-defined) segments ────────────────────────────────────────
     today_str = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d")
-    custom_segs = [c for c in seg_cfg.custom_segments if targets_chat(c.inject_into)]
+    custom_segs = [c for c in seg_cfg.custom_segments if _seg_matches_mode(c.inject_into)]
     for custom in custom_segs:
         if not _custom_triggered(custom, ctx):
             continue
@@ -247,13 +269,27 @@ def build_messages(
     messages.extend(prefix_non_system)
     messages.extend(history_msgs)
     messages.extend(suffix_non_system)
+
+    # Merge user-targeted segment content into the final user message
+    if user_seg_parts:
+        user_seg_parts.sort(key=lambda x: x[0])
+        user_seg_text = "\n\n".join(part for _, part in user_seg_parts if part.strip())
+    else:
+        user_seg_text = ""
+
     if last_message_override is not None and last_message_override.get("content") is not None:
+        if user_seg_text:
+            last_message_override = dict(last_message_override)
+            orig = last_message_override.get("content", "")
+            last_message_override["content"] = user_seg_text + ("\n\n" + orig if orig.strip() else "")
         messages.append(last_message_override)
     else:
+        final_user = user_seg_text + ("\n\n" + user_msg if user_msg and user_msg.strip() else "")
+        final_user = final_user.strip()
         # 群聊等场景下 store 已先 append 了当前 user 消息，history 末尾已是 user_msg，避免重复
         last = messages[-1] if messages else None
-        if not (last and last.get("role") == "user" and (last.get("content") or "").strip() == (user_msg or "").strip()):
-            messages.append({"role": "user", "content": user_msg})
+        if not (last and last.get("role") == "user" and (last.get("content") or "").strip() == (final_user or "").strip()):
+            messages.append({"role": "user", "content": final_user})
 
     _last_build_timings["assemble_ms"] = round((time.perf_counter() - assemble_start) * 1000, 2)
     _last_build_timings["total_build_ms"] = round((time.perf_counter() - build_start) * 1000, 2)

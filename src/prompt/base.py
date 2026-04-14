@@ -34,6 +34,8 @@ class SegmentResult:
     messages: List[Dict[str, str]] = field(default_factory=list)
     # Whether the segment actually fired (for cooldown bookkeeping)
     fired: bool = True
+    # Target message: "system" (default) or "user" — controls where content is placed
+    target: str = "system"
 
 
 class PromptSegment(ABC):
