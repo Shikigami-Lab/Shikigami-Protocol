@@ -209,7 +209,11 @@ def _get_recent_facts_text(storage_root: str, max_facts: int = 50,
     try:
         from src.memory.long_term_store import LongTermStore
         store = LongTermStore(storage_root)
-        facts = store.all_facts()
+        # Public API in LongTermStore is get_all(); keep a small compatibility fallback.
+        if hasattr(store, "get_all"):
+            facts = store.get_all()
+        else:
+            facts = getattr(store, "all_facts")()
         # 按 updated_at 降序，过滤权重和时间
         facts = sorted(facts, key=lambda f: getattr(f, "updated_at", 0), reverse=True)
         facts = [f for f in facts

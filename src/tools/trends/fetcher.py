@@ -79,6 +79,19 @@ async def _fetch_api(url: str, max_items: int = 10) -> List[Dict]:
         resp.raise_for_status()
         data = resp.json()
 
+    # Reddit Listing 格式：{kind: "Listing", data: {children: [{kind, data}]}}
+    if data.get("kind") == "Listing":
+        children = (data.get("data") or {}).get("children") or []
+        items = []
+        for child in children[:max_items]:
+            entry = child.get("data") or {}
+            title = (entry.get("title") or "").strip()
+            snippet = (entry.get("selftext") or "").strip()
+            link = (entry.get("url") or "").strip()
+            if title:
+                items.append({"title": title, "snippet": snippet[:400], "url": link})
+        return items
+
     # 尝试各种常见的列表字段
     raw = data.get("data") or data.get("items") or data.get("list") or []
     if not raw:
