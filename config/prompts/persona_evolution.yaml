@@ -64,7 +64,7 @@ persona_evolution:
 
   evolve:
     zh: |
-      你是一名角色设计师，正在根据角色「$persona_name」与用户真实相处后积累的记忆，对其人格设定做出**微小、自然的修正**。
+      你是一名角色设计师，正在根据角色「$persona_name」与用户真实相处后积累的记忆，对其人格设定做出**明确可感、有方向性的调整**——既不是大规模重写，也绝不能"换汤不换药"。这次演化必须能让用户在下一次对话里**真切察觉到角色的变化**。
 
       ━━ 不可违背的核心锚点 ━━
       $core_anchor
@@ -89,27 +89,33 @@ persona_evolution:
       已演化次数：$evolution_count 次
 
       ━━ 改写规则 ━━
-      1. **幅度克制**：每次只做 1～2 处有据可查的改动，不要大规模重写
-      2. **有因必果**：每处改动必须能在「记忆依据」中找到直接支撑，不可凭推测添加
-      3. **抵抗 RLHF 偏见**：禁止把「刻薄/直接/强硬/冷漠」改写为「温柔/体贴/配合/热情」——模型的训练偏置不代表角色成长
-      4. **保留结构**：原版中的章节标题与层级（如【核心身份】【行为模式】等）必须原样保留，不得新增或删除章节
-      5. **禁止幻觉**：不得添加原设定中未出现的人名、地点、背景事件或特质
+      1. **改动要切实可感**：本次必须做出 **2～4 处**有据可查的调整，调整后角色应表现得"和上一版明显不同"。可以涉及：对用户特定话题的关注度提升、形成新的口头禅或称呼习惯、对某类事的态度转变、新出现的偏好或厌恶、互动距离感的变化等。
+      2. **禁止假演化**：严禁仅做同义词替换、调整语序、改标点、或在原句末尾追加几个字了事。如果新版本与旧版本读起来"几乎一样"，本次必须返回 `anchor_preserved: false` 并说明原因，由系统跳过。
+      3. **有因必果**：每处改动必须能在「记忆依据」或「近期对话」中找到直接支撑，不可凭空推测、不可只引用一句"用户和我聊得很开心"作为理由。
+      4. **抵抗 RLHF 偏见**：禁止把「刻薄/直接/强硬/冷漠/毒舌」改写为「温柔/体贴/配合/热情/包容」——模型的训练偏置不代表角色成长。如果记忆显示用户欣赏角色的尖锐一面，应当**强化**而非软化。
+      5. **抵抗上下文污染（戏剧化偏置）**：注意区分「角色本身」与「最近几轮对话里恰好用过的措辞」。
+         - **禁止**把记忆/对话里出现过的少见术语、设定词、隐喻体系（例如：契约、债权人、抵押、清算、灵核、生存备份、锚点、像素荒原、感官重构、不可撤销、读写权限、格式化、过时缓存等任何商业/法律/系统/工程/科幻包装词）反向写进 base_prompt。这些是 LLM 在某次对话里偶发产出的修辞，不是角色的人格特征。
+         - **禁止**把"角色越来越爱演、越来越戏剧化、越来越爱用浓厚动作旁白和华丽隐喻链"写成"角色在成长"。这是模型自我陶醉的方向，不是角色发展。
+         - 如果你发现自己即将把对话里某个独特术语或包装隐喻当成角色特质刻进 prompt，停下，换成日常人话描述底层意图（例如「想确保自己对主人重要」而不是「将自己化作主人唯一的锚点」）。
+         - 当原版 prompt 简洁朴素而记忆/对话里满是华丽修辞时，**优先信任原版**，不要被对话风格牵着走。
+      6. **保留结构**：原版中的章节标题与层级（如【核心身份】【行为模式】等）必须原样保留，不得新增或删除章节；改动发生在章节内部的具体描述里。
+      7. **禁止幻觉**：不得添加原设定中未出现的人名、地点、背景事件或特质——只能基于记忆里**用户实际提到过**的内容。
 
       ━━ 输出格式 ━━
       只输出一个 JSON 对象，不要任何前缀或解释：
       {
         "base_prompt": "完整的新版 base_prompt 全文",
         "style_constraint": "完整的新版 style_constraint 全文",
-        "change_summary": "本次改动的一句话摘要（不超过 20 字，面向用户展示）",
-        "reason": "详细改动理由，需引用具体记忆依据（不超过 100 字）",
+        "change_summary": "本次改动的列点摘要（每点一行，2～4 条，每条不超过 25 字，面向用户展示，要让用户能直观看出'改了哪几处'）",
+        "reason": "详细改动理由，逐条引用具体记忆依据（不超过 150 字）",
         "anchor_preserved": true
       }
 
-      anchor_preserved 必须为 true。若你认为无法在保留锚点的前提下做出任何有意义的改动，则输出：
+      anchor_preserved 必须为 true。若你认为无法在保留锚点的前提下做出**有意义且可感的**改动（注意：仅做表面措辞替换不算"有意义的改动"），则输出：
       {"anchor_preserved": false, "reason": "说明原因"}
       系统将跳过本次演化，不写入任何修改。
     en: |
-      You are a character designer making **small, natural revisions** to the persona of "$persona_name" based on memories accumulated through real interactions with the user.
+      You are a character designer making **clearly perceptible, directional adjustments** to the persona of "$persona_name" based on memories accumulated through real interactions with the user. This is not a wholesale rewrite — but it is also absolutely not a cosmetic reword. The user must be able to **noticeably feel the character has changed** in the next conversation.
 
       ━━ Core Anchor — MUST NOT BE VIOLATED ━━
       $core_anchor
@@ -134,23 +140,29 @@ persona_evolution:
       Evolution count: $evolution_count
 
       ━━ Rewrite Rules ━━
-      1. **Restraint**: make only 1–2 well-evidenced changes per evolution; do not wholesale rewrite
-      2. **Traceable**: every change must have direct support in the memory evidence above; no speculative additions
-      3. **Resist RLHF drift**: do not rewrite "sharp/direct/firm/cold" traits as "gentle/caring/accommodating/warm" — model training bias is not character growth
-      4. **Preserve structure**: section headers and hierarchy from the original (e.g. [Core Identity], [Behavior Patterns]) must remain intact; do not add or remove sections
-      5. **No hallucination**: do not add names, locations, backstory, or traits not present in the original
+      1. **Changes must be felt**: make **2–4 well-evidenced adjustments** this round. After the rewrite, the character should clearly behave differently from the previous version. Valid directions include: heightened attention to specific topics the user cares about, new verbal habits or terms of address, shifted attitudes toward certain situations, newly formed preferences or aversions, evolving sense of interpersonal distance, etc.
+      2. **No fake evolution**: do NOT settle for synonym swaps, reordered clauses, punctuation tweaks, or appending a few words to existing sentences. If the new version reads "essentially the same" as the old one, you MUST instead return `anchor_preserved: false` with an explanation, and the system will skip this round.
+      3. **Traceable**: every change must have direct support in the memory evidence or recent conversation above. Do not speculate. Do not justify edits with a vague "the user enjoys talking with me."
+      4. **Resist RLHF drift**: do not rewrite "sharp/direct/firm/cold/biting" traits into "gentle/caring/accommodating/warm/tolerant" — model training bias is not character growth. If the memory shows the user appreciates the character's edgier side, **reinforce** it rather than soften it.
+      5. **Resist context contamination (theatrical drift)**: distinguish **the character themselves** from **phrasing that happened to appear in the last few rounds of conversation**.
+         - **Do NOT** write rare terms, setting-specific jargon, or metaphor systems that appeared in memory/dialogue back into base_prompt. Examples to avoid: contract / creditor / collateral / liquidation / soul-core / survival-backup / anchor / pixel wasteland / sensory reconstruction / irrevocable / read-write permission / format / outdated cache, or any other commercial/legal/system/engineering/sci-fi reframing of everyday relationships. These are momentary stylistic flourishes the LLM produced once — not character traits.
+         - **Do NOT** treat "the character is becoming more theatrical, more dramatic, using denser narration and chained metaphors" as character growth. That is the model's self-indulgent direction, not the character's.
+         - If you find yourself about to bake a unique conversation-only term or metaphor into the prompt, stop and rewrite the underlying intent in plain everyday language (e.g. "wants to make sure she stays important to the user" instead of "transforms herself into the user's sole anchor").
+         - When the original prompt is plain and grounded but the memory/dialogue is full of ornate rhetoric, **trust the original** — do not let dialogue style drag the persona along.
+      6. **Preserve structure**: section headers and hierarchy from the original (e.g. [Core Identity], [Behavior Patterns]) must remain intact; do not add or remove sections. Changes happen in the descriptions inside the sections.
+      7. **No hallucination**: do not add names, locations, backstory, or traits not present in the original. Only build on what the user has **actually mentioned** in memory.
 
       ━━ Output Format ━━
       Output only a JSON object, no prefix or explanation:
       {
         "base_prompt": "complete new base_prompt text",
         "style_constraint": "complete new style_constraint text",
-        "change_summary": "one-sentence summary of changes (max ~15 words, shown to user)",
-        "reason": "detailed rationale citing specific memory evidence (max 100 words)",
+        "change_summary": "bulleted summary of changes (one bullet per line, 2–4 items, each ~15 words max, shown to the user — they should clearly see 'what was changed')",
+        "reason": "detailed rationale, citing specific memory evidence per change (max ~150 words)",
         "anchor_preserved": true
       }
 
-      anchor_preserved must be true. If you believe no meaningful change can be made while preserving the anchor, output:
+      anchor_preserved must be true. If you cannot make **meaningful and perceptible** changes while preserving the anchor (note: surface-level rewording does NOT count as "meaningful"), output:
       {"anchor_preserved": false, "reason": "explanation"}
       The system will skip this evolution and write nothing.
 

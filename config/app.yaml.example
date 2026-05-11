@@ -101,6 +101,12 @@ engines:
   emotion:
     enabled: true
     classification_frequency: 5
+    # 情绪自动衰减：静默超过 decay_full_secs 后整体回归 neutral_emotion，
+    # 避免上一次分类的情绪被永久保留。
+    decay_enabled: true
+    decay_full_secs: 14400          # 默认 4h
+    decay_skip_if_active_secs: 300  # 对话活跃期不衰减
+    neutral_emotion: "calm"
   affinity:
     enabled: true
     llm_adjust_frequency: 5

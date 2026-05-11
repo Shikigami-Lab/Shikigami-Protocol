@@ -29,6 +29,9 @@ async def start_energy_refresh(
 ) -> None:
     """每 interval 秒对所有已加载 session 做时间恢复计算（轻量，无 LLM）。
     每个 session 使用其人格的 energy.refresh_interval 决定是否执行恢复。
+
+    同一节拍内还会执行情绪衰减：静默超过 emotion.decay_full_secs 后把情绪
+    回归中性（默认 calm）。能量与情绪衰减解耦，各自有 enabled 开关。
     """
     logger.info("[energy_refresh] started, interval=%ds skip_if_active=%ds",
                 interval, skip_if_active_secs)
@@ -45,27 +48,50 @@ async def start_energy_refresh(
         for session in sessions:
             try:
                 energy_cfg = get_effective_engine_config(app, session.profile_id, "energy")
-                if energy_cfg.get("enabled", True) is False:
-                    continue
-                refresh_interval = energy_cfg.get("refresh_interval", 300)
-                recovery_gain = energy_cfg.get("recovery_gain_per_300s")
-                if recovery_gain is not None:
+                if energy_cfg.get("enabled", True) is not False:
+                    refresh_interval = energy_cfg.get("refresh_interval", 300)
+                    recovery_gain = energy_cfg.get("recovery_gain_per_300s")
+                    if recovery_gain is not None:
+                        try:
+                            recovery_gain = float(recovery_gain)
+                        except (TypeError, ValueError):
+                            recovery_gain = None
+                    full_secs = energy_cfg.get("full_recovery_secs")
+                    if full_secs is not None:
+                        try:
+                            full_secs = float(full_secs)
+                        except (TypeError, ValueError):
+                            full_secs = None
+                    emotion_engine.apply_time_recovery(
+                        session,
+                        skip_if_active_secs=skip_if_active_secs,
+                        refresh_interval=refresh_interval,
+                        recovery_gain_per_300s=recovery_gain,
+                        full_recovery_secs=full_secs,
+                    )
+
+                emotion_cfg = get_effective_engine_config(app, session.profile_id, "emotion")
+                if (
+                    emotion_cfg.get("enabled", True) is not False
+                    and emotion_cfg.get("decay_enabled", True) is not False
+                ):
+                    decay_full = emotion_cfg.get("decay_full_secs")
+                    if decay_full is not None:
+                        try:
+                            decay_full = float(decay_full)
+                        except (TypeError, ValueError):
+                            decay_full = None
+                    decay_skip = emotion_cfg.get("decay_skip_if_active_secs", skip_if_active_secs)
                     try:
-                        recovery_gain = float(recovery_gain)
+                        decay_skip = float(decay_skip)
                     except (TypeError, ValueError):
-                        recovery_gain = None
-                full_secs = energy_cfg.get("full_recovery_secs")
-                if full_secs is not None:
-                    try:
-                        full_secs = float(full_secs)
-                    except (TypeError, ValueError):
-                        full_secs = None
-                emotion_engine.apply_time_recovery(
-                    session,
-                    skip_if_active_secs=skip_if_active_secs,
-                    refresh_interval=refresh_interval,
-                    recovery_gain_per_300s=recovery_gain,
-                    full_recovery_secs=full_secs,
-                )
+                        decay_skip = skip_if_active_secs
+                    neutral = emotion_cfg.get("neutral_emotion", "calm")
+                    emotion_engine.apply_emotion_decay(
+                        session,
+                        decay_full_secs=decay_full,
+                        skip_if_active_secs=decay_skip,
+                        neutral_emotion=neutral,
+                    )
             except Exception as e:
                 logger.warning("[energy_refresh] failed for %s: %s", session.id, e)

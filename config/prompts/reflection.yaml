@@ -163,6 +163,10 @@ reflection:
 
 # ── Prompt Segments (reflection_state.py) ────────────────────────────────────
 
+  thought_segment:
+    zh: "[此刻内心]\n$thought"
+    en: "[Inner State Right Now]\n$thought"
+
   style_hint_segment:
     zh: "[本次回复行为指令]\n请在这次回复中，以此作为你的语气与态度基调：$style_hint"
     en: "[Behavioral Directive for This Reply]\nAdopt this as your tone and attitude baseline for this reply: $style_hint"

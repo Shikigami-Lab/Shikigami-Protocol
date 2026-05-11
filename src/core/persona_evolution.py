@@ -374,7 +374,15 @@ async def trigger_evolution(
 
     new_base = (data.get("base_prompt") or "").strip()
     new_style = (data.get("style_constraint") or "").strip()
-    change_summary = (data.get("change_summary") or "").strip()
+    # change_summary 可能是 string 或 list（prompt 要求列点摘要时 LLM 常返回数组）
+    raw_summary = data.get("change_summary") or ""
+    if isinstance(raw_summary, list):
+        change_summary = "\n".join(
+            f"- {str(item).strip().lstrip('-').strip()}"
+            for item in raw_summary if str(item).strip()
+        )
+    else:
+        change_summary = str(raw_summary).strip()
     reason = (data.get("reason") or "").strip()
 
     if not new_base:

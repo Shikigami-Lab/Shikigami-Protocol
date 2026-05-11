@@ -2,15 +2,17 @@
 
 Priority 75 — fires after time_context (70), before affinity_state (80).
 
-Injects the AI's current behavioral style hint into every normal chat so the
-model's tone and attitude are subtly influenced without explicit self-awareness.
-Uses style_hint (third-person behavioral description) rather than thought
-(first-person inner monologue) to avoid the AI "performing" a scripted state.
+Injects the AI's current inner state into every normal chat so the
+model's tone and attitude are shaped by its reflection output.
+Injects both thought (first-person inner monologue) and style_hint
+(third-person behavioral description).
 
 When chat_inject_topic_anchor is enabled (per-profile reflection_config), also
-injects topic_anchor as a weak hint: "最近话题：…（可自然提及，不必硬接。）"
+injects topic_anchor as a weak hint.
 
 Format injected (system block):
+    [此刻内心]
+    {thought}
     [当前行为倾向]
     {style_hint}
     （此刻的情绪自然流露在言行中，无需直接提及。）
@@ -68,6 +70,7 @@ class ReflectionStateSegment(PromptSegment):
         if age > ttl:
             return SegmentResult(fired=False)
 
+        thought = state.get("thought", "").strip()
         style_hint = state.get("style_hint", "").strip()
         topic_anchor = state.get("topic_anchor", "").strip()
         speak_reason = state.get("speak_reason", "").strip()
@@ -76,6 +79,14 @@ class ReflectionStateSegment(PromptSegment):
 
         locale = get_locale()
         parts = []
+        if thought:
+            parts.append(render("reflection.thought_segment", locale=locale,
+                                default=(
+                                    "[Inner State Right Now]\n$thought"
+                                    if locale == "en"
+                                    else "[此刻内心]\n$thought"
+                                ),
+                                thought=thought))
         if style_hint:
             parts.append(render("reflection.style_hint_segment", locale=locale,
                                 default=(

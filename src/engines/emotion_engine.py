@@ -1,7 +1,7 @@
 """EmotionEngine — 管理 profiles/<id>/emotion_state.json（情绪 + 能量）。
 
-两条触发路径：
-  - 后台 EnergyRefreshTask（每 5 分钟）：apply_time_recovery()
+三条触发路径：
+  - 后台 EnergyRefreshTask（每 5 分钟）：apply_time_recovery() + apply_emotion_decay()
   - Chat 流完成后 fire-and-forget：maybe_classify()
 """
 import json
@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # 默认恢复/满回时间（可被 config 的 energy.recovery_gain_per_300s、full_recovery_secs 覆盖）
 _ENERGY_RECOVERY_PER_300S = 2.0
 _ENERGY_FULL_RECOVERY_SECS = 14400  # 4h
+
+# 情绪自动衰减默认值（可被 config 的 emotion.decay_* 覆盖）
+_EMOTION_DECAY_FULL_SECS = 14400          # 静默 4h 后情绪回归中性
+_EMOTION_DECAY_SKIP_IF_ACTIVE_SECS = 300  # 对话活跃期不衰减
+_EMOTION_DECAY_NEUTRAL = "calm"
 
 # 情绪→能量即时影响
 # 注意：正向情绪的影响值不应过大，否则会形成反馈死循环：
@@ -178,6 +183,56 @@ class EmotionEngine:
             "[EmotionEngine] time_recovery session=%s energy=%.1f elapsed=%.0fs",
             session.id, energy, elapsed,
         )
+
+    def apply_emotion_decay(
+        self,
+        session,
+        decay_full_secs: Optional[float] = None,
+        skip_if_active_secs: float = 300.0,
+        neutral_emotion: str = _EMOTION_DECAY_NEUTRAL,
+    ) -> bool:
+        """情绪硬截断衰减：静默超过 decay_full_secs 后，把多层情绪整体重置为中性。
+
+        基准时间取 state["last_updated"]（每次 LLM 分类都会刷新），所以"静默"
+        指的是"距上次情绪被改写的间隔"。这与能量恢复的对话活跃判断保持一致。
+
+        返回 True 表示发生了重置（用于日志/统计）。
+        """
+        now = time.time()
+        full_secs = decay_full_secs if decay_full_secs is not None else _EMOTION_DECAY_FULL_SECS
+        if full_secs <= 0:
+            return False
+
+        if skip_if_active_secs > 0:
+            last_msg = getattr(session, "last_user_message_time", 0.0)
+            silent_secs = now - last_msg
+            if silent_secs < skip_if_active_secs:
+                return False
+
+        state = self.load_state(session)
+        if state.get("primary_emotion") == neutral_emotion:
+            return False
+
+        elapsed = now - state.get("last_updated", now)
+        if elapsed < full_secs:
+            return False
+
+        prev_primary = state.get("primary_emotion")
+        state["_prev_primary"] = prev_primary
+        state["emotion_layers"] = [{"emotion": neutral_emotion, "intensity": 1.0}]
+        state["primary_emotion"] = neutral_emotion
+        state["primary_weight"] = 1.0
+        state["secondary_emotion"] = None
+        state["secondary_weight"] = 0.0
+        state["tertiary_emotion"] = None
+        state["tertiary_weight"] = 0.0
+        state["last_updated"] = now
+        self.save_state(session, state)
+        logger.info(
+            "[EmotionEngine] emotion_decay session=%s %s -> %s (silent %.0fs)",
+            session.id, prev_primary, neutral_emotion, elapsed,
+        )
+        return True
 
     def apply_emotion_to_energy(self, session, emotion: str) -> None:
         """情绪分类更新后立即调整能量。"""
