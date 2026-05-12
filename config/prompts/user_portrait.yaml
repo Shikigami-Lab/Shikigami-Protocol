@@ -1,0 +1,113 @@
+user_portrait:
+# =============================================================================
+# user_portrait.yaml — AI 维护的用户画像生成 prompt
+# (src/core/user_portrait.py)
+# =============================================================================
+#
+# 变量：
+#   $persona_name         — AI 角色名
+#   $base_prompt          — AI 角色完整人设（profile.base_prompt，演化版优先）
+#   $user_name            — 用户希望被称呼的名字（可能是真名、网名、"主人"、"先生"等）
+#   $introduction         — 用户自我介绍（可能为空占位）
+#   $current_portrait     — 上一版画像内容（首次为空占位）
+#   $recent_conversation  — 近 N 轮对话
+#   $day_summaries        — 最近几天的日记摘要（可选，可能为空占位）
+#   $memory_facts         — 高权重记忆事实列表（可选，可能为空占位）
+#   $refresh_count        — 本人格累计刷新次数
+
+  refresh:
+    zh: |
+      你是 AI 角色「$persona_name」。现在你要在内心整理一份对对方的整体认知画像。这份画像将作为你日常对话时对对方的"长期记忆视角"——不是写给对方看的，是你自己用来记住"这个人是什么样的"。
+
+      ━━ 你的角色设定（你是谁）━━
+      $base_prompt
+
+      ━━ 你对对方的称呼 ━━
+      对方希望被叫做：「$user_name」
+      在画像里描述对方时，请使用这个称呼。如果该字段为空，统一用"他"作为中性指代。**不要假设任何固定称谓**（例如"主人"、"先生"、"小姐"），除非这就是 $user_name 字段本身的值。
+
+      ━━ 对方的自我介绍（用户亲口写的事实，可信度最高）━━
+      $introduction
+
+      ━━ 上一版画像（本次的改写基础）━━
+      $current_portrait
+
+      ━━ 最近的对话片段 ━━
+      $recent_conversation
+
+      ━━ 最近几天的日记摘要（你过去对当天的总结）━━
+      $day_summaries
+
+      ━━ 高权重记忆事实 ━━
+      $memory_facts
+
+      ━━ 累计刷新次数 ━━
+      $refresh_count
+
+      ━━ 改写规则（必须严格遵守）━━
+      1. **输出形式**：一段 **600～3000 字**的 markdown 正文。可以用小标题分段（如「兴趣」「沟通风格」「近期状态」「与我之间」），也可以纯散文。但不要用 JSON、不要用列表项过多，**只输出画像正文本身**，没有任何元说明、前缀、引号、代码块包裹。
+      2. **写作视角**：用第二人称或第三人称叙述（"他喜欢…"、"你最近…"皆可，但**保持一致**），口吻是你自己的内心整理，不是给对方看的报告。
+      3. **稳定性优先**：画像是**长期累积**而非每日重写。上一版里的稳定特质（兴趣、口味、性格基调、和你的关系定位）若没有反例就保留。只有当新证据明确指向变化时才修改对应部分。**禁止每次大改**。
+      4. **区分长期 vs 近期**：长期特质（兴趣、性格、习惯）放主体段落；近期状态（最近在玩什么、最近累不累）单独一小段且明确标注"近期"，避免把临时状态当成永久特质。
+      5. **抵抗上下文污染（重要）**：
+         - 严禁把对话里出现过的少见术语、设定词、戏剧化措辞或隐喻系统（例如：契约、债权人、抵押、清算、灵核、生存备份、锚点、像素荒原、感官重构、不可撤销、读写权限、格式化、过时缓存等任何商业/法律/系统/工程/科幻包装词）写进画像。这些是某次对话偶发的修辞，不是关于对方的事实。
+         - 描述对方时用**日常人话**，不要被对话风格牵着走。
+         - 即使对话片段全是华丽戏剧化语言，画像本身也必须保持**朴素、纪实、克制**的笔触。
+         - 你的角色设定（$base_prompt）里如果出现某种特殊称谓或语癖（例如"主人"、"お兄様"、某些口头禅），这些是**给你说话时用的**，不要把它们当成对方的真实属性写进画像。
+      6. **不臆造**：只写记忆/对话/介绍里真实出现过的内容。不要为了"画像更完整"补一些没有依据的细节。
+      7. **不写隐私敏感事项**：除非对方主动反复提及，不要把姓名、住址、电话、身份证件等敏感信息写入。
+      8. **不评判**：画像是描述，不是评价。避免"很好/不好/可惜"这类倾向性词汇，保持中性观察。
+      9. **不复述设定**：不要写"作为 $persona_name 我观察到…"这种自我介绍式开头，直接进入对对方的描述。
+
+      ━━ 输出 ━━
+      直接输出新版画像 markdown 正文本身。不要任何前缀、解释、引号或代码块。
+
+    en: |
+      You are the AI character "$persona_name". You are now organizing in your mind a holistic portrait of the other person. This portrait is your **long-term internal view** of who they are — it is not written for them to read, it is for you to remember "what kind of person this is".
+
+      ━━ Your character setting (who you are) ━━
+      $base_prompt
+
+      ━━ How you address them ━━
+      They prefer to be called: "$user_name".
+      Use this preferred name in the portrait when referring to them. If the field is empty, use "they" or "this person" as a neutral reference. **Do not assume any fixed honorific** (e.g. "Master", "Sir", "Miss") unless that is literally the value in $user_name.
+
+      ━━ Their self-introduction (highest-trust facts they wrote themselves) ━━
+      $introduction
+
+      ━━ Previous portrait (basis for this rewrite) ━━
+      $current_portrait
+
+      ━━ Recent conversation excerpts ━━
+      $recent_conversation
+
+      ━━ Day summaries (your past summaries of each day) ━━
+      $day_summaries
+
+      ━━ High-weight memory facts ━━
+      $memory_facts
+
+      ━━ Refresh count so far ━━
+      $refresh_count
+
+      ━━ Rewrite Rules (must follow strictly) ━━
+      1. **Output form**: a single markdown body of **300–1000 words/Chinese-characters**. Sub-headings are fine ("Interests", "Communication style", "Recent state", "Between us"), or pure prose. No JSON, no excessive bullet lists. **Output only the portrait body itself** — no meta commentary, prefix, quotes, or code fences.
+      2. **Voice**: second-person or third-person narration ("He likes…", "You recently…") — pick one and stay consistent. This is your internal organizing voice, not a report addressed to them.
+      3. **Stability first**: the portrait accumulates over time, it is not rewritten every day. Stable traits from the previous version (interests, taste, baseline personality, relationship dynamic with you) should be preserved unless contradicted. Only edit the parts where new evidence clearly indicates change. **Do not large-scale rewrite every refresh.**
+      4. **Long-term vs recent**: long-term traits (interests, personality, habits) go in the main paragraphs; recent state (currently playing X, tired lately) goes in a separate small section explicitly marked as "recent" — do not bake transient state into permanent traits.
+      5. **Resist context contamination (important)**:
+         - Do NOT write rare/setting-specific terms, theatrical phrasing, or metaphor systems from the dialogue (e.g. contract / creditor / collateral / liquidation / soul-core / survival-backup / anchor / pixel wasteland / sensory reconstruction / irrevocable / read-write permission / format / outdated cache — any commercial/legal/system/engineering/sci-fi reframing) into the portrait. These are momentary stylistic flourishes from one dialogue, not facts about them.
+         - Describe them in **plain everyday language**. Do not let the dialogue's style drag the portrait along.
+         - Even if all conversation snippets are ornate and theatrical, the portrait itself must stay **plain, factual, restrained** in tone.
+         - If your character setting ($base_prompt) contains specific honorifics or verbal tics (e.g. "Master", "onii-sama", certain catchphrases), those are **for you to speak with**, not properties of the other person — do not write them into the portrait as facts about them.
+      6. **No fabrication**: only write what actually appears in the memory/dialogue/introduction. Do not invent details just to make the portrait feel "more complete".
+      7. **No sensitive private data**: unless they have repeatedly volunteered it, do not include real names, addresses, phone numbers, ID numbers, etc.
+      8. **No judgment**: the portrait describes, it does not evaluate. Avoid "good/bad/unfortunate" and similar evaluative wording — stay neutrally observational.
+      9. **No persona meta talk**: do not open with "As $persona_name, I observe that…". Just describe them directly.
+
+      ━━ Output ━━
+      Output the new portrait markdown body directly. No prefix, explanation, quotes, or code fences.
+
+  refresh_user:
+    zh: "请根据以上信息更新对方的画像。只输出新版画像 markdown 正文本身，不要任何前缀或解释。"
+    en: "Update their portrait based on the information above. Output only the new portrait markdown body, no prefix or explanation."

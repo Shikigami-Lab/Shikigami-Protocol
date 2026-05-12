@@ -258,6 +258,13 @@ def preview_forgetting_for_profile(
             "total_facts": 0,
             "preview_facts": [],
         },
+        "portrait_refresh": {
+            "enabled": False,
+            "would_run": False,
+            "reason": "",
+            "last_updated_at": 0,
+            "refresh_count": 0,
+        },
     }
     sm = getattr(app.state, "session_manager", None)
     if not sm:
@@ -273,6 +280,33 @@ def preview_forgetting_for_profile(
         out["skip"] = True
         out["reason"] = "人格未加载"
         return out
+
+    # portrait_refresh 预览（完全独立于 memory 总开关，先填好，即便后续 skip 也保留）
+    try:
+        from src.config.profile_loader import ProfileLoader
+        _card_for_portrait = ProfileLoader().load(profile_id)
+    except Exception:
+        _card_for_portrait = {}
+    _portrait_cfg = _card_for_portrait.get("user_portrait_config") or {}
+    _portrait_block = _card_for_portrait.get("user_portrait") or {}
+    _portrait_enabled = bool(_portrait_cfg.get("enabled", True))
+    _portrait_auto = bool(_portrait_cfg.get("auto_refresh_in_daily_job", True))
+    _portrait_min_h = float(_portrait_cfg.get("min_hours_between_refresh", 6))
+    _portrait_updated = int(_portrait_block.get("updated_at") or 0)
+    out["portrait_refresh"]["enabled"] = _portrait_enabled
+    out["portrait_refresh"]["last_updated_at"] = _portrait_updated
+    out["portrait_refresh"]["refresh_count"] = int(_portrait_block.get("refresh_count") or 0)
+    if not _portrait_enabled:
+        out["portrait_refresh"]["reason"] = "画像功能未启用"
+    elif not _portrait_auto:
+        out["portrait_refresh"]["reason"] = "已关闭日批自动刷新"
+    elif _portrait_min_h > 0 and _portrait_updated > 0 and \
+            (datetime.now().timestamp() - _portrait_updated) / 3600 < _portrait_min_h:
+        out["portrait_refresh"]["reason"] = f"仍在冷却期内（< {_portrait_min_h:g}h）"
+    else:
+        out["portrait_refresh"]["would_run"] = True
+        out["portrait_refresh"]["reason"] = "将尝试刷新画像"
+
     mgr = _get_manager_for_session(session, app)
     if not mgr:
         out["skip"] = True
@@ -455,8 +489,43 @@ async def run_forgetting_for_profile(profile_id: str, app, yesterday: Optional[s
         logger.info("[daily_memory_job] 手动执行遗忘完成 profile=%s", profile_id)
 
 
+async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool = False) -> None:
+    """日批中调用 user_portrait 刷新（受 user_portrait_config 控制，完全独立于 memory 总开关）。"""
+    sm = getattr(app.state, "session_manager", None)
+    if not sm:
+        return
+    session = None
+    for s in sm.list_sessions():
+        if s.profile_id == profile_id:
+            session = s
+            break
+    if not session:
+        logger.debug("[daily_memory_job] portrait: profile %s 未加载，跳过", profile_id)
+        return
+
+    from src.config.profile_loader import ProfileLoader
+    try:
+        card = ProfileLoader().load(profile_id)
+    except Exception:
+        return
+    cfg = card.get("user_portrait_config") or {}
+    if not cfg.get("enabled", True):
+        return
+    if not force and not cfg.get("auto_refresh_in_daily_job", True):
+        return
+
+    from src.core.user_portrait import trigger_portrait_refresh
+    try:
+        await trigger_portrait_refresh(
+            profile_id, session.storage_root, app,
+            force=force, triggered_by="manual" if force else "daily",
+        )
+    except Exception as e:
+        logger.exception("[daily_memory_job] portrait 刷新失败 profile=%s: %s", profile_id, e)
+
+
 async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
-    """对一个人格跑完整每日任务：先日摘要再遗忘。无对话时仍写安静日记，但跳过遗忘任务。"""
+    """对一个人格跑完整每日任务：先日摘要再遗忘，最后画像刷新。无对话时仍写安静日记，但跳过遗忘任务。"""
     sm = getattr(app.state, "session_manager", None)
     if not sm:
         return
@@ -473,6 +542,9 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
     store = session.conversation_store
     if _has_conversation_on_date(store, yesterday):
         await run_forgetting_for_profile(profile_id, app, yesterday)
+
+    # portrait 完全独立于 memory 总开关，单独检查自己的 enabled / auto_refresh_in_daily_job
+    await run_portrait_refresh_for_profile(profile_id, app)
 
     _save_last_daily_run(session.storage_root, date.today().strftime("%Y-%m-%d"))
 

@@ -3233,6 +3233,20 @@ textarea.form-input {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* iOS Safari 修复：flex 容器在窄屏需要 min-width:0 才能让子元素正确缩小，
+     否则有的 .s-card 内含长 textarea 会撑爆面板、把整面板挤出可视区。 */
+  min-width: 0;
+  max-width: 100%;
+}
+/* 子卡片宽度兜底，防止内部 textarea/inline-style flex 行撑爆 */
+.profile-subtab-panel > .s-card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.profile-subtab-panel .form-input {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* ── Engine override block ── */

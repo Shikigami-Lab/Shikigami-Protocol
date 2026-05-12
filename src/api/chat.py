@@ -269,6 +269,12 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     except Exception as mem_err:
                         logger.warning("[chat] _fire_memory_tasks 失败: %s", mem_err)
 
+                    # ── user_portrait 对话量兜底（完全独立于 memory 总开关）─────────────
+                    try:
+                        _fire_portrait_burst_check(session, request.app)
+                    except Exception as port_err:
+                        logger.warning("[chat] _fire_portrait_burst_check 失败: %s", port_err)
+
                     # Broadcast completed assistant reply（带 sender）
                     await broadcast.push(session.id, {
                         "type": "new_message",
@@ -588,6 +594,52 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
                         retries=2,
                         retry_delay=10.0,
                     ))
+
+
+def _fire_portrait_burst_check(session, app):
+    """user_portrait 对话量兜底刷新：累计 ≥ min_turns_for_burst_refresh 条新对话
+    且距上次刷新 ≥ min_hours_between_refresh 小时时，异步触发一次画像刷新。
+    完全独立于 memory 总开关，只看 user_portrait_config。"""
+    try:
+        from src.config.profile_loader import ProfileLoader
+        card = ProfileLoader().load(session.profile_id)
+    except Exception:
+        return
+    cfg = card.get("user_portrait_config") or {}
+    if not cfg.get("enabled", True):
+        return
+    min_turns = int(cfg.get("min_turns_for_burst_refresh") or 0)
+    if min_turns <= 0:
+        return  # 兜底关闭
+    min_hours = float(cfg.get("min_hours_between_refresh", 6))
+    portrait = card.get("user_portrait") or {}
+    last_ts = float(portrait.get("updated_at") or 0)
+
+    if min_hours > 0 and last_ts > 0:
+        if (time.time() - last_ts) / 3600 < min_hours:
+            return
+
+    try:
+        all_msgs = session.conversation_store.get_all()
+    except Exception:
+        return
+    recent_count = sum(
+        1 for m in all_msgs
+        if (getattr(m, "timestamp", 0) or 0) > last_ts
+        and getattr(m, "role", None) in ("user", "assistant")
+    )
+    if recent_count < min_turns:
+        return
+
+    _profile_id = session.profile_id
+    _storage_root = session.storage_root
+    _app = app
+
+    async def _run():
+        from src.core.user_portrait import trigger_portrait_refresh
+        await trigger_portrait_refresh(_profile_id, _storage_root, _app, triggered_by="burst")
+
+    asyncio.create_task(_fire_task(_run, "portrait_burst_refresh", retries=1, retry_delay=5.0))
 
 
 def _msg_date(msg) -> str:

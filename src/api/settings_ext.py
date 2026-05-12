@@ -978,7 +978,7 @@ async def update_profile(profile_id: str, body: ProfileUpdateBody):
 
     if body.user_persona is not None:
         up = {k: (v or "").strip() for k, v in body.user_persona.items()
-              if k in ("name", "description", "personality", "role_in_story")}
+              if k in ("name", "introduction")}
         if any(up.values()):
             card["user_persona"] = up
         else:
@@ -1954,8 +1954,13 @@ async def get_engines_config(request: Request):
     config = request.app.state.config
     engines = config.engines
     sec = config.secondary_models.get("analysis", {})
+    em_cfg = engines.get("emotion", {})
     return {
-        "emotion_freq":          engines.get("emotion",  {}).get("classification_frequency", 5),
+        "emotion_freq":          em_cfg.get("classification_frequency", 5),
+        "emotion_decay_enabled":         em_cfg.get("decay_enabled", True),
+        "emotion_decay_full_secs":       em_cfg.get("decay_full_secs", 14400),
+        "emotion_decay_skip_if_active":  em_cfg.get("decay_skip_if_active_secs", 300),
+        "emotion_neutral":               em_cfg.get("neutral_emotion", "calm"),
         "affinity_freq":         engines.get("affinity", {}).get("llm_adjust_frequency", 5),
         "affinity_delta_clamp":  engines.get("affinity", {}).get("delta_clamp", 15.0),
         "energy_interval":       engines.get("energy",   {}).get("refresh_interval", 300),
@@ -1970,7 +1975,11 @@ async def get_engines_config(request: Request):
 
 
 class EnginesConfigBody(BaseModel):
-    emotion_freq:         int   = 5
+    emotion_freq:                 int   = 5
+    emotion_decay_enabled:        Optional[bool] = None
+    emotion_decay_full_secs:      Optional[int]  = None
+    emotion_decay_skip_if_active: Optional[int]  = None
+    emotion_neutral:              Optional[str]  = None
     affinity_freq:        int   = 5
     affinity_delta_clamp: float = 15.0
     energy_interval:      int   = 300
@@ -1990,6 +1999,14 @@ async def save_engines_config(request: Request, body: EnginesConfigBody):
     en = data["engines"].setdefault("energy",   {})
 
     em["classification_frequency"] = body.emotion_freq
+    if body.emotion_decay_enabled is not None:
+        em["decay_enabled"] = bool(body.emotion_decay_enabled)
+    if body.emotion_decay_full_secs is not None:
+        em["decay_full_secs"] = max(0, int(body.emotion_decay_full_secs))
+    if body.emotion_decay_skip_if_active is not None:
+        em["decay_skip_if_active_secs"] = max(0, int(body.emotion_decay_skip_if_active))
+    if body.emotion_neutral:
+        em["neutral_emotion"] = str(body.emotion_neutral)
     af["llm_adjust_frequency"]     = body.affinity_freq
     af["delta_clamp"]              = body.affinity_delta_clamp
     en["refresh_interval"]         = body.energy_interval
@@ -2005,33 +2022,43 @@ async def save_engines_config(request: Request, body: EnginesConfigBody):
     return {"ok": True}
 
 
+def _migrate_global_user_persona_in_memory(raw: dict) -> dict:
+    """读端兼容：若全局 user_persona 仍是老 schema (description/personality)，临时合成 introduction。
+    仅用于读，不写回磁盘——save 端使用新 schema 后会自然替换。"""
+    if raw.get("introduction"):
+        return raw
+    desc = (raw.get("description") or "").strip()
+    pers = (raw.get("personality") or "").strip()
+    if not desc and not pers:
+        return raw
+    parts = [s for s in [desc, pers] if s]
+    return {**raw, "introduction": "\n\n".join(parts)}
+
+
 @router.get("/settings/user_persona")
 async def get_user_persona(request: Request):
-    """Return global user persona config."""
+    """Return global user persona config (new schema: name + introduction)."""
     config = request.app.state.config
-    p = config.user_persona or {}
+    p = _migrate_global_user_persona_in_memory(config.user_persona or {})
     return {
-        "name":        p.get("name", ""),
-        "description": p.get("description", ""),
-        "personality": p.get("personality", ""),
+        "name":         p.get("name", ""),
+        "introduction": p.get("introduction", ""),
     }
 
 
 class UserPersonaBody(BaseModel):
-    name:        str = ""
-    description: str = ""
-    personality: str = ""
+    name:         str = ""
+    introduction: str = ""
 
 
 @router.post("/settings/user_persona")
 async def save_user_persona(request: Request, body: UserPersonaBody):
-    """Persist global user persona to app.yaml and hot-reload."""
+    """Persist global user persona to app.yaml and hot-reload (new schema)."""
     config = request.app.state.config
     y, data = _load_yaml()
     data["user_persona"] = {
-        "name":        body.name.strip(),
-        "description": body.description.strip(),
-        "personality": body.personality.strip(),
+        "name":         body.name.strip(),
+        "introduction": body.introduction.strip(),
     }
     _save_yaml(y, data)
     config.user_persona = dict(data["user_persona"])
@@ -3259,3 +3286,144 @@ async def trigger_persona_evolution_manual(profile_id: str, request: Request):
     if entry is None:
         return {"ok": False, "reason": "evolution skipped (no facts, anchor init, or disabled)"}
     return {"ok": True, "entry": entry}
+
+
+# ── User Portrait (AI-maintained user image) ─────────────────────────────────
+
+
+def _portrait_paths(profile_id: str) -> tuple[str, str]:
+    """Return (profile_json_path, storage_root)."""
+    return (
+        os.path.join(_PROFILES_DIR, f"{profile_id}.json"),
+        os.path.join(_PROFILES_DIR, profile_id),
+    )
+
+
+@router.get("/profiles/{profile_id}/user_portrait")
+async def get_user_portrait(profile_id: str):
+    """读取画像当前状态 + 配置 + 元数据。"""
+    path, storage_root = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+    portrait = card.get("user_portrait") or {}
+    cfg = card.get("user_portrait_config") or {
+        "enabled": True,
+        "auto_refresh_in_daily_job": True,
+        "min_turns_for_burst_refresh": 100,
+        "min_hours_between_refresh": 6,
+        "use_day_summary_as_input": True,
+        "use_facts_as_input": True,
+        "max_input_conv_turns": 60,
+    }
+    from src.core.user_portrait import get_changelog
+    changelog_count = len(get_changelog(storage_root))
+    return {
+        "content": portrait.get("content", ""),
+        "updated_at": int(portrait.get("updated_at") or 0),
+        "refresh_count": int(portrait.get("refresh_count") or 0),
+        "config": cfg,
+        "changelog_count": changelog_count,
+    }
+
+
+class UserPortraitEditBody(BaseModel):
+    content: str = ""
+
+
+@router.post("/profiles/{profile_id}/user_portrait/edit")
+async def edit_user_portrait(profile_id: str, body: UserPortraitEditBody):
+    """用户手动编辑画像（不走 LLM）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import manual_edit
+    ok = manual_edit(profile_id, body.content)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Edit failed")
+    return {"ok": True}
+
+
+@router.post("/profiles/{profile_id}/user_portrait/reset")
+async def reset_user_portrait(profile_id: str):
+    """清空 content（下次刷新从 introduction 重新长出）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import reset_portrait
+    ok = reset_portrait(profile_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Reset failed")
+    return {"ok": True}
+
+
+@router.post("/profiles/{profile_id}/user_portrait/refresh")
+async def refresh_user_portrait_manual(profile_id: str, request: Request):
+    """立即触发一次 LLM 画像刷新（force=True，跳过冷却与 signature 短路）。"""
+    path, storage_root = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import trigger_portrait_refresh
+    entry = await trigger_portrait_refresh(
+        profile_id, storage_root, request.app, force=True, triggered_by="manual",
+    )
+    if entry is None:
+        return {"ok": False, "reason": "refresh skipped (disabled / no input / LLM error)"}
+    return {"ok": True, "entry": entry}
+
+
+@router.get("/profiles/{profile_id}/user_portrait/changelog")
+async def get_user_portrait_changelog(profile_id: str):
+    """读取画像变更历史。"""
+    _, storage_root = _portrait_paths(profile_id)
+    from src.core.user_portrait import get_changelog
+    return {"entries": get_changelog(storage_root)}
+
+
+class UserPortraitRollbackBody(BaseModel):
+    version: int
+
+
+@router.post("/profiles/{profile_id}/user_portrait/rollback")
+async def rollback_user_portrait(profile_id: str, body: UserPortraitRollbackBody):
+    """回滚画像到指定 version 的 content_before。"""
+    _, storage_root = _portrait_paths(profile_id)
+    from src.core.user_portrait import rollback as portrait_rollback
+    ok = portrait_rollback(profile_id, storage_root, body.version)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Version {body.version} not found in changelog")
+    return {"ok": True}
+
+
+class UserPortraitConfigBody(BaseModel):
+    enabled: Optional[bool] = None
+    auto_refresh_in_daily_job: Optional[bool] = None
+    min_turns_for_burst_refresh: Optional[int] = None
+    min_hours_between_refresh: Optional[int] = None
+    use_day_summary_as_input: Optional[bool] = None
+    use_facts_as_input: Optional[bool] = None
+    max_input_conv_turns: Optional[int] = None
+
+
+@router.post("/profiles/{profile_id}/user_portrait/config")
+async def update_user_portrait_config(profile_id: str, body: UserPortraitConfigBody):
+    """更新 user_portrait_config（partial update）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+    cfg = card.setdefault("user_portrait_config", {})
+    updates = body.model_dump(exclude_none=True)
+    # 数值字段的下限保护
+    if "min_turns_for_burst_refresh" in updates:
+        updates["min_turns_for_burst_refresh"] = max(0, int(updates["min_turns_for_burst_refresh"]))
+    if "min_hours_between_refresh" in updates:
+        updates["min_hours_between_refresh"] = max(0, int(updates["min_hours_between_refresh"]))
+    if "max_input_conv_turns" in updates:
+        updates["max_input_conv_turns"] = max(10, int(updates["max_input_conv_turns"]))
+    cfg.update(updates)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(card, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "config": cfg}
