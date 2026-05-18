@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20260518h" />
-  <link rel="stylesheet" href="css/settings.css?v=20260518h" />
+  <link rel="stylesheet" href="css/styles.css?v=20260518i" />
+  <link rel="stylesheet" href="css/settings.css?v=20260518i" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260518h"></script>
+  <script src="js/i18n.js?v=20260518i"></script>
 </head>
 <body>
 
@@ -4607,17 +4607,20 @@
                   <span class="mem-changelog-caret">{{ memChangelogExpanded === run.run_id ? '▲' : '▼' }}</span>
                 </div>
                 <div v-show="memChangelogExpanded === run.run_id" class="mem-changelog-detail">
-                  <template v-if="run.summary.consolidation.added_preview && run.summary.consolidation.added_preview.length">
+                  <template v-if="run.summary.consolidation.added_contents && run.summary.consolidation.added_contents.length">
                     <div class="mem-changelog-sub">{{ t('memChangelogAdded') }}</div>
-                    <div v-for="(s, i) in run.summary.consolidation.added_preview" :key="'a'+i" class="mem-changelog-fact added">+ {{ s }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.added_contents" :key="'a'+i" class="mem-changelog-fact added">+ {{ s }}</div>
+                  </template>
+                  <template v-if="run.summary.consolidation.vectors_removed_contents && run.summary.consolidation.vectors_removed_contents.length">
+                    <div class="mem-changelog-sub">{{ t('memChangelogMerged') }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.vectors_removed_contents" :key="'v'+i" class="mem-changelog-fact removed">− {{ s }}</div>
                   </template>
                   <template v-if="run.summary.decay_floored && run.summary.decay_floored.length">
                     <div class="mem-changelog-sub">{{ t('memChangelogFloored') }}</div>
                     <div v-for="(s, i) in run.summary.decay_floored" :key="'f'+i" class="mem-changelog-fact">↓ {{ s }}</div>
                   </template>
                   <div class="mem-changelog-stats">
-                    {{ t('memChangelogStatVecRemoved') }} {{ run.summary.consolidation.vectors_removed_count }}
-                    · {{ t('memChangelogStatOrphan') }} {{ run.summary.orphan_vectors }}
+                    {{ t('memChangelogStatOrphan') }} {{ run.summary.orphan_vectors }}
                   </div>
                   <button v-if="!run.rolled_back" class="s-btn" style="font-size:11px;margin-top:6px;"
                           :disabled="memoryRollbackLoading"
@@ -5252,9 +5255,9 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20260518h"></script>
-<script src="js/components.js?v=20260518h"></script>
-<script src="js/settings.js?v=20260518h"></script>
-<script src="js/app.js?v=20260518h"></script>
+<script src="js/api-paths.js?v=20260518i"></script>
+<script src="js/components.js?v=20260518i"></script>
+<script src="js/settings.js?v=20260518i"></script>
+<script src="js/app.js?v=20260518i"></script>
 </body>
 </html>

@@ -725,11 +725,13 @@ class MemoryManager:
             "[MemoryManager] 合并完成 profile=%s 旧向量删除 %d 新事实写入 %d（事实库未删，永久保留）",
             self._profile_id, len(old_ids), len(added),
         )
-        # detail 供 memory_changelog 记录回滚数据：added=新摘要 fact id；vectors_removed=被移除向量的旧事实 id
+        # detail 供 memory_changelog 记录：added=新摘要 fact id；vectors_removed=被移除向量的旧事实 id；
+        # *_contents 为对应全文（日志展示用，不截断）
         detail = {
             "added": [f.id for f in added],
-            "added_preview": [f.content[:60] + ("…" if len(f.content) > 60 else "") for f in added],
+            "added_contents": [f.content for f in added],
             "vectors_removed": list(old_ids),
+            "vectors_removed_contents": [f.content for f in batch],
             "count": len(added),
         }
         return True, detail

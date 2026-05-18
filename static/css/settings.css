@@ -3691,6 +3691,7 @@ textarea.form-input {
   font-size: var(--fs-xs);
 }
 .mem-changelog-sub { color: var(--text-secondary); margin-top: var(--space-1); }
-.mem-changelog-fact { padding: 2px 0 2px var(--space-2); color: var(--text-primary); }
+.mem-changelog-fact { padding: 2px 0 2px var(--space-2); color: var(--text-primary); line-height: 1.5; }
 .mem-changelog-fact.added { color: var(--green); }
+.mem-changelog-fact.removed { color: var(--text-tertiary); }
 .mem-changelog-stats { color: var(--text-tertiary); margin-top: var(--space-2); }
