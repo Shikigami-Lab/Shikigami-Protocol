@@ -1,3 +1,51 @@
+/* ═══════════════ 设计 Token（与主题无关的结构性变量）═══════════════
+   颜色 token 仍按主题在下方各 [data-theme] 块定义；此处只放与主题无关的
+   间距/圆角/字号/阴影/过渡/字体，外加两个「派生」色 token：
+   --text-tertiary 用 color-mix 从各主题的 secondary+bg 自动算出，
+   --warning* 为全局警告色（取代散落在 HTML 里的硬编码琥珀色）。 */
+:root {
+  /* 间距（4px 基准） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  /* 圆角 */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+  /* 字号（取自实际高频值，绝大多数用法零位移） */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  /* 阴影 */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 6px var(--accent-dim);
+  /* 过渡 */
+  --transition-fast: 0.12s;
+  --transition-base: 0.15s;
+  --transition-mid: 0.2s;
+  --transition-slow: 0.3s;
+  /* 字体 */
+  --font-ui: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-serif: KaiTi, "STKaiti", "Kaiti SC", "楷体", serif;
+  /* 派生色：第三级文字（比 secondary 更弱）+ 全局警告色 */
+  --text-tertiary: color-mix(in srgb, var(--text-secondary) 62%, var(--bg-app));
+  --warning: #e8a040;
+  --warning-bg: rgba(232, 160, 64, 0.10);
+  --warning-border: rgba(232, 160, 64, 0.28);
+}
+
 /* ── 深紫（星轨）— 左上角鲜明紫云，大幅渐变至深空黑 ── */
 :root, [data-theme="purple"] {
   --bg-app: #0d0d1a;
@@ -215,10 +263,10 @@
 html, body {
   height: 100%;
   overflow: hidden;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg-app);   /* fallback solid color */
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--fs-base);
   /* Prevent subpixel blur at non-integer window scale factors in Electron.
      -webkit-font-smoothing is inherited so this fixes all descendants,
      including elements inside backdrop-filter / transform compositing layers. */
@@ -281,12 +329,12 @@ html, body {
 .app-logo {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-base);
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -299,15 +347,15 @@ html, body {
 .app-logo .app-logo-fallback {
   display: none;
   color: var(--text-primary);
-  font-family: KaiTi, "STKaiti", "Kaiti SC", "楷体", serif;
-  font-size: 15px;
+  font-family: var(--font-serif);
+  font-size: var(--fs-base);
   font-weight: normal;
   letter-spacing: 0.02em;
 }
 .app-logo .app-logo-fallback.use-fallback { display: inline; }
 
 .app-name {
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.5px;
@@ -316,10 +364,10 @@ html, body {
 .sidebar-out-of-sync-hint {
   padding: 8px 12px;
   margin: 8px 10px 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   background: var(--accent-dim);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--accent);
   display: flex;
   align-items: center;
@@ -327,9 +375,9 @@ html, body {
 }
 .sidebar-sync-inline-btn {
   padding: 2px 6px;
-  font-size: 14px;
+  font-size: var(--fs-base);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
   cursor: pointer;
@@ -345,7 +393,7 @@ html, body {
 }
 .sidebar-section-label {
   padding: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -356,10 +404,10 @@ html, body {
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: var(--fs-lg);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -388,9 +436,9 @@ html, body {
   width: 100%;
   padding: 8px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: center;
   opacity: 0.6;
   cursor: default;
@@ -402,9 +450,9 @@ html, body {
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: background 0.18s, transform 0.18s;
+  transition: background var(--transition-mid), transform var(--transition-mid);
   position: relative;
   user-select: none;
 }
@@ -416,7 +464,7 @@ html, body {
 .session-drag-handle {
   color: var(--text-tertiary, #888);
   cursor: grab;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   user-select: none;
   flex-shrink: 0;
 }
@@ -426,7 +474,7 @@ html, body {
 .session-move-btns { display: none; flex-shrink: 0; gap: 0; }
 .session-move-btn {
   padding: 4px 6px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   border: none;
   background: transparent;
@@ -454,14 +502,14 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: #fff;
   flex-shrink: 0;
 }
 
 .session-name {
-  font-size: 13.5px;
+  font-size: var(--fs-base);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -491,11 +539,11 @@ html, body {
 .group-list .session-item { min-height: 40px; }
 .group-avatar {
   background: linear-gradient(135deg, #64748b, #94a3b8);
-  font-size: 16px;
+  font-size: var(--fs-lg);
 }
 .group-user-avatar {
   background: linear-gradient(135deg, #475569, #64748b);
-  font-size: 14px;
+  font-size: var(--fs-base);
 }
 .group-item { position: relative; }
 .group-pin-btn {
@@ -507,7 +555,7 @@ html, body {
   border: none;
   background: transparent;
   color: var(--text-tertiary, rgba(255,255,255,0.35));
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
   opacity: 0.6;
   line-height: 1;
@@ -519,12 +567,12 @@ html, body {
   padding: 8px 12px;
   width: 100%;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--transition-base), color var(--transition-base);
 }
 .sidebar-create-group-btn:hover {
   background: var(--accent-dim);
@@ -534,10 +582,10 @@ html, body {
   margin-left: 10px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 .header-back-single-btn:hover {
@@ -554,7 +602,7 @@ html, body {
   padding: 8px 14px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }
 .group-participants-label { flex-shrink: 0; }
@@ -567,14 +615,14 @@ html, body {
   padding: 6px 14px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }
-.group-toolbar-label { flex-shrink: 0; font-size: 12px; }
-.group-toolbar-select { min-width: 100px; font-size: 12px; padding: 4px 8px; }
-.group-toolbar-search { flex: 1; min-width: 120px; max-width: 200px; font-size: 12px; padding: 4px 8px; }
-.group-toolbar-btn { font-size: 12px; padding: 4px 10px; }
-.group-search-summary { font-size: 12px; color: var(--accent); }
+.group-toolbar-label { flex-shrink: 0; font-size: var(--fs-sm); }
+.group-toolbar-select { min-width: 100px; font-size: var(--fs-sm); padding: 4px 8px; }
+.group-toolbar-search { flex: 1; min-width: 120px; max-width: 200px; font-size: var(--fs-sm); padding: 4px 8px; }
+.group-toolbar-btn { font-size: var(--fs-sm); padding: 4px 10px; }
+.group-search-summary { font-size: var(--fs-sm); color: var(--accent); }
 .group-record-edit-row {
   display: flex;
   align-items: center;
@@ -588,7 +636,7 @@ html, body {
 .group-record-edit-list-wrap .mem-list-total {
   display: block;
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
 .group-record-edit-list {
@@ -599,10 +647,10 @@ html, body {
   margin-top: 6px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 .stream-abort-btn:hover {
@@ -613,10 +661,10 @@ html, body {
   margin-left: auto;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 .group-settings-btn:hover {
@@ -632,7 +680,7 @@ html, body {
   z-index: 999;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s, visibility 0.2s;
+  transition: opacity var(--transition-mid), visibility var(--transition-mid);
 }
 .create-group-overlay.open {
   opacity: 1;
@@ -646,12 +694,12 @@ html, body {
   width: 90%;
   max-width: 400px;
   background: var(--bg-panel);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   box-shadow: 0 12px 40px rgba(0,0,0,0.4);
   z-index: 1000;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s, visibility 0.2s, transform 0.2s;
+  transition: opacity var(--transition-mid), visibility var(--transition-mid), transform var(--transition-mid);
   display: flex;
   flex-direction: column;
   max-height: 85vh;
@@ -675,7 +723,7 @@ html, body {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 18px;
+  font-size: var(--fs-xl);
 }
 .create-group-close:hover { color: var(--text-primary); }
 .create-group-body {
@@ -685,7 +733,7 @@ html, body {
 }
 .create-group-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
@@ -693,10 +741,10 @@ html, body {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--bg-app);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--fs-base);
   margin-bottom: 16px;
   box-sizing: border-box;
 }
@@ -712,7 +760,7 @@ html, body {
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-base);
 }
 .create-group-participant-item input { flex-shrink: 0; }
 .create-group-participant-row {
@@ -730,12 +778,12 @@ html, body {
 }
 .group-participant-order-btns .session-move-btn {
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 .create-group-participant-row .group-participant-mute {
   flex: 0 0 auto;
   margin-right: 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -747,7 +795,7 @@ html, body {
   gap: 8px;
   margin-top: 6px;
 }
-.create-group-actions-row .s-btn { font-size: 12px; padding: 6px 10px; }
+.create-group-actions-row .s-btn { font-size: var(--fs-sm); padding: 6px 10px; }
 .create-group-modal-settings .create-group-body { max-height: 70vh; overflow-y: auto; }
 .create-group-footer {
   display: flex;
@@ -833,12 +881,12 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
 .current-name {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -852,12 +900,12 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 6px;
-  transition: background 0.15s;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-base);
 }
 
 .tts-toggle:hover { background: var(--accent-dim); }
@@ -873,11 +921,11 @@ html, body {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-base);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
   line-height: 1;
 }
 .conv-mode-btn:hover { background: var(--accent-dim); }
@@ -922,11 +970,11 @@ html, body {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-base);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--transition-base), color var(--transition-base);
   line-height: 1;
 }
 
@@ -992,7 +1040,7 @@ html, body {
   background: var(--accent);
   margin-left: 2px;
   vertical-align: text-bottom;
-  border-radius: 1px;
+  border-radius: var(--radius-xs);
   animation: cursorBreathe 1.1s ease-in-out infinite;
   box-shadow: 0 0 6px var(--accent);
 }
@@ -1016,9 +1064,9 @@ html, body {
 .toast-item {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 9px 18px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text-primary);
   box-shadow: 0 4px 20px rgba(0,0,0,0.45);
   pointer-events: auto;
@@ -1037,7 +1085,7 @@ html, body {
 /* Status bar */
 .status-bar {
   padding: 3px 20px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
@@ -1072,8 +1120,8 @@ html, body {
   padding: 6px 12px;
   background: var(--accent-dim);
   border: 1px solid var(--accent);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-lg);
+  font-size: var(--fs-sm);
   color: var(--text-primary);
 }
 
@@ -1082,7 +1130,7 @@ html, body {
 }
 
 .pending-image-bar .pending-image-remove {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 4px 10px;
 }
 
@@ -1091,14 +1139,14 @@ html, body {
   resize: none;
   background: var(--bg-app);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 10px 14px;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-family: inherit;
   line-height: 1.5;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color var(--transition-mid);
   max-height: 140px;
   overflow-y: auto;
 }
@@ -1120,11 +1168,11 @@ html, body {
   background: var(--accent);
   color: #fff;
   border: none;
-  border-radius: 12px;
-  font-size: 14px;
+  border-radius: var(--radius-xl);
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+  transition: background var(--transition-base), transform var(--transition-base), box-shadow var(--transition-base);
   white-space: nowrap;
   flex-shrink: 0;
   height: 42px;
@@ -1148,15 +1196,15 @@ html, body {
 .bubble code {
   background: rgba(255, 255, 255, 0.08);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: 'Consolas', 'Cascadia Code', monospace;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .bubble pre {
   background: rgba(0, 0, 0, 0.35);
   padding: 12px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow-x: auto;
   margin: 8px 0;
   border: 1px solid var(--border);
@@ -1165,7 +1213,7 @@ html, body {
 .bubble pre code {
   background: none;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .bubble ul, .bubble ol {
@@ -1195,23 +1243,23 @@ html, body {
 }
 
 .empty-icon { font-size: 40px; }
-.empty-hint { font-size: 13px; margin-bottom: 16px; }
+.empty-hint { font-size: var(--fs-md); margin-bottom: 16px; }
 
 .load-more-banner {
   text-align: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   padding: 6px 0 2px;
   cursor: pointer;
   opacity: 0.6;
-  transition: opacity 0.15s;
+  transition: opacity var(--transition-base);
   user-select: none;
 }
 .load-more-banner:hover { opacity: 1; }
 
 .system-notice-bubble {
   text-align: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   padding: 4px 12px;
   opacity: 0.55;
@@ -1232,7 +1280,7 @@ html, body {
 
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-xs); }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a6a; }
 
 /* ═══════════════════════════ MOBILE RESPONSIVE ═══════════════════════════ */
@@ -1266,7 +1314,7 @@ html, body {
   height: 2px;
   width: 22px;
   background: var(--text-primary);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 /* Sidebar backdrop — hidden on desktop */
@@ -1282,7 +1330,7 @@ html, body {
 /* 桌面/iPad：侧栏可收起，带宽度+淡入淡出动画（开、关都过渡） */
 @media (min-width: 769px) {
   #app .sidebar {
-    transition: width 0.28s ease, min-width 0.28s ease, opacity 0.28s ease;
+    transition: width var(--transition-slow) ease, min-width var(--transition-slow) ease, opacity var(--transition-slow) ease;
   }
   #app.sidebar-closed .sidebar,
   #app[data-sidebar-closed="true"] .sidebar {
@@ -1293,7 +1341,7 @@ html, body {
     border-right: none;
     padding: 0 !important;
     pointer-events: none !important;
-    transition: width 0.28s ease, min-width 0.28s ease, opacity 0.28s ease;
+    transition: width var(--transition-slow) ease, min-width var(--transition-slow) ease, opacity var(--transition-slow) ease;
   }
 }
 
@@ -1311,7 +1359,7 @@ html, body {
     z-index: 200;
     width: 260px;
     transform: translateX(-100%);
-    transition: transform 0.25s ease;
+    transition: transform var(--transition-slow) ease;
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
     /* Prevent hidden sidebar from capturing touches */
     pointer-events: none;
@@ -1371,13 +1419,13 @@ html, body {
   }
 
   .input-area textarea {
-    font-size: 16px; /* prevents iOS auto-zoom on focus */
+    font-size: var(--fs-lg); /* prevents iOS auto-zoom on focus */
     max-height: 90px;
   }
 
   .send-btn {
     padding: 10px 14px;
-    font-size: 14px;
+    font-size: var(--fs-base);
   }
 }
 
@@ -1399,7 +1447,7 @@ html, body {
   background: var(--accent-dim);
   border: 1px solid var(--accent);
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -1412,7 +1460,7 @@ html, body {
 
 /* 时间戳 */
 .msg-time {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   padding: 0 4px;
   line-height: 1;
@@ -1426,7 +1474,7 @@ html, body {
 
 /* 发言者标识（群聊/单聊均带 sender 时显示） */
 .msg-sender {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   padding: 0 4px;
   line-height: 1;
@@ -1441,13 +1489,13 @@ html, body {
   bottom: 5px;
   right: 7px;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--transition-base);
   background: none;
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
   padding: 3px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   line-height: 0;
   display: flex;
   align-items: center;
@@ -1485,7 +1533,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: var(--fs-xl);
   color: #fff;
   font-weight: 700;
 }
@@ -1533,7 +1581,7 @@ html, body {
 
 /* ── 工具栏按钮悬停抬起 ── */
 .gear-btn, .screenshot-btn {
-  transition: background 0.15s, color 0.15s, transform 0.15s;
+  transition: background var(--transition-base), color var(--transition-base), transform var(--transition-base);
   position: relative;
 }
 .gear-btn:hover, .screenshot-btn:hover {
@@ -1581,7 +1629,7 @@ html, body {
   .session-item,
   .gear-btn,
   .screenshot-btn {
-    transition: background 0.1s, color 0.1s;
+    transition: background var(--transition-fast), color var(--transition-fast);
     transform: none !important;
   }
 }
