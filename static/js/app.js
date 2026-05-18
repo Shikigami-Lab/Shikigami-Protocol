@@ -88,6 +88,11 @@ function uiWarn(prefix, msg, data) {
 
 const App = {
   mixins: [SettingsMixin],
+  // 把 t() 注入给全局组件（components.js）。子组件 inject('gt') 即可调用；
+  // 因 t() 内部读 this.locale（响应式），子组件渲染时建立依赖，切语言会重渲染。
+  provide() {
+    return { gt: this.t.bind(this) };
+  },
   data() {
     return {
       // Chat state

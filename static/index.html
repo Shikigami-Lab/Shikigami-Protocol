@@ -2801,29 +2801,17 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('reflection') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.reflection_enabled === null }]" @click="profileEnginesForm.reflection_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.reflection_enabled === true }]" @click="profileEnginesForm.reflection_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.reflection_enabled === false }]" @click="profileEnginesForm.reflection_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.reflection_enabled"></tri-toggle>
                     <div class="engine-override-label" style="margin-top:4px;">{{ t('lblAseEngine') }}</div>
                     <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('ase') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === null }]" @click="profileEnginesForm.ase_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === true }]" @click="profileEnginesForm.ase_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === false }]" @click="profileEnginesForm.ase_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.ase_enabled"></tri-toggle>
                     <div class="engine-override-label" style="margin-top:4px;">{{ t('secTopicDiscovery') }}</div>
                     <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('topic_discovery') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.topic_discovery_enabled === null }]" @click="profileEnginesForm.topic_discovery_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.topic_discovery_enabled === true }]" @click="profileEnginesForm.topic_discovery_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.topic_discovery_enabled === false }]" @click="profileEnginesForm.topic_discovery_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.topic_discovery_enabled"></tri-toggle>
                   </div>
 
                   <template v-if="reflectionFormProfileId">
@@ -3133,11 +3121,7 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('emotion') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.emotion_enabled === null }]" @click="profileEnginesForm.emotion_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.emotion_enabled === true }]" @click="profileEnginesForm.emotion_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.emotion_enabled === false }]" @click="profileEnginesForm.emotion_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.emotion_enabled"></tri-toggle>
                     <div v-if="profileEnginesForm.emotion_enabled !== false" class="engine-freq-row" style="margin-bottom:0;">
                       <span class="engine-freq-label">{{ t('lblFreqEveryN') }}</span>
                       <input type="number" class="seg-num-input" min="1" max="100" v-model="profileEnginesForm.emotion_freq" style="width:52px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.emotion_freq) ?? 5" />
@@ -3154,11 +3138,7 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('affinity') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.affinity_enabled === null }]" @click="profileEnginesForm.affinity_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.affinity_enabled === true }]" @click="profileEnginesForm.affinity_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.affinity_enabled === false }]" @click="profileEnginesForm.affinity_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.affinity_enabled"></tri-toggle>
                     <div v-if="profileEnginesForm.affinity_enabled !== false" class="engine-freq-row" style="margin-bottom:0;">
                       <span class="engine-freq-label">{{ t('lblFreqEveryN') }}</span>
                       <input type="number" class="seg-num-input" min="1" max="100" v-model="profileEnginesForm.affinity_freq" style="width:52px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.affinity_freq) ?? 5" />
@@ -3177,11 +3157,7 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('energy') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.energy_enabled === null }]" @click="profileEnginesForm.energy_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.energy_enabled === true }]" @click="profileEnginesForm.energy_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.energy_enabled === false }]" @click="profileEnginesForm.energy_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.energy_enabled"></tri-toggle>
                     <div v-if="profileEnginesForm.energy_enabled !== false" class="engine-freq-row" style="margin-bottom:0;">
                       <input type="number" class="seg-num-input" min="60" max="3600" v-model="profileEnginesForm.energy_interval" style="width:70px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.energy_interval) ?? 300" />
                       <span class="engine-freq-unit">{{ t('lblEnergyIntervalUnit') }}</span>
@@ -5343,8 +5319,8 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/components.js?v=20260518f"></script>
+<script src="js/components.js?v=20260518g"></script>
 <script src="js/settings.js?v=20260518e"></script>
-<script src="js/app.js?v=20260518d"></script>
+<script src="js/app.js?v=20260518g"></script>
 </body>
 </html>

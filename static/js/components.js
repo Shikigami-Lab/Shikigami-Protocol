@@ -68,4 +68,22 @@ window.SK_COMPONENTS = {
       </div>`,
   },
 
+  /* 三态开关：人格级覆盖的「继承全局 / 强制开 / 强制关」分段按钮。
+       <tri-toggle v-model="profileEnginesForm.xxx_enabled"></tri-toggle>
+     v-model 取值 null（继承）/ true / false。标签经 inject 的 gt() 国际化。 */
+  'tri-toggle': {
+    inject: ['gt'],
+    props: { modelValue: { default: null } },
+    emits: ['update:modelValue'],
+    template: `
+      <div class="engine-tri-toggle">
+        <button type="button" :class="['tri-btn',{active: modelValue===null}]"
+                @click="$emit('update:modelValue', null)">{{ gt('optInherit') }}</button>
+        <button type="button" :class="['tri-btn',{active: modelValue===true}]"
+                @click="$emit('update:modelValue', true)">{{ gt('optOn') }}</button>
+        <button type="button" :class="['tri-btn',{active: modelValue===false}]"
+                @click="$emit('update:modelValue', false)">{{ gt('optOff') }}</button>
+      </div>`,
+  },
+
 };
