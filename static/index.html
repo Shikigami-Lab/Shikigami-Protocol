@@ -1452,13 +1452,7 @@
         </div>
 
         <!-- Reflection model (collapsible) — 自省模型（从「自省」页迁入） -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showReflectionModelSection = !showReflectionModelSection">
-            {{ t('secReflectionModel') }}
-            <span>{{ showReflectionModelSection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showReflectionModelSection" class="section-collapsible-body" :class="{ disabled: !reflectionForm.reflection_enabled }">
+        <collapsible-section :title="t('secReflectionModel')" :body-class="{ disabled: !reflectionForm.reflection_enabled }">
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintReflectionLlmCollapsibleBody') }}</p>
             <div class="param-row">
               <span class="param-label">{{ t('lblEnableDedicatedModel') }}</span>
@@ -1537,17 +1531,10 @@
                 v-model.number="reflectionForm.reflection_max_tokens" :disabled="!reflectionForm.reflection_enabled || !reflectionForm.reflection_max_tokens_enabled" style="width:80px;" />
               <span class="param-val" style="font-size:11px;color:var(--text-secondary);">{{ reflectionForm.reflection_max_tokens_enabled ? '' : t('lblInheritParen') }}</span>
             </div>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- VLM model (collapsible) — 图像识别 -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showVlmModelSection = !showVlmModelSection">
-            {{ t('secVlm') }}
-            <span>{{ showVlmModelSection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showVlmModelSection" class="section-collapsible-body">
+        <collapsible-section :title="t('secVlm')">
             <div class="param-row">
               <span class="param-label">{{ t('lblEnableVlm') }}</span>
               <label class="toggle-switch">
@@ -1602,17 +1589,10 @@
             </div>
             <div class="hint-block" style="margin-top:10px;font-size:11px;" v-html="t('hintVlmScreenSource')"></div>
 
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- 主动话题（collapsible）— ASE 沉默后主动开口时从多来源选定话题 -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showTopicDiscoverySection = !showTopicDiscoverySection">
-            {{ t('secTopicDiscovery') }}
-            <span>{{ showTopicDiscoverySection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showTopicDiscoverySection" class="section-collapsible-body">
+        <collapsible-section :title="t('secTopicDiscovery')">
             <div class="param-row">
               <span class="param-label" :title="t('titleTopicDiscovery')">{{ t('lblTopicDiscoveryEnabled') }}</span>
               <label class="toggle-switch">
@@ -1696,8 +1676,7 @@
               </div>
             </template>
             <div class="hint-block" style="margin-top:10px;font-size:11px;">{{ t('hintTopicDiscovery') }}</div>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- Memory extraction model (collapsible) — per-profile -->
         <div class="section-collapsible">
@@ -5477,7 +5456,8 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/settings.js?v=20260518c"></script>
-<script src="js/app.js?v=20260518c"></script>
+<script src="js/components.js?v=20260518d"></script>
+<script src="js/settings.js?v=20260518d"></script>
+<script src="js/app.js?v=20260518d"></script>
 </body>
 </html>

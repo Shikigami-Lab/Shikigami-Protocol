@@ -2900,4 +2900,6 @@ const App = {
 };
 
 const vueApp = Vue.createApp(App);
+// 注册全局组件（定义见 components.js）
+Object.entries(window.SK_COMPONENTS || {}).forEach(([name, def]) => vueApp.component(name, def));
 vueApp.mount('#app');
