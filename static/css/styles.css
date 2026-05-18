@@ -39,8 +39,11 @@
   /* 字体 */
   --font-ui: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-serif: KaiTi, "STKaiti", "Kaiti SC", "楷体", serif;
-  /* 派生色：第三级文字（比 secondary 更弱）+ 全局警告色 */
+  /* 派生色：均用 color-mix 从各主题色自动算出，此前被引用却从未定义 */
   --text-tertiary: color-mix(in srgb, var(--text-secondary) 62%, var(--bg-app));
+  --bg-elevated: color-mix(in srgb, var(--bg-panel) 88%, var(--text-primary));
+  --accent-muted: color-mix(in srgb, var(--accent) 45%, var(--bg-panel));
+  /* 全局警告色（取代散落在 HTML 里的硬编码琥珀色） */
   --warning: #e8a040;
   --warning-bg: rgba(232, 160, 64, 0.10);
   --warning-border: rgba(232, 160, 64, 0.28);
@@ -259,6 +262,14 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── 通用工具类 ──────────────────────────────────────────────────
+   Phase 2 建立、Phase 3 按区域替换 index.html 内联样式时套用。
+   类名取自调查出的最高频内联 pattern（出现 11~35 次）。 */
+.u-caption        { font-size: var(--fs-sm); color: var(--text-secondary); }
+.u-hint-suffix    { font-size: var(--fs-xs); opacity: 0.6; margin-left: 2px; }
+.u-hint-note      { font-size: var(--fs-xs); opacity: 0.7; margin-left: 6px; }
+.u-textarea-compact { margin-top: var(--space-1); font-size: var(--fs-sm); resize: vertical; }
 
 html, body {
   height: 100%;

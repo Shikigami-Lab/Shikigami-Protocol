@@ -10,8 +10,8 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20260518a" />
-  <link rel="stylesheet" href="css/settings.css?v=20260518a" />
+  <link rel="stylesheet" href="css/styles.css?v=20260518b" />
+  <link rel="stylesheet" href="css/settings.css?v=20260518b" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
@@ -617,7 +617,7 @@
 
     <!-- Status bar -->
     <div class="status-bar">
-      <span v-if="engineWarning && statusText === t('statusReady')" style="color:#e8a020">⚠ {{ engineWarning }}</span>
+      <span v-if="engineWarning && statusText === t('statusReady')" style="color:var(--warning)">⚠ {{ engineWarning }}</span>
       <span v-else>{{ statusText }}</span>
     </div>
 
@@ -3512,7 +3512,7 @@
               <!-- ─── 世界书（lorebooks/ 文件库 + 人格绑定）─── -->
               <div v-if="profileSubTab === 'lorebook'" class="profile-subtab-panel">
                 <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;line-height:1.55;">{{ t('hintLorebookTabIntro') }}</p>
-                <p v-if="!isLorebookSegmentEnabled()" style="font-size:12px;color:#e8a040;margin:0 0 12px;padding:6px 10px;background:rgba(232,160,64,0.08);border-radius:6px;border:1px solid rgba(232,160,64,0.25);">
+                <p v-if="!isLorebookSegmentEnabled()" style="font-size:var(--fs-sm);color:var(--warning);margin:0 0 12px;padding:6px 10px;background:var(--warning-bg);border-radius:var(--radius-md);border:1px solid var(--warning-border);">
                   ⚠ {{ t('hintLorebookSegmentOff') }}
                 </p>
 
@@ -4255,7 +4255,7 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
-            <div class="hint-block" style="border-left-color: var(--warn-color, #f59e0b); background: var(--warn-bg, rgba(245,158,11,0.07)); margin-top: 10px;">
+            <div class="hint-block" style="border-left-color: var(--warning); background: var(--warning-bg); margin-top: 10px;">
               {{ t('hintReflectionApiCost') }}
             </div>
 
