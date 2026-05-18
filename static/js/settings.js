@@ -217,9 +217,6 @@ const SettingsMixin = {
         energy_prompts: { '0': '', '10': '', '30': '', '60': '', '80': '' },
         affinity_prompts: { '-100': '', '0': '', '200': '', '400': '', '600': '', '800': '', '1000': '', '1200': '' },
       },
-      emotionPromptsExpanded: false,
-      energyPromptsExpanded: false,
-      affinityPromptsExpanded: false,
       lorebooksList: [],
       lorebooksListLoading: false,
       lorebookEditId: '',
@@ -236,7 +233,6 @@ const SettingsMixin = {
       lorebookCreateNameDraft: '',
       lorebookCreateSaving: false,
       showLorebookDeleteConfirm: false,
-      reflPromptExpanded: false,
       memPromptExpanded: false,
       profileWizardOpen: false,
       profileWizardDesc: '',
@@ -308,9 +304,6 @@ const SettingsMixin = {
       _profileEnginesSaveTimer: null,
 
       // ── Analysis Model (P4) ──
-      showAnalysisModel: false,
-      showExtractionModel: false,
-      showEmbeddingSection: false,
       topicDiscoveryAdvancedOpen: false,
       analysisModelEnabled: false,
       analysisModelPreset: '',
@@ -515,7 +508,6 @@ const SettingsMixin = {
       _reflectionProfileFormLoaded: false,
       _reflectionProfileSaveTimer: null,
       reflectionFormProfileId: '',
-      refaseExpanded: false,
       // 人格演化
       personaEvolutionForm: {
         base_prompt_original: '',
@@ -530,7 +522,6 @@ const SettingsMixin = {
         min_interval_turns: 200,
       },
       _personaEvolutionFormLoaded: false,
-      personaEvolutionOpen: false,
       personaEvolutionExtracting: false,
       personaEvolutionTriggering: false,
       newCustomRefaseSeg: null,

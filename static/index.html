@@ -1388,13 +1388,7 @@
         </div>
 
         <!-- Analysis model (collapsible) — 情绪/好感度辅助模型 -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showAnalysisModel = !showAnalysisModel">
-            {{ t('llmAnalysisSectionTitle') }}
-            <span>{{ showAnalysisModel ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showAnalysisModel" class="section-collapsible-body">
+        <collapsible-section :title="t('llmAnalysisSectionTitle')">
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintAnalysisModelIntro') }}</p>
             <div class="param-row" style="margin-bottom:0;">
               <span class="param-label">{{ t('lblEnableAnalysis') }}</span>
@@ -1448,8 +1442,7 @@
                 v-model.number="analysisOverride.max_tokens" :disabled="!analysisOverride.max_tokens_enabled" style="width:80px;" />
               <span class="param-val" style="font-size:11px;color:var(--text-secondary);">{{ analysisOverride.max_tokens_enabled ? '' : t('lblInheritParen') }}</span>
             </div>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- Reflection model (collapsible) — 自省模型（从「自省」页迁入） -->
         <collapsible-section :title="t('secReflectionModel')" :body-class="{ disabled: !reflectionForm.reflection_enabled }">
@@ -1679,13 +1672,7 @@
         </collapsible-section>
 
         <!-- Memory extraction model (collapsible) — per-profile -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showExtractionModel = !showExtractionModel">
-            {{ t('llmExtractionSectionTitle') }}
-            <span>{{ showExtractionModel ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showExtractionModel" class="section-collapsible-body">
+        <collapsible-section :title="t('llmExtractionSectionTitle')">
             <p class="form-hint" style="margin-bottom:10px;">{{ t('hintExtractionModelIntro') }}</p>
             <div class="form-field">
               <div class="form-label">{{ t('lblMemoryProfile') }}</div>
@@ -1707,17 +1694,10 @@
               </select>
             </div>
             <p class="form-hint" style="margin-top:2px;">{{ t('hintExtractionModel') }}</p>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- Embedding model (collapsible) -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showEmbeddingSection = !showEmbeddingSection">
-            {{ t('llmEmbeddingSectionTitle') }}
-            <span>{{ showEmbeddingSection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showEmbeddingSection" class="section-collapsible-body">
+        <collapsible-section :title="t('llmEmbeddingSectionTitle')">
             <p class="form-hint" style="margin-bottom:12px;">{{ t('tabEmbeddingDesc') }}</p>
 
             <div class="form-field">
@@ -1811,8 +1791,7 @@
                 <template v-else>✗ {{ embedTestResult.error }}</template>
               </span>
             </div>
-          </div>
-        </div>
+        </collapsible-section>
 
       </div><!-- end LLM tab -->
 
@@ -2411,12 +2390,7 @@
                 </div>
 
                 <!-- 人格演化 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="personaEvolutionOpen = !personaEvolutionOpen">
-                    {{ t('secPersonaEvolution') }}
-                    <span>{{ personaEvolutionOpen ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="personaEvolutionOpen" class="section-collapsible-body">
+                <collapsible-section :title="t('secPersonaEvolution')">
                     <p class="form-hint" style="margin-bottom:12px;">{{ t('hintPersonaEvolution') }}</p>
 
                     <!-- 开关 + 频率 -->
@@ -2509,16 +2483,10 @@
                         <div v-if="entry.reason" style="color:var(--text-secondary);">{{ entry.reason }}</div>
                       </div>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- 情绪 Prompt 覆盖 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="emotionPromptsExpanded = !emotionPromptsExpanded">
-                    {{ t('secEmotionPromptsOverride') }}
-                    <span>{{ emotionPromptsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="emotionPromptsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secEmotionPromptsOverride')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">{{ t('hintEmotionPromptsOverride') }}</p>
                     <div v-for="key in emotionKeyList" :key="key" class="emotion-prompt-card">
                       <div class="emotion-prompt-header">
@@ -2533,16 +2501,10 @@
                         style="resize:vertical;font-size:12px;line-height:1.55;margin-top:5px;"
                         :placeholder="t('phEmotionPromptText')"></textarea>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- 能量 Prompt 覆盖 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="energyPromptsExpanded = !energyPromptsExpanded">
-                    {{ t('secEnergyPromptsOverride') }}
-                    <span>{{ energyPromptsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="energyPromptsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secEnergyPromptsOverride')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">{{ t('hintEnergyPromptsOverride') }}</p>
                     <div v-for="(lvl, key) in energyLevelsI18n" :key="key" class="form-field" style="margin-bottom:12px;">
                       <div class="form-label" style="font-size:12px;font-weight:600;">{{ lvl }}</div>
@@ -2552,16 +2514,10 @@
                         style="resize:vertical;font-size:12px;line-height:1.55;"
                         :placeholder="lvl"></textarea>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- 好感度 Prompt 覆盖 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="affinityPromptsExpanded = !affinityPromptsExpanded">
-                    {{ t('secAffinityPromptsOverride') }}
-                    <span>{{ affinityPromptsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="affinityPromptsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secAffinityPromptsOverride')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">{{ t('hintAffinityPromptsOverride') }}</p>
                     <div v-for="(lbl, key) in affinityLevelsI18n" :key="key" class="form-field" style="margin-bottom:12px;">
                       <div class="form-label" style="font-size:12px;font-weight:600;">{{ lbl }}</div>
@@ -2571,16 +2527,10 @@
                         style="resize:vertical;font-size:12px;line-height:1.55;"
                         :placeholder="lbl"></textarea>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- Prompt 增强 (segment config) -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="segmentsExpanded = !segmentsExpanded">
-                    {{ t('secPromptSegments') }}
-                    <span>{{ segmentsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="segmentsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secPromptSegments')" v-model:open="segmentsExpanded">
                   <!-- 去助手化：persona 层注入，与 segment 列表并列展示 -->
                   <div class="seg-row">
                     <div class="seg-row-top">
@@ -2726,16 +2676,10 @@
                   <div class="btn-row" style="margin-top:8px;gap:6px;">
                     <button class="s-btn s-btn-secondary" style="font-size:12px;" @click="beginAddCustomSeg" :disabled="!!newCustomSeg">{{ t('btnAddCustomSeg') }}</button>
                   </div>
-                </div><!-- end segmentsExpanded body -->
-                </div><!-- end Prompt增强 section-collapsible -->
+                </collapsible-section>
 
                 <!-- 记忆提取 Prompt（从记忆设置移入） -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="memPromptExpanded = !memPromptExpanded">
-                    {{ t('secMemoryExtractPrompts') }}
-                    <span>{{ memPromptExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="memPromptExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secMemoryExtractPrompts')" v-model:open="memPromptExpanded">
                     <div class="mem-cfg-item">
                       <div class="param-row" style="align-items:flex-start;">
                         <span class="param-label">{{ t('lblCustomExtractionPrompt') }}</span>
@@ -2754,8 +2698,7 @@
                       </div>
                       <p class="mem-cfg-hint">{{ t('hintDaySummaryPrompt') }}</p>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
               </div><!-- end Prompt 编辑 -->
 
@@ -2935,27 +2878,16 @@
                     <p class="form-hint">{{ t('hintLongAbsenceHours') }}</p>
 
                     <!-- 自省自定义 Prompt -->
-                    <div class="section-collapsible">
-                      <div class="section-collapsible-header" @click="reflPromptExpanded = !reflPromptExpanded">
-                        {{ t('secReflectionCustomPrompt') }}
-                        <span>{{ reflPromptExpanded ? '▲' : '▼' }}</span>
-                      </div>
-                      <div v-show="reflPromptExpanded" class="section-collapsible-body">
+                    <collapsible-section :title="t('secReflectionCustomPrompt')">
                         <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">{{ t('hintReflectionCustomPrompt') }}</p>
                         <div v-if="reflectionProfileForm.source === 'base_prompt'" style="font-size:11px;color:var(--accent);margin-bottom:6px;">{{ t('hintReflectionBasePromptShown') }}</div>
                         <textarea class="form-input" rows="8" v-model="reflectionProfileForm.custom_prompt"
                                   :placeholder="t('phReflectionCustomPrompt')"
                                   style="font-size:12px;resize:vertical;"></textarea>
-                      </div>
-                    </div>
+                    </collapsible-section>
 
                     <!-- 自省 & ASE 片段 -->
-                    <div class="section-collapsible">
-                      <div class="section-collapsible-header" @click="refaseExpanded = !refaseExpanded">
-                        {{ t('secRefaseSegments') }}
-                        <span>{{ refaseExpanded ? '▲' : '▼' }}</span>
-                      </div>
-                      <div v-show="refaseExpanded" class="section-collapsible-body">
+                    <collapsible-section :title="t('secRefaseSegments')">
                       <p style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.55;">
                         {{ t('hintRefaseSegments') }}
                       </p>
@@ -3216,8 +3148,7 @@
                         </div>
                       </div><!-- end ASE sub-tab -->
 
-                      </div><!-- end refaseExpanded body -->
-                    </div><!-- end 自省&ASE片段 section-collapsible -->
+                    </collapsible-section>
 
                   </template>
 
@@ -3618,27 +3549,16 @@
                   <p class="form-hint">{{ t('hintLongAbsenceHours') }}</p>
 
                   <!-- 自省自定义 Prompt -->
-                  <div class="section-collapsible">
-                    <div class="section-collapsible-header" @click="reflPromptExpanded = !reflPromptExpanded">
-                      {{ t('secReflectionCustomPrompt') }}
-                      <span>{{ reflPromptExpanded ? '▲' : '▼' }}</span>
-                    </div>
-                    <div v-show="reflPromptExpanded" class="section-collapsible-body">
+                  <collapsible-section :title="t('secReflectionCustomPrompt')">
                       <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">{{ t('hintReflectionCustomPrompt') }}</p>
                       <div v-if="reflectionProfileForm.source === 'base_prompt'" style="font-size:11px;color:var(--accent);margin-bottom:6px;">{{ t('hintReflectionBasePromptShown') }}</div>
                       <textarea class="form-input" rows="8" v-model="reflectionProfileForm.custom_prompt"
                                 :placeholder="t('phReflectionCustomPrompt')"
                                 style="font-size:12px;resize:vertical;"></textarea>
-                    </div>
-                  </div>
+                  </collapsible-section>
 
                   <!-- 自省 & ASE 片段 -->
-                  <div class="section-collapsible">
-                    <div class="section-collapsible-header" @click="refaseExpanded = !refaseExpanded">
-                      {{ t('secRefaseSegments') }}
-                      <span>{{ refaseExpanded ? '▲' : '▼' }}</span>
-                    </div>
-                    <div v-show="refaseExpanded" class="section-collapsible-body">
+                  <collapsible-section :title="t('secRefaseSegments')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.55;">
                       {{ t('hintRefaseSegments') }}
                     </p>
@@ -3899,8 +3819,7 @@
                       </div>
                     </div><!-- end ASE sub-tab -->
 
-                    </div><!-- end refaseExpanded body -->
-                  </div><!-- end 自省&ASE片段 section-collapsible -->
+                  </collapsible-section>
                   </div><!-- end s-card -->
 
                   <div class="btn-row" style="margin-top:16px;">
@@ -5456,8 +5375,8 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/components.js?v=20260518d"></script>
-<script src="js/settings.js?v=20260518d"></script>
+<script src="js/components.js?v=20260518e"></script>
+<script src="js/settings.js?v=20260518e"></script>
 <script src="js/app.js?v=20260518d"></script>
 </body>
 </html>
