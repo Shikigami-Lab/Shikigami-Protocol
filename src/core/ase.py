@@ -717,15 +717,11 @@ class AseEngine:
         store = session.conversation_store
 
         # Ensure MemoryManager exists so memory segments can access it
+        # （复用 memory API 的工厂：旧实现 MemoryManager(profile_id, mem_cfg) 参数错位，
+        #   mem_cfg 被当成 storage_root，记忆段落静默失效）
         try:
-            managers = getattr(app.state, "memory_managers", None)
-            if managers is None:
-                app.state.memory_managers = {}
-                managers = app.state.memory_managers
-            if session.profile_id not in managers:
-                from src.memory.memory_manager import MemoryManager
-                mem_cfg = config.get_memory_config()
-                managers[session.profile_id] = MemoryManager(session.profile_id, mem_cfg)
+            from src.api.memory import get_or_create_manager_for_session
+            get_or_create_manager_for_session(app, session)
         except Exception:
             pass
 

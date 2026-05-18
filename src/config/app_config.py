@@ -17,7 +17,7 @@ class AppConfig:
     log_level: str = "info"
     default_llm: str = "custom_api_1"
     default_tts: str = "edge_tts"
-    max_history_turns: int = 20
+    max_history_turns: int = 60
     user_name: str = "用户"  # 人类发言者标识，群聊认用户与 sender 一致
     user_persona: Dict[str, Any] = field(default_factory=dict)  # 主角（用户）全局设定
     llm_presets: Dict[str, Any] = field(default_factory=dict)
@@ -66,7 +66,7 @@ class AppConfig:
             log_level=raw.get("log_level", "info"),
             default_llm=raw.get("default_llm", "custom_api_1"),
             default_tts=raw.get("default_tts", "edge_tts"),
-            max_history_turns=int(raw.get("max_history_turns", 20)),
+            max_history_turns=int(raw.get("max_history_turns", 60)),
             user_name=str(raw.get("user_name", "用户")).strip() or "用户",
             user_persona=raw.get("user_persona", {}),
             llm_presets=presets,
@@ -118,7 +118,7 @@ class AppConfig:
             "extraction_frequency": 5,
             "extraction_weight_threshold": 0.5,
             "max_facts_in_prompt": 8,
-            "max_history_turns": 20,
+            "max_history_turns": 60,
             "day_summary_enabled": False,
             "day_summary_keep_days": 14,
             "day_summary_max_messages": 100,      # 写日记/日摘要时单日最多取多少条对话（超出截断）

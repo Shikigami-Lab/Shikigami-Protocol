@@ -51,8 +51,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 return
 
             preset = config.get_active_llm_preset()
-            if not preset.get("api_key") and not preset.get("base_url"):
-                yield f"data: {json.dumps({'error': 'LLM not configured. Set api_key and base_url in config/app.yaml', 'done': True})}\n\n"
+            # openai_compat 必需 base_url + model；api_key 对本地模型(Ollama/LM Studio)可空，
+            # 故不能用 api_key 判断「已配置」。
+            if not preset.get("base_url") or not preset.get("model"):
+                yield f"data: {json.dumps({'error': 'LLM not configured. Set base_url and model for the active preset (Settings → Models).', 'done': True})}\n\n"
                 return
 
             store = session.conversation_store
@@ -215,6 +217,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     })
                     log_llm_response(session_id=session.id, response=full_response or "(empty)", model=preset.get("model", ""))
                     yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response'})}\n\n"
+                    return  # 错误/空回复到此结束：不再走后续引擎/广播，也不重复 yield done
                 else:
                     store.append("assistant", full_response, sender=session.display_name or "")
 

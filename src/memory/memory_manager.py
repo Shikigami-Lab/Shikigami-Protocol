@@ -967,7 +967,7 @@ class MemoryManager:
             # 特殊值："__none__"=不做记忆提取；""=使用激活模型
             if extraction_preset_name == "__none__":
                 logger.debug("[MemoryManager] extraction_llm_preset='__none__', skip extraction")
-                return 0
+                return []
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:

@@ -342,6 +342,7 @@ const SettingsMixin = {
         extraction_frequency: 5,
         extraction_weight_threshold: 0.5,
         max_facts_in_prompt: 8,
+        max_history_turns: 60,
         day_summary_enabled: false,
         day_summary_keep_days: 14,
         day_summary_max_messages: 100,
@@ -3668,7 +3669,7 @@ const SettingsMixin = {
           extraction_frequency:  data.extraction_frequency  ?? 5,
           extraction_weight_threshold: data.extraction_weight_threshold ?? 0.5,
           max_facts_in_prompt:   data.max_facts_in_prompt   ?? 8,
-          max_history_turns:     data.max_history_turns     ?? 20,
+          max_history_turns:     data.max_history_turns     ?? 60,
           day_summary_enabled:     data.day_summary_enabled     ?? false,
           day_summary_keep_days:   data.day_summary_keep_days   ?? 14,
           day_summary_max_messages:   data.day_summary_max_messages   ?? 100,
@@ -3708,7 +3709,7 @@ const SettingsMixin = {
             extraction_frequency:  parseInt(this.memoryGlobalForm.extraction_frequency, 10) || 5,
             extraction_weight_threshold: Math.max(0, Math.min(1, parseFloat(this.memoryGlobalForm.extraction_weight_threshold) || 0.5)),
             max_facts_in_prompt:   parseInt(this.memoryGlobalForm.max_facts_in_prompt, 10) || 8,
-            max_history_turns:    Math.max(1, Math.min(200, parseInt(this.memoryGlobalForm.max_history_turns, 10) || 20)),
+            max_history_turns:    Math.max(1, Math.min(200, parseInt(this.memoryGlobalForm.max_history_turns, 10) || 60)),
             day_summary_enabled:     this.memoryGlobalForm.day_summary_enabled,
             day_summary_keep_days:   parseInt(this.memoryGlobalForm.day_summary_keep_days, 10) || 14,
             day_summary_max_messages:   Math.max(10, Math.min(500, parseInt(this.memoryGlobalForm.day_summary_max_messages, 10) || 100)),
@@ -3916,7 +3917,7 @@ const SettingsMixin = {
           this.memProfileSaveState = 'saved';
           setTimeout(() => { this.memProfileSaveState = null; }, 2000);
         } else {
-          this.showToast(`保存失败: ${(data && data.error) || !res.ok ? `HTTP ${res.status}` : 'unknown'}`, 'error');
+          this.showToast(`保存失败: ${(data && data.error) || (!res.ok ? `HTTP ${res.status}` : 'unknown')}`, 'error');
         }
       } catch (e) {
         this.showToast(`保存失败: ${e.message}`, 'error');
