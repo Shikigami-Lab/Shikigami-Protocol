@@ -429,6 +429,10 @@ const SettingsMixin = {
       forgettingRunLoading: false,
       forgettingPreview: null,   // 每日遗忘预览结果 { skip, reason, day_summary, decay, ... }
       forgettingPreviewLoading: false,
+      memoryChangelog: [],       // 记忆变更历史（最近 20 条）
+      memoryChangelogLoading: false,
+      memChangelogExpanded: '',  // 当前展开的 run_id
+      memoryRollbackLoading: false,
       factSortBy: 'time',    // 'time' | 'category' | 'weight'
       factSearch: '',
       factFilterEmotional: 'all',  // 'all' | 'with_note' 有情感注记
@@ -3926,6 +3930,7 @@ const SettingsMixin = {
           this.loadMemorySummaries(profileId),
           this.loadMemoryProfileConfig(profileId),
           this.loadChatHistory(profileId),
+          this.loadMemoryChangelog(profileId),
         ]);
         this.memoryContentProfileId = profileId;
       } finally {
@@ -4260,6 +4265,7 @@ const SettingsMixin = {
           this.forgettingPreview = null;
           await this.loadMemoryFacts(profileId);
           await this.loadMemoryStatus(profileId);
+          await this.loadMemoryChangelog(profileId);
         } else {
           this.showToast(`执行失败: ${data.detail || data.error || ''}`, 'error');
         }
@@ -4268,6 +4274,56 @@ const SettingsMixin = {
       } finally {
         this.forgettingRunLoading = false;
       }
+    },
+
+    async loadMemoryChangelog(profileId) {
+      if (!profileId || this.memoryChangelogLoading) return;
+      this.memoryChangelogLoading = true;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.memoryChangelog(profileId));
+        const data = await res.json();
+        if (res.ok) this.memoryChangelog = data.changelog || [];
+      } catch (e) {
+        console.warn('[memory] loadMemoryChangelog:', e);
+      } finally {
+        this.memoryChangelogLoading = false;
+      }
+    },
+
+    async rollbackMemoryRun(profileId, runId) {
+      if (!profileId || !runId || this.memoryRollbackLoading) return;
+      if (!confirm(this.t('confirmMemoryRollback'))) return;
+      this.memoryRollbackLoading = true;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.memoryChangelogRollback(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ run_id: runId }),
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          this.showToast(this.t('toastMemoryRollbackDone')
+            .replace('{r}', data.restored).replace('{s}', data.skipped), 'success');
+          await this.loadMemoryChangelog(profileId);
+          await this.loadMemoryFacts(profileId);
+          await this.loadMemoryStatus(profileId);
+        } else {
+          this.showToast(`${this.t('toastMemoryRollbackFail')}: ${data.detail || data.error || ''}`, 'error');
+        }
+      } catch (e) {
+        this.showToast(`${this.t('toastMemoryRollbackFail')}: ${e.message}`, 'error');
+      } finally {
+        this.memoryRollbackLoading = false;
+      }
+    },
+
+    memChangelogBrief(run) {
+      const s = run.summary || {};
+      const c = s.consolidation || {};
+      return this.t('memChangelogBrief')
+        .replace('{d}', s.decay_count || 0)
+        .replace('{r}', s.reinforce_count || 0)
+        .replace('{a}', c.added_count || 0);
     },
 
     async deleteMemorySummary(dateStr) {

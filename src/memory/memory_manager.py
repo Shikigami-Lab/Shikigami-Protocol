@@ -584,7 +584,7 @@ class MemoryManager:
     ) -> Tuple[bool, int]:
         """将一批「已很淡」的事实交给 LLM 合并为 1～2 条新事实，先写新再删旧。返回 (成功, 新写入条数)。"""
         if not batch:
-            return True, 0
+            return True, {}
         valid_categories = {"habit", "preference", "taboo", "relationship", "location", "milestone", "ai_insight", "other"}
         fact_list = "\n".join(
             f"{f.content} [{getattr(f, 'category', 'other')}] [{getattr(f, 'emotional_note', '')}]"
@@ -602,7 +602,7 @@ class MemoryManager:
             extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
             # 特殊值："__none__"=不做合并；""=使用激活模型
             if extraction_preset_name == "__none__":
-                return False, 0
+                return False, {}
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:
@@ -628,7 +628,7 @@ class MemoryManager:
             )
         except Exception as e:
             logger.warning("[MemoryManager] 合并 LLM 调用失败 profile=%s: %s", self._profile_id, e)
-            return False, 0
+            return False, {}
         raw = raw.strip()
         for prefix in ("```json", "```"):
             if raw.startswith(prefix):
@@ -656,9 +656,9 @@ class MemoryManager:
                 data = json.loads(raw)
             except Exception as e2:
                 logger.warning("[MemoryManager] 合并重试仍失败 profile=%s: %s", self._profile_id, e2)
-                return False, 0
+                return False, {}
         if not isinstance(data, list):
-            return False, 0
+            return False, {}
         min_old_updated = min(f.updated_at for f in batch)
         valid_items = []
         # 合并产出是 1～2 条概括性陈述，允许比「单条提取 50 字」更长，上限 500 字
@@ -681,7 +681,7 @@ class MemoryManager:
                 tags = _normalize_keywords(tags)
             valid_items.append({"content": content, "category": cat, "weight": weight, "emotional_note": emotional_note, "tags": tags})
         if not valid_items:
-            return False, 0
+            return False, {}
         added = []
         for it in valid_items:
             fact = self.facts.add(
@@ -695,7 +695,7 @@ class MemoryManager:
             )
             if not fact:
                 logger.warning("[MemoryManager] 合并写新事实失败（重复或错误）profile=%s", self._profile_id)
-                return False, 0
+                return False, {}
             added.append(fact)
             log_fact_add(
                 self._profile_id,
@@ -725,7 +725,30 @@ class MemoryManager:
             "[MemoryManager] 合并完成 profile=%s 旧向量删除 %d 新事实写入 %d（事实库未删，永久保留）",
             self._profile_id, len(old_ids), len(added),
         )
-        return True, len(added)
+        # detail 供 memory_changelog 记录回滚数据：added=新摘要 fact id；vectors_removed=被移除向量的旧事实 id
+        detail = {
+            "added": [f.id for f in added],
+            "added_preview": [f.content[:60] + ("…" if len(f.content) > 60 else "") for f in added],
+            "vectors_removed": list(old_ids),
+            "count": len(added),
+        }
+        return True, detail
+
+    async def reembed_fact(self, fact_id: str) -> bool:
+        """把某条仍在档案里的事实重新嵌入向量库（记忆变更回滚用）。"""
+        if not (self.vectors and self.vectors.is_available()):
+            return False
+        fact = self.facts.get_by_id(fact_id)
+        if not fact:
+            return False
+        try:
+            doc = _vector_document_for_fact(fact)
+            meta = _vector_metadata_for_fact(fact)
+            await asyncio.to_thread(self.vectors.add, doc, metadata=meta, skip_dedup=True)
+            return True
+        except Exception as e:
+            logger.warning("[MemoryManager] reembed_fact 失败 %s: %s", fact_id, e)
+            return False
 
     def get_summary_range_preview(
         self,

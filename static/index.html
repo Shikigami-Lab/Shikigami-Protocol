@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20260518c" />
-  <link rel="stylesheet" href="css/settings.css?v=20260518c" />
+  <link rel="stylesheet" href="css/styles.css?v=20260518h" />
+  <link rel="stylesheet" href="css/settings.css?v=20260518h" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260518c"></script>
+  <script src="js/i18n.js?v=20260518h"></script>
 </head>
 <body>
 
@@ -4585,6 +4585,49 @@
                 </ul>
               </div>
             </div>
+
+            <!-- 记忆变更历史 -->
+            <div class="mem-changelog">
+              <div class="mem-diary-preview-title" style="display:flex;align-items:center;gap:8px;">
+                {{ t('memChangelogTitle') }}
+                <button class="s-btn s-btn-secondary" style="font-size:11px;margin-left:auto;"
+                        :disabled="memoryChangelogLoading || !(memoryContentProfileId || selectedProfileId)"
+                        @click="loadMemoryChangelog(memoryContentProfileId || selectedProfileId)">
+                  {{ memoryChangelogLoading ? '…' : t('btnRefresh') }}
+                </button>
+              </div>
+              <p v-if="!memoryChangelog.length" class="mem-cfg-hint">{{ t('memChangelogEmpty') }}</p>
+              <div v-for="run in memoryChangelog" :key="run.run_id"
+                   class="mem-changelog-entry" :class="{ 'is-rolled-back': run.rolled_back }">
+                <div class="mem-changelog-head"
+                     @click="memChangelogExpanded = (memChangelogExpanded === run.run_id ? '' : run.run_id)">
+                  <span>{{ run.date }} · {{ run.trigger === 'manual' ? t('memChangelogManual') : t('memChangelogAuto') }}</span>
+                  <span class="mem-changelog-brief">{{ memChangelogBrief(run) }}</span>
+                  <span v-if="run.rolled_back" class="mem-changelog-rbtag">{{ t('memChangelogRolledBack') }}</span>
+                  <span class="mem-changelog-caret">{{ memChangelogExpanded === run.run_id ? '▲' : '▼' }}</span>
+                </div>
+                <div v-show="memChangelogExpanded === run.run_id" class="mem-changelog-detail">
+                  <template v-if="run.summary.consolidation.added_preview && run.summary.consolidation.added_preview.length">
+                    <div class="mem-changelog-sub">{{ t('memChangelogAdded') }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.added_preview" :key="'a'+i" class="mem-changelog-fact added">+ {{ s }}</div>
+                  </template>
+                  <template v-if="run.summary.decay_floored && run.summary.decay_floored.length">
+                    <div class="mem-changelog-sub">{{ t('memChangelogFloored') }}</div>
+                    <div v-for="(s, i) in run.summary.decay_floored" :key="'f'+i" class="mem-changelog-fact">↓ {{ s }}</div>
+                  </template>
+                  <div class="mem-changelog-stats">
+                    {{ t('memChangelogStatVecRemoved') }} {{ run.summary.consolidation.vectors_removed_count }}
+                    · {{ t('memChangelogStatOrphan') }} {{ run.summary.orphan_vectors }}
+                  </div>
+                  <button v-if="!run.rolled_back" class="s-btn" style="font-size:11px;margin-top:6px;"
+                          :disabled="memoryRollbackLoading"
+                          @click="rollbackMemoryRun(memoryContentProfileId || selectedProfileId, run.run_id)">
+                    {{ t('btnRollback') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div class="mem-list">
               <div v-if="memoryFacts.length === 0" class="mem-empty">{{ t('memEmptyFacts') }}</div>
               <div v-for="fact in displayedMemoryFacts" :key="fact.id" class="mem-fact-row">
@@ -5209,9 +5252,9 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/components.js?v=20260518g"></script>
-<script src="js/settings.js?v=20260518e"></script>
-<script src="js/app.js?v=20260518g"></script>
+<script src="js/api-paths.js?v=20260518h"></script>
+<script src="js/components.js?v=20260518h"></script>
+<script src="js/settings.js?v=20260518h"></script>
+<script src="js/app.js?v=20260518h"></script>
 </body>
 </html>

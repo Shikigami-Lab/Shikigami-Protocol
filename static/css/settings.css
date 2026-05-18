@@ -3657,3 +3657,40 @@ textarea.form-input {
   transform: rotate(0deg);
 }
 .adv-toggle-arrow.open { transform: rotate(90deg); }
+
+/* ── 记忆变更历史面板 ── */
+.mem-changelog { margin-top: var(--space-3); }
+.mem-changelog-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-2);
+  overflow: hidden;
+}
+.mem-changelog-entry.is-rolled-back { opacity: 0.55; }
+.mem-changelog-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+}
+.mem-changelog-head:hover { background: var(--bg-elevated); }
+.mem-changelog-brief { color: var(--text-secondary); font-size: var(--fs-xs); }
+.mem-changelog-caret { margin-left: auto; color: var(--text-secondary); font-size: var(--fs-xs); }
+.mem-changelog-rbtag {
+  font-size: var(--fs-2xs);
+  color: var(--warning);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+.mem-changelog-detail {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+.mem-changelog-sub { color: var(--text-secondary); margin-top: var(--space-1); }
+.mem-changelog-fact { padding: 2px 0 2px var(--space-2); color: var(--text-primary); }
+.mem-changelog-fact.added { color: var(--green); }
+.mem-changelog-stats { color: var(--text-tertiary); margin-top: var(--space-2); }

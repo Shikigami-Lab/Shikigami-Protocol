@@ -67,6 +67,8 @@ window.API_PATHS = {
   memorySummaryByDate: (pid, dateStr) => `/memory/${encodeURIComponent(pid)}/summaries/${encodeURIComponent(dateStr)}`,
   memoryForgettingPreview: (pid) => `/memory/${encodeURIComponent(pid)}/forgetting/preview`,
   memoryForgettingRun: (pid) => `/memory/${encodeURIComponent(pid)}/forgetting/run`,
+  memoryChangelog: (pid) => `/memory/${encodeURIComponent(pid)}/changelog`,
+  memoryChangelogRollback: (pid) => `/memory/${encodeURIComponent(pid)}/changelog/rollback`,
 
   timers: () => '/timers',
   timerById: (id) => `/timers/${encodeURIComponent(id)}`,
