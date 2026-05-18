@@ -164,8 +164,17 @@ async def backup_session_memory(session_id: str, request: Request):
     copied = []
     errors = []
 
+    # Flush all WAL data into the main .db file before copying, so the backup
+    # is self-contained and consistent without needing the -wal/-shm files.
+    try:
+        conn = session.conversation_store._conn
+        if conn is not None:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception as e:
+        errors.append(f"wal_checkpoint warning: {e}")
+
     # Back up the entire profile directory so any future file types are included automatically.
-    # Exclude transient SQLite WAL/SHM files (they are empty or will be rolled back on restore).
+    # Exclude -wal/-shm files: after checkpoint they are empty, so excluding them is safe.
     def _ignore(dir_path, names):
         return {n for n in names if n.endswith((".db-wal", ".db-shm"))}
 

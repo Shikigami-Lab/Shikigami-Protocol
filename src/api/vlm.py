@@ -211,13 +211,16 @@ async def _call_vlm(
         }
     ]
 
+    # Screenshots (incl. ASE) and uploads both use a higher token limit.
+    _max_tokens = 5000
+
     # Log call — skip the base64 image block to avoid huge log entries
     _log_messages = [{"role": "user", "content": f"[image ~{len(image_b64)*3//4} bytes, {mime}] {_text_prompt}"}]
     log_secondary_llm_call(
         role="vlm",
         messages=_log_messages,
         model=model,
-        gen_kwargs={"max_tokens": 400},
+        gen_kwargs={"max_tokens": _max_tokens},
         session_id=session_id,
     )
 
@@ -226,7 +229,7 @@ async def _call_vlm(
         model=model,
         messages=messages,
         stream=False,
-        max_tokens=400,
+        max_tokens=_max_tokens,
     )
     description = result.choices[0].message.content.strip()
     log_secondary_llm_response(

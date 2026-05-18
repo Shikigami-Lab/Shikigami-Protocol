@@ -4,7 +4,7 @@ Runs a background asyncio loop that periodically calls a lightweight LLM
 to produce a per-session "inner state":
     - thought: what the AI is currently thinking about
     - urgency: 0.0–1.0 indicating desire to speak proactively
-    - topic_hint: brief label for the current context
+    - topic_anchor: specific content fragment from inputs, or empty string
 
 Key design principles:
     - Completely independent of ASE: reflection continues even if ASE is disabled
@@ -41,7 +41,7 @@ import src.prompt.segments.reflection.emotion        # noqa: F401
 import src.prompt.segments.reflection.affinity       # noqa: F401
 import src.prompt.segments.reflection.silence        # noqa: F401
 import src.prompt.segments.reflection.ase_context     # noqa: F401
-import src.prompt.segments.reflection.trend_context   # noqa: F401
+import src.prompt.segments.reflection.topic_candidates # noqa: F401
 import src.prompt.segments.reflection.proactive_log   # noqa: F401
 import src.prompt.segments.reflection.memory_facts    # noqa: F401
 import src.prompt.segments.reflection.user_engagement # noqa: F401
@@ -56,10 +56,10 @@ def _reflection_user_instruction(locale: str = None) -> str:
     return get_prompt("reflection.user_instruction", locale=locale,
                       default=(
                           "What are you thinking right now? Feel first, then fill in the JSON. "
-                          "Output only one JSON object with exactly these five English keys: "
-                          "thought, style_hint, urgency, topic_hint, next_reflection_in. Nothing else, no non-English key names."
+                          "Output only one JSON object with exactly these six English keys: "
+                          "thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle. Nothing else, no non-English key names."
                           if locale == "en"
-                          else "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这五个英文键：thought, style_hint, urgency, topic_hint, next_reflection_in。不要其他内容、不要中文键名。"
+                          else "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这六个英文键：thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle。不要其他内容、不要中文键名。"
                       ))
 
 
@@ -202,7 +202,7 @@ def _build_reflection_prompt(
     # 【你上一轮自省】便于连贯与校准 urgency，减少无依据的跳变
     if prev_reflection:
         urgency = prev_reflection.get("urgency")
-        topic = (prev_reflection.get("topic_hint") or "").strip()
+        topic = (prev_reflection.get("topic_anchor") or "").strip()
         updated_at = prev_reflection.get("updated_at") or 0
         if topic or urgency is not None:
             line = get_prompt("reflection.prev_reflection_header", locale=locale,
@@ -327,8 +327,10 @@ def _build_reflection_prompt(
     ]
 
 
-# 合法 reflection JSON 的键（仅此六种，否则视为错误格式）
-_REFLECTION_KEYS = frozenset({"thought", "style_hint", "urgency", "topic_hint", "next_reflection_in", "speak_reason"})
+# 合法 reflection JSON 的键（多余的键视为错误格式）
+# topic_pick / topic_angle 为主动话题发现新增；topic_anchor / speak_reason 现由 topic_pick 派生（保留于集合内以兼容旧响应）
+_REFLECTION_KEYS = frozenset({"thought", "style_hint", "urgency", "topic_anchor", "next_reflection_in",
+                              "speak_reason", "topic_pick", "topic_angle"})
 _VALID_SPEAK_REASONS = frozenset({"memory_recall", "trend_share", "emotional_overflow", "silence_concern", "none"})
 
 
@@ -342,31 +344,39 @@ async def _parse_reflection_response(text: str) -> Dict[str, Any]:
     try:
         data = json.loads(text)
         if not isinstance(data, dict):
-            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": ""}
+            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": ""}
         # 若模型输出了错误 schema（如 情感/认知/意图/担忧/期待），拒绝使用并回退默认
         extra = set(data.keys()) - _REFLECTION_KEYS
         if extra and not data.get("thought"):
             logger.warning(
-                "[reflection] 忽略错误 JSON 格式（含非预期键 %s），请模型只输出 thought/style_hint/urgency/topic_hint",
+                "[reflection] 忽略错误 JSON 格式（含非预期键 %s），请模型只输出 thought/style_hint/urgency/topic_anchor",
                 list(extra)[:5],
             )
-            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": ""}
+            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": ""}
         raw_nri = data.get("next_reflection_in")
         next_reflection_in = None
         if isinstance(raw_nri, (int, float)) and raw_nri > 0:
             next_reflection_in = int(raw_nri)
         raw_sr = str(data.get("speak_reason", "none")).strip().lower()
         speak_reason = raw_sr if raw_sr in _VALID_SPEAK_REASONS else "none"
+        # topic_pick：主动话题发现的复合 ID（source:item_id）；"null"/空/无冒号视为未选
+        raw_pick = str(data.get("topic_pick", "") or "").strip()
+        if raw_pick.lower() in ("null", "none", "") or ":" not in raw_pick:
+            topic_pick = ""
+        else:
+            topic_pick = raw_pick
         return {
             "thought": str(data.get("thought", "")).strip(),
             "style_hint": str(data.get("style_hint", "")).strip(),
             "urgency": float(max(0.0, min(1.0, data.get("urgency", 0.0)))),
-            "topic_hint": str(data.get("topic_hint", "")).strip(),
+            "topic_anchor": str(data.get("topic_anchor", "")).strip(),
             "next_reflection_in": next_reflection_in,
             "speak_reason": speak_reason,
+            "topic_pick": topic_pick,
+            "topic_angle": str(data.get("topic_angle", "")).strip(),
         }
     except Exception:
-        return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": "", "next_reflection_in": None}
+        return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": "", "next_reflection_in": None}
 
 
 # ── ReflectionEngine ─────────────────────────────────────────────────────────
@@ -646,6 +656,14 @@ class ReflectionEngine:
         except Exception:
             pass
 
+        # 主动话题发现配置（全局 + 人格级 enabled 覆盖）
+        _td_cfg = {}
+        try:
+            from src.config.effective_config import get_effective_topic_discovery_config
+            _td_cfg = get_effective_topic_discovery_config(self._app, session.profile_id)
+        except Exception as _td_err:
+            logger.debug("[reflection] topic_discovery 配置读取失败: %s", _td_err)
+
         ctx = ReflectionBuildContext(
             profile_id=session.id,
             profile=pdata,
@@ -666,6 +684,7 @@ class ReflectionEngine:
             store=store,
             memory_manager=_mm,
             reflection_cfg=_ref_cfg,
+            topic_discovery_cfg=_td_cfg,
         )
         messages = build_reflection_messages(session.id, ctx)
 
@@ -804,14 +823,38 @@ class ReflectionEngine:
         from src.utils.engine_warnings import clear_warning
         clear_warning(self._app, "reflection")
 
+        # ── 主动话题发现：把 topic_pick 解析成 chosen_topic ──────────────────
+        # 自省只记录方向（source + item_id + angle），完整素材由 ASE 开口前现拉。
+        chosen_topic = None
+        derived_topic_anchor = result.get("topic_anchor", "")
+        derived_speak_reason = result.get("speak_reason", "none")
+        topic_pick = result.get("topic_pick", "")
+        if topic_pick:
+            from src.core.topics import SOURCE_TO_SPEAK_REASON
+            match = next((c for c in getattr(ctx, "topic_candidates", [])
+                          if getattr(c, "ref", None) == topic_pick), None)
+            if match is not None:
+                chosen_topic = {
+                    "source": match.source_id,
+                    "item_id": match.item_id,
+                    "angle": result.get("topic_angle", ""),
+                    "summary": match.summary,
+                    "picked_at": time.time(),
+                }
+                derived_topic_anchor = match.summary
+                derived_speak_reason = SOURCE_TO_SPEAK_REASON.get(match.source_id, "none")
+            else:
+                logger.debug("[reflection] topic_pick=%r 不在候选列表，忽略", topic_pick)
+
         # Store in session and persist to disk
         session.reflection_state = {
             "thought": result["thought"],
             "style_hint": result["style_hint"],
             "urgency": result["urgency"],
-            "topic_hint": result["topic_hint"],
+            "topic_anchor": derived_topic_anchor,
             "next_reflection_in": result.get("next_reflection_in"),
-            "speak_reason": result.get("speak_reason", "none"),
+            "speak_reason": derived_speak_reason,
+            "chosen_topic": chosen_topic,
             "updated_at": time.time(),
         }
         session.save_runtime_state()
@@ -822,7 +865,7 @@ class ReflectionEngine:
             thought=result["thought"],
             style_hint=result["style_hint"],
             urgency=result["urgency"],
-            topic_hint=result["topic_hint"],
+            topic_anchor=derived_topic_anchor,
             model=model_name,
             used_fallback=used_fallback,
             recent_turns_used=len(recent),

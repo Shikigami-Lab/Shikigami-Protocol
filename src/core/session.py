@@ -27,7 +27,7 @@ class Session:
     _store: Any = field(default=None, init=False, repr=False)
 
     # ── Runtime state (persisted to runtime_state.json) ──────────────────────
-    # Reflection engine output: {thought, urgency, topic_hint, updated_at}
+    # Reflection engine output: {thought, urgency, topic_anchor, updated_at}
     reflection_state: Optional[Dict[str, Any]] = field(default=None, repr=False)
     # Timestamp of the most recent user message (for silent_seconds calculation)
     last_user_message_time: float = field(default_factory=time.time, repr=False)

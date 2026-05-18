@@ -269,6 +269,18 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     except Exception as mem_err:
                         logger.warning("[chat] _fire_memory_tasks 失败: %s", mem_err)
 
+                    # ── user_portrait 对话量兜底（完全独立于 memory 总开关）─────────────
+                    try:
+                        _fire_portrait_burst_check(session, request.app)
+                    except Exception as port_err:
+                        logger.warning("[chat] _fire_portrait_burst_check 失败: %s", port_err)
+
+                    # ── 人格演化兜底（同样独立于 memory 总开关）──────────────────────
+                    try:
+                        _fire_persona_evolution_check(session, request.app)
+                    except Exception as evo_err:
+                        logger.warning("[chat] _fire_persona_evolution_check 失败: %s", evo_err)
+
                     # Broadcast completed assistant reply（带 sender）
                     await broadcast.push(session.id, {
                         "type": "new_message",
@@ -588,6 +600,106 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
                         retries=2,
                         retry_delay=10.0,
                     ))
+
+
+def _fire_portrait_burst_check(session, app):
+    """user_portrait 对话量兜底刷新：累计 ≥ min_turns_for_burst_refresh 条新对话
+    且距上次刷新 ≥ min_hours_between_refresh 小时时，异步触发一次画像刷新。
+    完全独立于 memory 总开关，只看 user_portrait_config。"""
+    try:
+        from src.config.profile_loader import ProfileLoader
+        card = ProfileLoader().load(session.profile_id)
+    except Exception:
+        return
+    cfg = card.get("user_portrait_config") or {}
+    if not cfg.get("enabled", True):
+        return
+    min_turns = int(cfg.get("min_turns_for_burst_refresh") or 0)
+    if min_turns <= 0:
+        return  # 兜底关闭
+    min_hours = float(cfg.get("min_hours_between_refresh", 6))
+    portrait = card.get("user_portrait") or {}
+    last_ts = float(portrait.get("updated_at") or 0)
+
+    if min_hours > 0 and last_ts > 0:
+        if (time.time() - last_ts) / 3600 < min_hours:
+            return
+
+    try:
+        all_msgs = session.conversation_store.get_all()
+    except Exception:
+        return
+    recent_count = sum(
+        1 for m in all_msgs
+        if (getattr(m, "timestamp", 0) or 0) > last_ts
+        and getattr(m, "role", None) in ("user", "assistant")
+    )
+    if recent_count < min_turns:
+        return
+
+    _profile_id = session.profile_id
+    _storage_root = session.storage_root
+    _app = app
+
+    async def _run():
+        from src.core.user_portrait import trigger_portrait_refresh
+        await trigger_portrait_refresh(_profile_id, _storage_root, _app, triggered_by="burst")
+
+    asyncio.create_task(_fire_task(_run, "portrait_burst_refresh", retries=1, retry_delay=5.0))
+
+
+# 正在演化中的 profile_id 集合 —— 防止快速连发消息导致同一人格并发触发多次演化
+_evolution_inflight: set = set()
+
+
+def _fire_persona_evolution_check(session, app):
+    """人格演化兜底触发：自上次演化以来累计 ≥ min_interval_turns 条用户消息时，
+    异步触发一次演化。
+
+    要点（修复旧实现的两个缺陷）：
+      - 完全独立于 memory 总开关：旧实现挂在记忆提取 auto_extract 末尾，
+        关掉记忆提取就等于关掉了演化。
+      - 用「自 evolved_at 以来的用户消息计数 ≥ interval」判定，而非
+        turn_counter % interval == 0：后者在 extraction_frequency 不整除
+        interval 时会永远命不中。只数用户消息，不被 ASE 主动发言灌水。
+    """
+    profile_id = session.profile_id
+    if profile_id in _evolution_inflight:
+        return  # 已有一次演化在跑，避免并发重复
+
+    try:
+        from src.config.effective_config import _load_profile_card
+        card = _load_profile_card(profile_id)
+    except Exception:
+        return
+    evolved = card.get("persona_evolved") or {}
+    if not evolved.get("enabled", True):
+        return
+    interval = int(evolved.get("min_interval_turns", 200) or 0)
+    if interval <= 0:
+        return  # 兜底关闭
+
+    # evolved_at 为上次演化时间戳（首次演化前为 0 → 统计全部用户消息）
+    last_ts = float(evolved.get("evolved_at") or 0)
+    try:
+        recent_count = session.conversation_store.count_user_messages_since(last_ts)
+    except Exception:
+        return
+    if recent_count < interval:
+        return
+
+    _evolution_inflight.add(profile_id)   # 同步占位，关闭与 create_task 之间的竞态窗口
+    _storage_root = session.storage_root
+    _app = app
+
+    async def _run():
+        try:
+            from src.core.persona_evolution import trigger_evolution
+            await trigger_evolution(profile_id, _storage_root, _app)
+        finally:
+            _evolution_inflight.discard(profile_id)
+
+    asyncio.create_task(_fire_task(_run, "persona_evolution", retries=1, retry_delay=5.0))
 
 
 def _msg_date(msg) -> str:

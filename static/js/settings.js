@@ -158,8 +158,30 @@ const SettingsMixin = {
         profile_id: '', display_name: '', base_prompt: '',
         style_constraint: '', avatar: '',
         lorebook_ref: '',  // lorebooks/<id>.json，空=不绑定文件（可用内嵌世界书）
-        user_persona: { name: '', description: '', personality: '', role_in_story: '' },
+        user_persona: { name: '', introduction: '' },
       },
+      // ── 用户画像（AI 维护）— 扁平结构（仿 personaEvolutionForm 模式）─────────────
+      userPortraitForm: {
+        content: '',
+        updated_at: 0,
+        refresh_count: 0,
+        changelog_count: 0,
+        enabled: true,
+        auto_refresh_in_daily_job: true,
+        min_turns_for_burst_refresh: 100,
+        min_hours_between_refresh: 6,
+        use_day_summary_as_input: true,
+        use_facts_as_input: true,
+        max_input_conv_turns: 60,
+      },
+      _userPortraitFormLoaded: false,
+      _userPortraitEditSaveTimer: null,
+      _userPortraitConfigSaveTimer: null,
+      userPortraitRefreshing: false,
+      userPortraitResetting: false,
+      userPortraitShowAdvanced: false,
+      userPortraitShowChangelog: false,
+      userPortraitChangelog: [],
       profileSaving: false,
       profileAllSaving: false,
       _profileFormLoaded: false,
@@ -268,17 +290,17 @@ const SettingsMixin = {
       // ── 行为 tab 子 tab ──
       behaviorSubTab: 'protagonist',   // 'protagonist' | 'reflection' | 'emotion'
       // ── Engines Config (P4) ──
-      enginesForm: { emotion_enabled: true, emotion_freq: 5, affinity_enabled: true, affinity_freq: 5, affinity_delta_clamp: 15, energy_enabled: true, energy_interval: 300 },
+      enginesForm: { emotion_enabled: true, emotion_freq: 5, emotion_decay_enabled: true, emotion_decay_full_secs: 14400, emotion_decay_skip_if_active: 300, emotion_neutral: 'calm', affinity_enabled: true, affinity_freq: 5, affinity_delta_clamp: 15, energy_enabled: true, energy_interval: 300 },
       enginesSaving: false,
       _enginesFormLoaded: false,
       _enginesSaveTimer: null,
       _analysisSaveTimer: null,
       // ── 主角（用户）全局设定 ──
-      userPersonaForm: { name: '', description: '', personality: '' },
+      userPersonaForm: { name: '', introduction: '' },
       userPersonaSaving: false,
       _userPersonaFormLoaded: false,
       _userPersonaSaveTimer: null,
-      profileEnginesForm: { emotion_enabled: null, emotion_freq: '', affinity_enabled: null, affinity_freq: '', affinity_delta_clamp: '', energy_enabled: null, energy_interval: '', reflection_enabled: null, ase_enabled: null },
+      profileEnginesForm: { emotion_enabled: null, emotion_freq: '', affinity_enabled: null, affinity_freq: '', affinity_delta_clamp: '', energy_enabled: null, energy_interval: '', reflection_enabled: null, ase_enabled: null, topic_discovery_enabled: null },
       /** 人格引擎页「继承」时对应的全局默认值（来自 GET /profiles/:id/engine_config 的 global_defaults） */
       profileEngineGlobalDefaults: null,
       profileEnginesSaving: false,
@@ -291,6 +313,8 @@ const SettingsMixin = {
       showEmbeddingSection: false,
       showReflectionModelSection: false,
       showVlmModelSection: false,
+      showTopicDiscoverySection: false,
+      topicDiscoveryAdvancedOpen: false,
       analysisModelEnabled: false,
       analysisModelPreset: '',
       analysisModelSaving: false,
@@ -461,6 +485,22 @@ const SettingsMixin = {
         vlm_for_chat:               true,
         vlm_for_ase:                true,
         vlm_ase_wait_seconds:       3,
+        topic_discovery: {
+          enabled:            true,
+          candidate_cap:      8,
+          recent_used_window: 10,
+          chosen_topic_ttl:   1800,
+          sources: {
+            trend:               { enabled: true },
+            conversation_recall: { enabled: true },
+            user_life:           { enabled: true },
+            ai_self:             { enabled: true },
+            random_api: {
+              enabled: false, mode: 'builtin', builtin_pool: 'icebreaker',
+              http_url: '', http_json_path: '',
+            },
+          },
+        },
       },
       reflectionSaving: false,
       vlmSaving: false,
@@ -469,7 +509,7 @@ const SettingsMixin = {
       reflectionProfileForm: {
         custom_prompt: '',
         source: '',
-        chat_inject_topic_hint: true,
+        chat_inject_topic_anchor: true,
         long_absence_hours: 48,
         segments: [],  // 统一列表（与人格 Prompt 同构）：内置 + 自定义，含 trigger_mode/trigger_param
       },
@@ -494,6 +534,7 @@ const SettingsMixin = {
       _personaEvolutionFormLoaded: false,
       personaEvolutionOpen: false,
       personaEvolutionExtracting: false,
+      personaEvolutionTriggering: false,
       newCustomRefaseSeg: null,
       activeReflectionSegTab: 'reflection',  // 'reflection' | 'ase'
     };
@@ -762,6 +803,17 @@ const SettingsMixin = {
         if (!this._reflectionFormLoaded) return;
         clearTimeout(this._reflectionSaveTimer);
         this._reflectionSaveTimer = setTimeout(() => this.saveReflectionConfig(true), 800);
+      },
+    },
+    userPortraitForm: {
+      deep: true,
+      handler() {
+        if (!this._userPortraitFormLoaded || !this.selectedProfileId) return;
+        clearTimeout(this._userPortraitEditSaveTimer);
+        this._userPortraitEditSaveTimer = setTimeout(() => {
+          this.saveUserPortraitContent(true);
+          this.saveUserPortraitConfig(true);
+        }, 800);
       },
     },
     userPersonaForm: {
@@ -1764,10 +1816,8 @@ const SettingsMixin = {
         avatar: p.avatar || '',
         lorebook_ref: p.lorebook_ref || '',
         user_persona: {
-          name:          (p.user_persona || {}).name          || '',
-          description:   (p.user_persona || {}).description   || '',
-          personality:   (p.user_persona || {}).personality   || '',
-          role_in_story: (p.user_persona || {}).role_in_story || '',
+          name:         (p.user_persona || {}).name         || '',
+          introduction: (p.user_persona || {}).introduction || '',
         },
         gpt_sovits_ref_audio_path: p.gpt_sovits_ref_audio_path || '',
         gpt_sovits_ref_text: p.gpt_sovits_ref_text || '',
@@ -1801,6 +1851,7 @@ const SettingsMixin = {
       // Load reflection + memory prompts so they're available in the Prompts sub-tab
       this.loadReflectionProfileConfig(profileId);
       this.loadPersonaEvolution(profileId);
+      this.loadUserPortrait(profileId);
       this.loadMemoryProfileConfig(profileId);
       // Populate prompt override form
       const ec = p.emotion_config || {};
@@ -2150,10 +2201,8 @@ const SettingsMixin = {
                 ['-100', '0', '200', '400', '600', '800', '1000', '1200']),
               lorebook_ref: this.profileForm.lorebook_ref != null ? this.profileForm.lorebook_ref : '',
               user_persona: {
-                name:          (this.profileForm.user_persona.name          || '').trim(),
-                description:   (this.profileForm.user_persona.description   || '').trim(),
-                personality:   (this.profileForm.user_persona.personality   || '').trim(),
-                role_in_story: (this.profileForm.user_persona.role_in_story || '').trim(),
+                name:         (this.profileForm.user_persona.name         || '').trim(),
+                introduction: (this.profileForm.user_persona.introduction || '').trim(),
               },
               anti_assistant_mode: !!this.profileForm.anti_assistant_mode,
             }),
@@ -2210,6 +2259,7 @@ const SettingsMixin = {
           energy_interval:       _v(data.energy_interval),
           reflection_enabled:    data.reflection_enabled ?? null,
           ase_enabled:           data.ase_enabled        ?? null,
+          topic_discovery_enabled: data.topic_discovery_enabled ?? null,
         };
         this.profileEngineGlobalDefaults = data.global_defaults && typeof data.global_defaults === 'object'
           ? { ...data.global_defaults }
@@ -2248,6 +2298,9 @@ const SettingsMixin = {
       }
       if (part === 'ase') {
         return g.ase_enabled ? t('optOn') : t('optOff');
+      }
+      if (part === 'topic_discovery') {
+        return g.topic_discovery_enabled ? t('optOn') : t('optOff');
       }
       return '—';
     },
@@ -2345,6 +2398,7 @@ const SettingsMixin = {
         body.energy_enabled      = this.profileEnginesForm.energy_enabled;
         body.reflection_enabled  = this.profileEnginesForm.reflection_enabled;
         body.ase_enabled         = this.profileEnginesForm.ase_enabled;
+        body.topic_discovery_enabled = this.profileEnginesForm.topic_discovery_enabled;
         // frequency / interval overrides
         if (this.profileEnginesForm.emotion_freq !== '') {
           const v = parseInt(this.profileEnginesForm.emotion_freq, 10);
@@ -2755,13 +2809,13 @@ const SettingsMixin = {
         if (!res.ok) return;
         const data = await res.json();
         this.segmentList = (data.segments || []).filter(s =>
-            ['chat', 'chat_reflection', 'chat_ase', 'all'].includes(s.inject_into)
+            s.inject_into === 'chat'
         ).map(s => ({ ...s }));
         this.reflectionSegmentList = (data.segments || []).filter(s =>
             s.inject_into === 'reflection' && !s.is_core
         ).map(s => ({ ...s }));
         this.customSegmentList = (data.custom_segments || []).filter(c =>
-            ['chat', 'chat_reflection', 'chat_ase', 'all'].includes(c.inject_into)
+            c.inject_into === 'chat'
         ).map(c => ({ ...c }));
       } catch (e) {
         console.error('[settings] loadSegmentConfig:', e);
@@ -3307,7 +3361,11 @@ const SettingsMixin = {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsEngines());
         if (!res.ok) return;
         const data = await res.json();
-        this.enginesForm.emotion_freq         = data.emotion_freq         ?? 5;
+        this.enginesForm.emotion_freq                 = data.emotion_freq                 ?? 5;
+        this.enginesForm.emotion_decay_enabled        = data.emotion_decay_enabled        ?? true;
+        this.enginesForm.emotion_decay_full_secs      = data.emotion_decay_full_secs      ?? 14400;
+        this.enginesForm.emotion_decay_skip_if_active = data.emotion_decay_skip_if_active ?? 300;
+        this.enginesForm.emotion_neutral              = data.emotion_neutral              ?? 'calm';
         this.enginesForm.affinity_freq        = data.affinity_freq        ?? 5;
         this.enginesForm.affinity_delta_clamp = data.affinity_delta_clamp ?? 15;
         this.enginesForm.energy_interval      = data.energy_interval      ?? 300;
@@ -3340,7 +3398,11 @@ const SettingsMixin = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            emotion_freq:         parseInt(this.enginesForm.emotion_freq,  10) || 5,
+            emotion_freq:                 parseInt(this.enginesForm.emotion_freq, 10) || 5,
+            emotion_decay_enabled:        !!this.enginesForm.emotion_decay_enabled,
+            emotion_decay_full_secs:      Math.max(0, parseInt(this.enginesForm.emotion_decay_full_secs, 10) || 0),
+            emotion_decay_skip_if_active: Math.max(0, parseInt(this.enginesForm.emotion_decay_skip_if_active, 10) || 0),
+            emotion_neutral:              (this.enginesForm.emotion_neutral || 'calm').toString(),
             affinity_freq:        parseInt(this.enginesForm.affinity_freq, 10) || 5,
             affinity_delta_clamp: parseFloat(this.enginesForm.affinity_delta_clamp) || 15,
             energy_interval:      parseInt(this.enginesForm.energy_interval, 10) || 300,
@@ -3361,9 +3423,8 @@ const SettingsMixin = {
       try {
         const res = await fetch(getBaseUrl() + '/settings/user_persona');
         const data = await res.json();
-        this.userPersonaForm.name        = data.name        || '';
-        this.userPersonaForm.description = data.description || '';
-        this.userPersonaForm.personality = data.personality || '';
+        this.userPersonaForm.name         = data.name         || '';
+        this.userPersonaForm.introduction = data.introduction || '';
       } catch (e) {
         console.error('[settings] loadUserPersona:', e);
       }
@@ -3379,9 +3440,8 @@ const SettingsMixin = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name:        this.userPersonaForm.name.trim(),
-            description: this.userPersonaForm.description.trim(),
-            personality: this.userPersonaForm.personality.trim(),
+            name:         this.userPersonaForm.name.trim(),
+            introduction: this.userPersonaForm.introduction.trim(),
           }),
         });
         const data = await res.json();
@@ -3391,6 +3451,178 @@ const SettingsMixin = {
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.userPersonaSaving = false;
+      }
+    },
+
+    // ── User Portrait (AI-maintained) ────────────────────────────────────
+    async loadUserPortrait(profileId) {
+      if (!profileId) return;
+      this._userPortraitFormLoaded = false;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(profileId)}/user_portrait`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const cfg = data.config || {};
+        // 整体替换 — 仿 personaEvolutionForm 的模式
+        this.userPortraitForm = {
+          content:                     data.content || '',
+          updated_at:                  data.updated_at || 0,
+          refresh_count:               data.refresh_count || 0,
+          changelog_count:             data.changelog_count || 0,
+          enabled:                     cfg.enabled !== false,
+          auto_refresh_in_daily_job:   cfg.auto_refresh_in_daily_job !== false,
+          min_turns_for_burst_refresh: cfg.min_turns_for_burst_refresh ?? 100,
+          min_hours_between_refresh:   cfg.min_hours_between_refresh ?? 6,
+          use_day_summary_as_input:    cfg.use_day_summary_as_input !== false,
+          use_facts_as_input:          cfg.use_facts_as_input !== false,
+          max_input_conv_turns:        cfg.max_input_conv_turns ?? 60,
+        };
+        this.$nextTick(() => { this._userPortraitFormLoaded = true; });
+      } catch (e) {
+        console.error('[settings] loadUserPortrait:', e);
+      }
+    },
+
+    async saveUserPortraitContent(silent = true) {
+      const pid = this.selectedProfileId;
+      if (!pid) return;
+      try {
+        if (silent) this.setAutoSaveState('saving');
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: this.userPortraitForm.content || '' }),
+        });
+        const data = await res.json();
+        if (data.ok) { if (silent) this.setAutoSaveState('saved'); }
+        else { if (silent) this.setAutoSaveState(null); this.showToast('画像保存失败', 'error'); }
+      } catch (e) {
+        this.showToast(`画像保存失败: ${e.message}`, 'error');
+      }
+    },
+
+    async saveUserPortraitConfig(silent = true) {
+      const pid = this.selectedProfileId;
+      if (!pid) return;
+      try {
+        if (silent) this.setAutoSaveState('saving');
+        const f = this.userPortraitForm;
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled:                     !!f.enabled,
+            auto_refresh_in_daily_job:   !!f.auto_refresh_in_daily_job,
+            min_turns_for_burst_refresh: parseInt(f.min_turns_for_burst_refresh, 10) || 0,
+            min_hours_between_refresh:   parseInt(f.min_hours_between_refresh, 10) || 0,
+            use_day_summary_as_input:    !!f.use_day_summary_as_input,
+            use_facts_as_input:          !!f.use_facts_as_input,
+            max_input_conv_turns:        parseInt(f.max_input_conv_turns, 10) || 60,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) { if (silent) this.setAutoSaveState('saved'); }
+        else { if (silent) this.setAutoSaveState(null); }
+      } catch (e) {
+        console.error('[settings] saveUserPortraitConfig:', e);
+      }
+    },
+
+    async refreshUserPortrait() {
+      const pid = this.selectedProfileId;
+      if (!pid || this.userPortraitRefreshing) return;
+      this.userPortraitRefreshing = true;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/refresh`, {
+          method: 'POST',
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this.showToast(this.locale === 'en' ? 'Portrait refreshed' : '画像已刷新', 'success');
+          await this.loadUserPortrait(pid);
+        } else {
+          this.showToast(data.reason || (this.locale === 'en' ? 'Refresh skipped' : '刷新被跳过'), 'info');
+        }
+      } catch (e) {
+        this.showToast(`刷新失败: ${e.message}`, 'error');
+      } finally {
+        this.userPortraitRefreshing = false;
+      }
+    },
+
+    async resetUserPortrait() {
+      const pid = this.selectedProfileId;
+      if (!pid || this.userPortraitResetting) return;
+      const ok = window.confirm(this.locale === 'en'
+        ? 'Clear current portrait content? (the seed introduction is kept; refresh_count is preserved)'
+        : '确认清空当前画像？（self-introduction 种子保留，refresh_count 也保留）');
+      if (!ok) return;
+      this.userPortraitResetting = true;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/reset`, {
+          method: 'POST',
+        });
+        const data = await res.json();
+        if (data.ok) {
+          await this.loadUserPortrait(pid);
+          this.showToast(this.locale === 'en' ? 'Portrait cleared' : '画像已清空', 'success');
+        }
+      } catch (e) {
+        this.showToast(`重置失败: ${e.message}`, 'error');
+      } finally {
+        this.userPortraitResetting = false;
+      }
+    },
+
+    async toggleUserPortraitChangelog() {
+      this.userPortraitShowChangelog = !this.userPortraitShowChangelog;
+      if (this.userPortraitShowChangelog) {
+        await this.loadUserPortraitChangelog(this.selectedProfileId);
+      }
+    },
+
+    async loadUserPortraitChangelog(profileId) {
+      if (!profileId) return;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(profileId)}/user_portrait/changelog`);
+        const data = await res.json();
+        this.userPortraitChangelog = data.entries || [];
+      } catch (e) {
+        console.error('[settings] loadUserPortraitChangelog:', e);
+      }
+    },
+
+    async rollbackUserPortrait(version) {
+      const pid = this.selectedProfileId;
+      if (!pid) return;
+      const ok = window.confirm(this.locale === 'en'
+        ? `Rollback portrait to version ${version}?`
+        : `回滚画像到版本 ${version}？`);
+      if (!ok) return;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/rollback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          await this.loadUserPortrait(pid);
+          await this.loadUserPortraitChangelog(pid);
+          this.showToast(this.locale === 'en' ? 'Rolled back' : '已回滚', 'success');
+        }
+      } catch (e) {
+        this.showToast(`回滚失败: ${e.message}`, 'error');
+      }
+    },
+
+    formatPortraitTime(ts) {
+      if (!ts) return this.locale === 'en' ? 'never' : '从未';
+      try {
+        const d = new Date(ts * 1000);
+        return d.toLocaleString(this.locale === 'en' ? 'en-US' : 'zh-CN');
+      } catch (e) {
+        return String(ts);
       }
     },
 
@@ -4137,6 +4369,7 @@ const SettingsMixin = {
       if (profileId && this.profiles.some(p => p.profile_id === profileId)) this.selectProfile(profileId);
       this.loadReflectionProfileConfig(profileId);
       this.loadPersonaEvolution(profileId);
+      this.loadUserPortrait(profileId);
     },
     onMemoryContentProfileChange(profileId) {
       if (profileId && this.profiles.some(p => p.profile_id === profileId)) this.selectProfile(profileId);
@@ -4226,7 +4459,7 @@ const SettingsMixin = {
         this.reflectionProfileForm = {
           custom_prompt: data.custom_prompt || '',
           source: data.source || 'reflection_config',
-          chat_inject_topic_hint: data.chat_inject_topic_hint !== false,
+          chat_inject_topic_anchor: data.chat_inject_topic_anchor !== false,
           long_absence_hours: typeof data.long_absence_hours === 'number' ? data.long_absence_hours : 48,
           segments,
         };
@@ -4260,7 +4493,7 @@ const SettingsMixin = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               custom_prompt: this.reflectionProfileForm.custom_prompt || '',
-              chat_inject_topic_hint: this.reflectionProfileForm.chat_inject_topic_hint,
+              chat_inject_topic_anchor: this.reflectionProfileForm.chat_inject_topic_anchor,
               long_absence_hours: this.reflectionProfileForm.long_absence_hours,
               segments,
             }),
@@ -4300,6 +4533,10 @@ const SettingsMixin = {
           changelog: data.changelog || [],
           enabled: ev.enabled !== false,
           min_interval_turns: ev.min_interval_turns ?? 200,
+          max_evolution_facts: ev.max_evolution_facts ?? 50,
+          max_evolution_conv_turns: ev.max_evolution_conv_turns ?? 40,
+          turns_until_next: data.turns_until_next ?? null,
+          turn_counter: data.turn_counter ?? 0,
         };
         this.$nextTick(() => { this._personaEvolutionFormLoaded = true; });
       } catch (e) {
@@ -4321,6 +4558,8 @@ const SettingsMixin = {
             style_constraint: this.personaEvolutionForm.style_constraint_evolved || '',
             enabled: this.personaEvolutionForm.enabled,
             min_interval_turns: this.personaEvolutionForm.min_interval_turns,
+            max_evolution_facts: this.personaEvolutionForm.max_evolution_facts,
+            max_evolution_conv_turns: this.personaEvolutionForm.max_evolution_conv_turns,
           }),
         });
         if (res.ok) {
@@ -4374,6 +4613,31 @@ const SettingsMixin = {
         }
       } catch (e) {
         this.showToast(`回滚失败: ${e.message}`, 'error');
+      }
+    },
+
+    async triggerPersonaEvolution() {
+      const profileId = this.selectedProfileId;
+      if (!profileId || this.personaEvolutionTriggering) return;
+      this.personaEvolutionTriggering = true;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolutionTrigger(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (data && data.ok) {
+          this.showToast('✓ ' + (this.locale === 'en' ? 'Evolution complete' : '演化完成'), 'success');
+          await this.loadPersonaEvolution(profileId);
+        } else {
+          const reason = (data && data.reason) || (this.locale === 'en' ? 'Evolution skipped' : '演化被跳过');
+          this.showToast(reason, 'error');
+        }
+      } catch (e) {
+        this.showToast((this.locale === 'en' ? 'Evolution failed: ' : '演化失败：') + e.message, 'error');
+      } finally {
+        this.personaEvolutionTriggering = false;
       }
     },
 

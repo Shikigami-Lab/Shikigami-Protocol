@@ -15,7 +15,9 @@ class AseMorningGreetingSegment(PromptSegment):
     is_core = False
     priority = 50
     label = "时段问候"
+    label_en = "Time-Window Greeting"
     description = "在「触发方式」设定的时段内注入（如 5–10 点早晨、18–22 点晚上）。"
+    description_en = "Injects a greeting hint during the configured time window (e.g. 5–10 AM morning, 18–22 evening)"
     default_trigger_mode = "time_window"
     default_trigger_param = 510.0  # 5–10 AM  (start*100+end)
 

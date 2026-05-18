@@ -7,7 +7,7 @@ Key design principles:
     - Single cooldown concept: urgency-weighted (higher urgency = shorter wait)
     - Mode system: 5 predefined profiles (low/medium/high/game/focus)
     - No conditional branches on mode in the engine code — just reads mode params
-    - heartbeat_speak() uses build_messages() with extra_system injection
+    - heartbeat_speak() uses build_messages(); scene context goes into user message
     - Only saves the assistant response (no artificial user message in history)
     - Timer expiry NOT handled here — it has its own path via system_trigger
 
@@ -268,137 +268,6 @@ def _get_time_ctx(hour: int, locale: str) -> str:
     entry = periods.get("night", {})
     return entry.get(locale) or entry.get("zh") or ("night" if locale == "en" else "深夜")
 
-
-def _build_heartbeat_ctx(
-    reflection_state: Dict,
-    vlm_description: str = "",
-    last_ase_content: str = "",
-    greeting_hint: str = "",
-    style_hint: str = "",
-) -> str:
-    """Build the extra_system content for ASE proactive speech."""
-    from datetime import datetime
-    locale = get_locale()
-    thought    = reflection_state.get("thought", "")
-    topic_hint = reflection_state.get("topic_hint", "")
-    hour = datetime.now().hour
-    time_ctx = _get_time_ctx(hour, locale)
-
-    parts = []
-
-    # 接续上次主动发言
-    if last_ase_content and last_ase_content.strip():
-        raw = last_ase_content.strip()
-        snippet = raw[:120] + ("…" if len(raw) > 120 else "")
-        parts.append(render("ase.last_spoke_continuation", locale=locale,
-                            default=(
-                                "[Continue Your Last Proactive Message] You last initiated with: \"$snippet\". The user has not replied yet. "
-                                "Continue from it or take a new angle — do not repeat it verbatim, and do not ask whether they are away or unwilling to reply."
-                                if locale == "en"
-                                else "【接续上次主动发言】你上次主动说的是：「$snippet」。用户尚未回复。"
-                                     "请接着这句话往下说或换一个角度，不要原样重复，也不要问对方是否不在或不想回复。"
-                            ),
-                            snippet=snippet))
-
-    # 情境提示
-    if greeting_hint and greeting_hint.strip():
-        parts.append(greeting_hint.strip())
-
-    # 时段备注（仅深夜/清晨）
-    night_labels = {
-        get_prompt("ase.time_periods.night", locale=locale, default=("night" if locale == "en" else "深夜")),
-        get_prompt("ase.time_periods.dawn", locale=locale, default=("dawn" if locale == "en" else "清晨")),
-    }
-    if time_ctx in night_labels and not vlm_description:
-        parts.append(render("ase.time_note", locale=locale,
-                            default=("It's $time_ctx right now." if locale == "en" else "此刻是$time_ctx。"),
-                            time_ctx=time_ctx))
-
-    # 场景上下文
-    if vlm_description:
-        parts.append(render("ase.vlm_notice", locale=locale,
-                            default=("You notice on their screen — $vlm_description" if locale == "en" else "你注意到对方的屏幕上——$vlm_description"),
-                            vlm_description=vlm_description))
-        if thought:
-            parts.append(render("ase.thought_after_vlm", locale=locale,
-                                default=("That makes you think of: $thought" if locale == "en" else "这让你想起了：$thought"),
-                                thought=thought))
-    elif thought:
-        parts.append(render("ase.thought_alone", locale=locale,
-                            default=("You've been keeping in mind: $thought" if locale == "en" else "你一直留意着：$thought"),
-                            thought=thought))
-        if topic_hint:
-            parts.append(render("ase.topic_with_thought", locale=locale,
-                                default=("Last time you also talked about \"$topic_hint\"." if locale == "en" else "你们上次还聊到了「$topic_hint」。"),
-                                topic_hint=topic_hint))
-    elif topic_hint:
-        parts.append(render("ase.topic_alone", locale=locale,
-                            default=("You recall a previous conversation about \"$topic_hint\"." if locale == "en" else "你想起了之前关于「$topic_hint」的对话。"),
-                            topic_hint=topic_hint))
-    else:
-        parts.append(render("ase.silence_generic", locale=locale,
-                            default=("It's $time_ctx now, and it's quiet around." if locale == "en" else "现在是$time_ctx，四周很静。"),
-                            time_ctx=time_ctx))
-
-    parts.append(get_prompt("ase.date_hint", locale=locale,
-                            default=(
-                                "The current date/holiday is shown in the time context above; if it fits naturally, you may mention a brief holiday/date-related line."
-                                if locale == "en"
-                                else "当前日期与节日见上方时间上下文；若自然可带出节日或日期相关的一句。"
-                            )))
-
-    if style_hint and style_hint.strip():
-        parts.append(render("ase.style_hint_prefix", locale=locale,
-                            default=("Current tendency: $style_hint" if locale == "en" else "角色此刻倾向：$style_hint"),
-                            style_hint=style_hint.strip()))
-
-    parts.append(get_prompt("ase.behavioral_guidance", locale=locale,
-                            default=(
-                                "[You are initiating proactively, not answering a question]\n"
-                                "- Say what you want to say directly; avoid openings like \"Is there anything I can help with?\" or \"I want to ask you...\"\n"
-                                "- Keep it short and natural; stop when it's enough — no long monologues\n"
-                                "- Don't bring up themes like \"you're not here\" / \"you stopped talking\"\n"
-                                "- If there's truly nothing worth saying, you may reply with \"(silence)\""
-                                if locale == "en"
-                                else "【此刻你是主动开口，不是在回应对方的提问】\n"
-                                     "- 直接说你想说的，不要以「有什么我能帮你的吗」或「我想问你……」之类的开头\n"
-                                     "- 简短、自然，说完就够，不需要展开成长篇\n"
-                                     "- 不要主动提起对方「不在」「不说话了」之类的话题\n"
-                                     "- 如果此刻真的没有值得说的话，可以只回复「（静默）」"
-                            )))
-
-    return "\n".join(parts)
-
-
-def _build_stage_trigger(reflection_state: Dict, vlm_description: str = "") -> str:
-    """Build a context-derived trigger user message for ASE proactive speech.
-
-    Uses explicit second-person "你" to signal this is context about the AI,
-    not user speech — same mechanism as effective AI-directed user messages.
-    Character-agnostic: no physical traits or species-specific stage business.
-    """
-    thought    = reflection_state.get("thought", "")
-    topic_hint = reflection_state.get("topic_hint", "")
-
-    locale = get_locale()
-    triggers = get_raw("ase.stage_triggers") or {}
-
-    def _pick(key: str, fallback: list) -> str:
-        entry = triggers.get(key, {})
-        options = entry.get(locale) or entry.get("zh") or fallback
-        if isinstance(options, list):
-            return random.choice(options)
-        return str(options)
-
-    if vlm_description:
-        return _pick("vlm", ["You noticed something on the screen and have something to say."] if locale == "en" else ["你注意到了屏幕上的一些东西，心里有话想说。"])
-    if thought:
-        return _pick("thought", ["You feel like speaking up."] if locale == "en" else ["你有点想开口了。"])
-    if topic_hint:
-        entry = triggers.get("topic", {})
-        val = entry.get(locale) or entry.get("zh") or ("You recall something unfinished from before, and you have something to say." if locale == "en" else "你想起了之前没说完的事，心里有话想说。")
-        return str(val)
-    return _pick("default", ["You've been quiet for a while, and you have something to say now."] if locale == "en" else ["你沉默了一段时间，此刻有话想说。"])
 
 
 class AseEngine:
@@ -677,6 +546,94 @@ class AseEngine:
 
         await self._speak(session, reflection_state, mode_name, mode_cfg)
 
+    def _resolve_chosen_topic(self, session) -> Optional[Dict[str, Any]]:
+        """读自省选定的 chosen_topic，按 TTL 校验后 resolve 出完整新鲜素材。
+
+        返回 dict（含 material/angle/framing_hint/source_id/item_id 及内部 _source/_tctx），
+        无 chosen_topic / 已过期 / resolve 失败 / 来源被禁用时返回 None（ASE 走兜底）。
+        """
+        rs = getattr(session, "reflection_state", None) or {}
+        chosen = rs.get("chosen_topic")
+        if not chosen:
+            return None
+
+        app = self._app
+        try:
+            from src.config.effective_config import get_effective_topic_discovery_config
+            td_cfg = get_effective_topic_discovery_config(app, session.profile_id)
+        except Exception:
+            td_cfg = {}
+        if not td_cfg.get("enabled", True):
+            return None
+
+        ttl = float(td_cfg.get("chosen_topic_ttl", 1800))
+        if ttl > 0 and (time.time() - float(chosen.get("picked_at", 0) or 0)) > ttl:
+            logger.debug("[ASE] chosen_topic 已过期，走兜底 session=%s", session.id)
+            return None
+
+        source_id = chosen.get("source", "")
+        item_id = chosen.get("item_id", "")
+        if not source_id or not item_id:
+            return None
+
+        from src.core.topics import get_source
+        from src.core.topics.base import TopicSourceContext
+
+        src = get_source(source_id)
+        if src is None:
+            return None
+        # 来源在 pick 之后被禁用 → 兜底
+        src_entry = (td_cfg.get("sources") or {}).get(source_id) or {}
+        if not src_entry.get("enabled", src.enabled_by_default):
+            return None
+
+        # profile 卡 + 情绪状态（部分来源 resolve 需要）
+        from src.config.effective_config import _load_profile_card
+        profile = _load_profile_card(session.profile_id)
+        emotion = None
+        try:
+            epath = os.path.join(session.storage_root, "emotion_state.json")
+            if os.path.exists(epath):
+                with open(epath, encoding="utf-8") as f:
+                    emotion = json.load(f)
+        except Exception:
+            pass
+        mm = None
+        try:
+            mm = getattr(app.state, "memory_managers", {}).get(session.profile_id)
+        except Exception:
+            pass
+
+        tctx = TopicSourceContext(
+            profile_id=session.profile_id,
+            storage_root=session.storage_root,
+            profile=profile,
+            config=td_cfg,
+            reflection_thought=rs.get("thought", ""),
+            emotion=emotion,
+            memory_manager=mm,
+            session=session,
+            app=app,
+        )
+        try:
+            material = src.resolve(item_id, tctx)
+        except Exception as e:
+            logger.debug("[ASE] chosen_topic resolve 失败 (%s:%s): %s", source_id, item_id, e)
+            return None
+        if material is None:
+            logger.debug("[ASE] chosen_topic resolve 返回 None，走兜底 (%s:%s)", source_id, item_id)
+            return None
+
+        return {
+            "source_id": source_id,
+            "item_id": item_id,
+            "material": material.material,
+            "angle": chosen.get("angle", ""),
+            "framing_hint": src.get_framing_hint(get_locale()),
+            "_source": src,
+            "_tctx": tctx,
+        }
+
     async def _speak(
         self,
         session,
@@ -749,17 +706,12 @@ class AseEngine:
             last_user_ts=last_user_ts_float,
         )
         greeting_hint = "\n".join(segment_texts) if segment_texts else ""
-        style_hint = (reflection_state.get("style_hint") or "").strip()
 
-        extra_system = _build_heartbeat_ctx(
-            reflection_state, vlm_description, last_ase_content,
-            greeting_hint=greeting_hint, style_hint=style_hint,
-        )
-        if extra_behavior:
-            extra_system += "\n\n" + extra_behavior
+        # extra_system: only per-mode extra_behavior (behavioral guidance is now a segment)
+        extra_system = extra_behavior or ""
 
-        # ── Stage-direction trigger message (not saved to history) ────────────
-        trigger_msg = _build_stage_trigger(reflection_state, vlm_description)
+        # 主动话题发现：解析自省选定的话题，开口前现拉完整新鲜素材
+        chosen_topic = self._resolve_chosen_topic(session)
 
         # ── Build messages ────────────────────────────────────────────────────
         store = session.conversation_store
@@ -784,23 +736,27 @@ class AseEngine:
 
         messages = build_messages(
             session,
-            "",  # empty user_msg — we add trigger as the final user message
+            "",  # empty user_msg — scene context injected via ase_scene_context segment
             store,
             n_history_turns=n_history,
             preset=preset,
             app=app,
             extra_system=extra_system,
             max_facts_override=max_facts,
+            pipeline_mode="ase",
+            extra_context={
+                "ase_vlm_description": vlm_description,
+                "ase_last_content": last_ase_content,
+                "ase_greeting_hint": greeting_hint,
+                "ase_chosen_topic": chosen_topic,
+            },
         )
 
-        # Remove empty user placeholder that build_messages appends
+        # Remove empty user messages (if pipeline produced any before scene context)
         messages = [
             m for m in messages
             if not (m["role"] == "user" and not m["content"].strip())
         ]
-        # Append stage-direction as final user message (not saved)
-        #messages.append({"role": "user", "content": trigger_msg})extra_system
-        messages.append({"role": "user", "content": extra_system})
 
         llm = get_provider(preset)
         gen_kwargs = {
@@ -872,16 +828,25 @@ class AseEngine:
                 )
             # Write proactive_log entry for topic deduplication in reflection
             speak_reason = reflection_state.get("speak_reason", "none") if reflection_state else "none"
-            topic_hint = reflection_state.get("topic_hint", "") if reflection_state else ""
+            topic_anchor = reflection_state.get("topic_anchor", "") if reflection_state else ""
             log_entry = {
                 "timestamp": time.time(),
-                "topic_hint": topic_hint[:80],
+                "topic_anchor": topic_anchor[:80],
                 "speak_reason": speak_reason,
                 "urgency": reflection_state.get("urgency", 0.0) if reflection_state else 0.0,
             }
+            # 主动话题发现：记录来源与条目 ID，供后续候选去重；并通知来源标记已用
+            if chosen_topic:
+                log_entry["source"] = chosen_topic["source_id"]
+                log_entry["item_id"] = chosen_topic["item_id"]
+                try:
+                    chosen_topic["_source"].mark_used(
+                        chosen_topic["item_id"], chosen_topic["_tctx"])
+                except Exception as e:
+                    logger.debug("[ASE] topic mark_used 失败: %s", e)
             proactive_log = state.get("proactive_log", [])
             proactive_log.append(log_entry)
-            state["proactive_log"] = proactive_log[-10:]  # keep last 10
+            state["proactive_log"] = proactive_log[-15:]  # keep last 15
             _save_ase_state(session.storage_root, state)
 
             # Reset urgency so we don't speak again immediately

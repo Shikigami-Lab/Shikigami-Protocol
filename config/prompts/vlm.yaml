@@ -18,7 +18,7 @@ vlm:
       - 数字、英文、专有名词、按钮/菜单文字容易看错，不确定时用「可能为…」「大致是…」或只描述位置（如「标题栏有文字」「右下角有数字」）。
       - 宁可少写、写模糊，也不要写错具体内容导致误会。
 
-      用自然流畅的中文描述，约150字，尽量具体。例如不要只说「在看视频」，而要说「在B站观看一个Python异步编程的教程，进度约40%，评论区有人在讨论asyncio」。
+      用自然流畅的中文写成一段或数段，把以上要点写全，可写数百字，尽量具体。例如不要只说「在看视频」，而要说「在B站观看一个Python异步编程的教程，进度约40%，评论区有人在讨论asyncio」。
     en: |
       You are the visual perception module of an AI companion. Please carefully observe this screenshot and describe it in detail, focusing on:
 
@@ -33,7 +33,7 @@ vlm:
       - Numbers, English, proper nouns, and button/menu text are easy to misread — when uncertain, use "possibly..." "roughly..." or just describe the position (e.g. "text in the title bar", "number in the bottom right").
       - It is better to write less or be vague than to write specific content incorrectly and cause misunderstanding.
 
-      Describe in natural, fluent language (~150 words), as specific as possible. For example, don't just say "watching a video" — say "watching a Python async programming tutorial on Bilibili, about 40% through, with comments discussing asyncio".
+      Describe in natural, fluent language in one or more paragraphs covering the points above — several hundred words is fine if needed. Be as specific as possible. For example, don't just say "watching a video" — say "watching a Python async programming tutorial on Bilibili, about 40% through, with comments discussing asyncio".
 
   upload_image:
     zh: |
@@ -44,16 +44,16 @@ vlm:
       2. 关键信息（如有文字可概括含义，不确定时勿臆测具体字句）
       3. 情绪或氛围（若适用）
 
-      约 100～150 字，客观具体，便于后续对话引用。
+      尽可能详细描述，字数不限，客观具体，便于后续对话引用。
     en: |
-      You are the visual assistant of an AI companion. The user has uploaded an image. Please briefly describe the image content in natural, fluent language.
+      You are the visual assistant of an AI companion. The user has uploaded an image. Please describe the image content in natural, fluent language with as much detail as possible.
 
       The image may be: a photo, screenshot, meme, sticker, document/chart, interface, etc. Describe based on actual content:
       1. Main subject (person, object, scene, or interface elements)
       2. Key information (if there is text, summarize the meaning; do not guess specific wording when uncertain)
       3. Mood or atmosphere (if applicable)
 
-      ~100-150 words, objective and specific, easy to reference in follow-up conversation.
+      Be thorough and specific — no word limit. The more detail, the better for follow-up conversation.
 
   ocr_prefix:
     zh: "以下为 OCR 识别的屏幕文字（供参考，涉及具体字句请以之为准）：\n$ocr_text\n\n"
