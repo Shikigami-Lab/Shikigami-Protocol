@@ -1390,13 +1390,7 @@
         <!-- Analysis model (collapsible) — 情绪/好感度辅助模型 -->
         <collapsible-section :title="t('llmAnalysisSectionTitle')">
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintAnalysisModelIntro') }}</p>
-            <div class="param-row" style="margin-bottom:0;">
-              <span class="param-label">{{ t('lblEnableAnalysis') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="analysisModelEnabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row style="margin-bottom:0;" :label="t('lblEnableAnalysis')" v-model="analysisModelEnabled"></toggle-row>
             <div class="form-field">
               <div class="form-label">{{ t('lblUsePreset') }}</div>
               <select class="form-select" v-model="analysisModelPreset">
@@ -1447,14 +1441,7 @@
         <!-- Reflection model (collapsible) — 自省模型（从「自省」页迁入） -->
         <collapsible-section :title="t('secReflectionModel')" :body-class="{ disabled: !reflectionForm.reflection_enabled }">
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintReflectionLlmCollapsibleBody') }}</p>
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableDedicatedModel') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.reflection_model_enabled"
-                  :disabled="!reflectionForm.reflection_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableDedicatedModel')" v-model="reflectionForm.reflection_model_enabled" :disabled="!reflectionForm.reflection_enabled"></toggle-row>
             <div class="form-field" style="margin-top:8px;">
               <div class="form-label" :title="t('titlePrimaryModel')">{{ t('lblPrimaryModel') }}</div>
               <select class="form-select" style="font-size:12px;padding:3px 6px;"
@@ -2362,13 +2349,7 @@
                     <p class="form-hint" style="margin-bottom:12px;">{{ t('hintPersonaEvolution') }}</p>
 
                     <!-- 开关 + 频率 -->
-                    <div class="param-row">
-                      <span class="param-label">{{ t('lblEvolutionEnabled') }}</span>
-                      <label class="toggle-switch">
-                        <input type="checkbox" v-model="personaEvolutionForm.enabled" />
-                        <span class="toggle-slider"></span>
-                      </label>
-                    </div>
+                    <toggle-row :label="t('lblEvolutionEnabled')" v-model="personaEvolutionForm.enabled"></toggle-row>
                     <div class="param-row" style="margin-top:8px;" v-show="personaEvolutionForm.enabled">
                       <span class="param-label">{{ t('lblEvolutionInterval') }}</span>
                       <input type="number" class="seg-num-input" min="10" max="1000" step="10" style="width:72px;"
@@ -2694,13 +2675,7 @@
                   <div class="s-card-title">{{ locale === 'en' ? 'AI portrait of you (auto-maintained)' : 'AI 对你的画像（自动维护）' }}</div>
                   <p class="form-hint" style="margin-bottom:12px;">{{ locale === 'en' ? 'A long-running portrait this AI maintains based on your conversations, day summaries, and memory facts. Independent of memory settings.' : '此 AI 基于对话、日记和记忆事实滚动维护的整体画像。独立于记忆系统设置。' }}</p>
 
-                  <div class="param-row">
-                    <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="userPortraitForm.enabled" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
+                  <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="userPortraitForm.enabled"></toggle-row>
 
                   <div v-show="userPortraitForm.enabled" style="margin-top:12px;">
                     <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Portrait content' : '画像内容' }}</div>
@@ -2752,13 +2727,7 @@
 
                     <!-- 高级设置（折叠）-->
                     <div v-show="userPortraitShowAdvanced" style="padding-top:8px;border-top:1px solid var(--border);">
-                      <div class="param-row" style="margin-top:8px;">
-                        <span class="param-label">{{ locale === 'en' ? 'Daily batch refresh' : '日批刷新' }}</span>
-                        <label class="toggle-switch">
-                          <input type="checkbox" v-model="userPortraitForm.auto_refresh_in_daily_job" />
-                          <span class="toggle-slider"></span>
-                        </label>
-                      </div>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Daily batch refresh' : '日批刷新'" v-model="userPortraitForm.auto_refresh_in_daily_job"></toggle-row>
                       <div class="param-row" style="margin-top:8px;">
                         <span class="param-label">{{ locale === 'en' ? 'Burst trigger turns (0=off)' : '对话量兜底（0=关闭）' }}</span>
                         <input type="number" class="seg-num-input" min="0" max="10000" step="10" style="width:80px;"
@@ -2769,20 +2738,8 @@
                         <input type="number" class="seg-num-input" min="0" max="168" step="1" style="width:80px;"
                                v-model.number="userPortraitForm.min_hours_between_refresh" />
                       </div>
-                      <div class="param-row" style="margin-top:8px;">
-                        <span class="param-label">{{ locale === 'en' ? 'Use day summaries' : '使用日记摘要' }}</span>
-                        <label class="toggle-switch">
-                          <input type="checkbox" v-model="userPortraitForm.use_day_summary_as_input" />
-                          <span class="toggle-slider"></span>
-                        </label>
-                      </div>
-                      <div class="param-row" style="margin-top:8px;">
-                        <span class="param-label">{{ locale === 'en' ? 'Use memory facts' : '使用记忆事实' }}</span>
-                        <label class="toggle-switch">
-                          <input type="checkbox" v-model="userPortraitForm.use_facts_as_input" />
-                          <span class="toggle-slider"></span>
-                        </label>
-                      </div>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Use day summaries' : '使用日记摘要'" v-model="userPortraitForm.use_day_summary_as_input"></toggle-row>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Use memory facts' : '使用记忆事实'" v-model="userPortraitForm.use_facts_as_input"></toggle-row>
                       <div class="param-row" style="margin-top:8px;">
                         <span class="param-label">{{ locale === 'en' ? 'Max conv turns' : '最大对话轮数' }}</span>
                         <input type="number" class="seg-num-input" min="10" max="500" step="10" style="width:80px;"
@@ -2817,13 +2774,7 @@
                   <template v-if="reflectionFormProfileId">
                     <div class="section-divider">{{ t('secReflectionBehavior') }}</div>
 
-                    <div class="param-row">
-                      <span class="param-label">{{ t('lblChatInjectTopicHint') }}</span>
-                      <label class="toggle-switch">
-                        <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_anchor" />
-                        <span class="toggle-slider"></span>
-                      </label>
-                    </div>
+                    <toggle-row :label="t('lblChatInjectTopicHint')" v-model="reflectionProfileForm.chat_inject_topic_anchor"></toggle-row>
                     <p class="form-hint">{{ t('hintChatInjectTopicHint') }}</p>
 
                     <div class="param-row" style="margin-top:10px;">
@@ -3476,13 +3427,7 @@
 
                   <div class="s-card">
                   <div class="s-card-title">{{ t('secReflectionBehavior') }}</div>
-                  <div class="param-row">
-                    <span class="param-label">{{ t('lblChatInjectTopicHint') }}</span>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_anchor" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
+                  <toggle-row :label="t('lblChatInjectTopicHint')" v-model="reflectionProfileForm.chat_inject_topic_anchor"></toggle-row>
                   <p class="form-hint">{{ t('hintChatInjectTopicHint') }}</p>
 
                   <div class="param-row" style="margin-top:10px;">
@@ -4090,13 +4035,7 @@
             <div class="s-card-title">{{ t('secReflectionEngine') }}</div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'The AI periodically generates an internal monologue — reflecting on the conversation, mood, and whether it wants to say something. This state then subtly influences how it responds.' : 'AI 会定期进行一次内心独白——回顾对话、感受情绪、判断是否想主动开口。这个内心状态会轻微影响它的回应方式。' }}</p>
 
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableReflection') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.reflection_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableReflection')" v-model="reflectionForm.reflection_enabled"></toggle-row>
             <div class="hint-block" style="border-left-color: var(--warning); background: var(--warning-bg); margin-top: 10px;">
               {{ t('hintReflectionApiCost') }}
             </div>
@@ -4168,13 +4107,7 @@
             <div class="s-card-title">{{ t('secAseEngine') }}</div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'When the AI has something on its mind and you\'ve been quiet for a while, it can send a message on its own. Requires reflection to be enabled.' : '当 AI 内心有话想说，而你已经沉默一段时间时，它会主动发一条消息。需要先开启自省引擎。' }}</p>
 
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableAse') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.ase_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableAse')" v-model="reflectionForm.ase_enabled"></toggle-row>
 
             <div class="settings-param-block" :class="{ disabled: !reflectionForm.ase_enabled }">
               <div class="param-row">
@@ -4235,13 +4168,7 @@
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'Global defaults. Each profile can override these in Profile → Behavior.' : '全局默认值，各人格可在人格→行为页单独覆盖。' }}</p>
 
             <div class="section-divider">{{ locale === 'en' ? 'Emotion Engine' : '情绪引擎' }}</div>
-            <div class="param-row">
-              <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="enginesForm.emotion_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="enginesForm.emotion_enabled"></toggle-row>
             <template v-if="enginesForm.emotion_enabled">
               <div class="param-row">
                 <span class="param-label">{{ locale === 'en' ? 'Classification frequency' : '情绪分类频率' }}</span>
@@ -4250,13 +4177,7 @@
               </div>
               <p class="form-hint">{{ locale === 'en' ? 'Classify the emotional tone of each message. Run once every N messages to save API calls.' : '每 N 条消息对情绪基调做一次分类，可减少 API 消耗。' }}</p>
 
-              <div class="param-row" style="margin-top:14px;">
-                <span class="param-label">{{ locale === 'en' ? 'Auto decay to neutral' : '情绪自动衰减' }}</span>
-                <label class="toggle-switch">
-                  <input type="checkbox" v-model="enginesForm.emotion_decay_enabled" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
+              <toggle-row style="margin-top:14px;" :label="locale === 'en' ? 'Auto decay to neutral' : '情绪自动衰减'" v-model="enginesForm.emotion_decay_enabled"></toggle-row>
               <p class="form-hint">{{ locale === 'en' ? 'After a long silence, reset the emotion back to a neutral state instead of keeping the last classified mood forever.' : '长时间未对话时，把情绪整体重置回中性状态，避免上次分类的情绪被永久保留。' }}</p>
 
               <template v-if="enginesForm.emotion_decay_enabled">
@@ -4286,13 +4207,7 @@
             </template>
 
             <div class="section-divider">{{ locale === 'en' ? 'Affinity Engine' : '好感度引擎' }}</div>
-            <div class="param-row">
-              <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="enginesForm.affinity_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="enginesForm.affinity_enabled"></toggle-row>
             <template v-if="enginesForm.affinity_enabled">
               <div class="param-row">
                 <span class="param-label">{{ locale === 'en' ? 'Adjust frequency' : '调整频率' }}</span>
@@ -4308,13 +4223,7 @@
             </template>
 
             <div class="section-divider">{{ locale === 'en' ? 'Energy System' : '能量系统' }}</div>
-            <div class="param-row">
-              <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="enginesForm.energy_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="enginesForm.energy_enabled"></toggle-row>
             <template v-if="enginesForm.energy_enabled">
               <div class="param-row" style="margin-bottom:0;">
                 <span class="param-label">{{ locale === 'en' ? 'Recovery interval' : '恢复间隔' }}</span>
@@ -4489,13 +4398,7 @@
         <div class="s-card">
           <div class="s-card-title">{{ t('secProxyAndHf') }}</div>
           <p class="form-hint" style="margin-bottom:12px;">{{ t('hintProxyDesc') }}</p>
-          <div class="param-row" style="margin-bottom:8px;">
-            <span class="param-label">{{ t('lblUseProxy') }}</span>
-            <label class="toggle-switch">
-              <input type="checkbox" v-model="systemEnvForm.proxy_enabled" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
+          <toggle-row style="margin-bottom:8px;" :label="t('lblUseProxy')" v-model="systemEnvForm.proxy_enabled"></toggle-row>
           <div class="form-field" v-if="systemEnvForm.proxy_enabled">
             <div class="form-label">{{ t('lblProxyUrl') }}</div>
             <input class="form-input" v-model="systemEnvForm.proxy_url" :placeholder="t('phProxyUrl')" />
@@ -4818,13 +4721,7 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectLtm') }}</div>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableLtm') }}</p>
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableLtm') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="memoryGlobalForm.enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableLtm')" v-model="memoryGlobalForm.enabled"></toggle-row>
 
             <div class="param-row" style="margin-top:10px;">
               <span class="param-label">{{ t('lblMaxHistoryTurns') }}</span>
@@ -4915,13 +4812,7 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectDaySummary') }}</div>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableDaySummary') }}</p>
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableDaySummary') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="memoryGlobalForm.day_summary_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableDaySummary')" v-model="memoryGlobalForm.day_summary_enabled"></toggle-row>
 
             <div class="settings-param-block" :class="{ disabled: !memoryGlobalForm.day_summary_enabled }">
               <div class="param-row" style="margin-top:8px;">
