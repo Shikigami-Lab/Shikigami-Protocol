@@ -39,10 +39,12 @@
   /* 字体 */
   --font-ui: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-serif: KaiTi, "STKaiti", "Kaiti SC", "楷体", serif;
-  /* 派生色：均用 color-mix 从各主题色自动算出，此前被引用却从未定义 */
+  /* 派生色：此前被 var() 引用却从未定义 */
   --text-tertiary: color-mix(in srgb, var(--text-secondary) 62%, var(--bg-app));
-  --bg-elevated: color-mix(in srgb, var(--bg-panel) 88%, var(--text-primary));
   --accent-muted: color-mix(in srgb, var(--accent) 45%, var(--bg-panel));
+  /* --bg-elevated：嵌套区块的微暗叠加。全代码库 14 处用法的 fallback 都是
+     rgba(0,0,0,0.0X)，故定义为同类半透明值（实色 color-mix 会让卡片发灰）。 */
+  --bg-elevated: rgba(0, 0, 0, 0.04);
   /* 全局警告色（取代散落在 HTML 里的硬编码琥珀色） */
   --warning: #e8a040;
   --warning-bg: rgba(232, 160, 64, 0.10);

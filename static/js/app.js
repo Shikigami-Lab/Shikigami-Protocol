@@ -2876,17 +2876,17 @@ const App = {
 
     aseOverallLabel() {
       const map = {
-        disabled:          '已禁用',
-        daily_limit:       '今日已满',
-        consecutive_limit: '等待回应',
-        waiting_silence:   '等待沉默',
-        waiting_urgency:   '紧迫度不足',
-        waiting_cooldown:  '冷却中',
-        waiting_check:     '待检测',
-        ready:             '发言中',
-        unknown:           '—',
+        disabled:          'aseOverallDisabled',
+        daily_limit:       'aseOverallDailyLimit',
+        consecutive_limit: 'aseOverallConsecutiveLimit',
+        waiting_silence:   'aseOverallWaitingSilence',
+        waiting_urgency:   'aseOverallWaitingUrgency',
+        waiting_cooldown:  'aseOverallWaitingCooldown',
+        waiting_check:     'aseOverallWaitingCheck',
+        ready:             'aseOverallReady',
       };
-      return map[this.aseStatus.overall_status] || '—';
+      const key = map[this.aseStatus.overall_status];
+      return key ? this.t(key) : '—';
     },
     aseOverallStyle() {
       const s = this.aseStatus.overall_status;

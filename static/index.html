@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20260518b" />
-  <link rel="stylesheet" href="css/settings.css?v=20260518b" />
+  <link rel="stylesheet" href="css/styles.css?v=20260518c" />
+  <link rel="stylesheet" href="css/settings.css?v=20260518c" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260518b"></script>
+  <script src="js/i18n.js?v=20260518c"></script>
 </head>
 <body>
 
@@ -5477,7 +5477,7 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/settings.js?v=20260518b"></script>
-<script src="js/app.js?v=20260518b"></script>
+<script src="js/settings.js?v=20260518c"></script>
+<script src="js/app.js?v=20260518c"></script>
 </body>
 </html>
