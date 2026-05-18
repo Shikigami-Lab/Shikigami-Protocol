@@ -2613,7 +2613,7 @@ const SettingsMixin = {
           await this.loadProfiles();
           if (this.selectedProfileId === profileId) {
             this.selectedProfileId = '';
-            this.profileForm = { profile_id: '', display_name: '', base_prompt: '', style_constraint: '', avatar: '', lorebook_ref: '', user_persona: { name: '', description: '', personality: '', role_in_story: '' } };
+            this.profileForm = { profile_id: '', display_name: '', base_prompt: '', style_constraint: '', avatar: '', lorebook_ref: '', user_persona: { name: '', introduction: '' } };
           }
           if (data.cleanup_failed) {
             this.showToast(
@@ -4307,8 +4307,8 @@ const SettingsMixin = {
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsReflection());
         const data = await res.json();
-        // Merge scalar fields directly
-        const { ase_modes, ...rest } = data;
+        // Merge scalar fields directly（ase_modes / topic_discovery 是嵌套对象，单独深合并）
+        const { ase_modes, topic_discovery, ...rest } = data;
         Object.assign(this.reflectionForm, rest);
         // Init _enabled flags from API response (null = not overriding → disabled)
         for (const k of ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'max_tokens']) {
@@ -4324,6 +4324,18 @@ const SettingsMixin = {
             } else {
               this.reflectionForm.ase_modes[mode] = ase_modes[mode];
             }
+          }
+        }
+        // Deep-merge topic_discovery：直接 Object.assign 会整体替换嵌套的 sources 默认结构
+        if (topic_discovery && this.reflectionForm.topic_discovery) {
+          const td = this.reflectionForm.topic_discovery;
+          for (const k of ['enabled', 'candidate_cap', 'recent_used_window', 'chosen_topic_ttl']) {
+            if (topic_discovery[k] !== undefined) td[k] = topic_discovery[k];
+          }
+          const srcs = topic_discovery.sources || {};
+          for (const sid of Object.keys(srcs)) {
+            if (td.sources[sid]) Object.assign(td.sources[sid], srcs[sid]);
+            else td.sources[sid] = srcs[sid];
           }
         }
       } catch (e) {

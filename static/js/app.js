@@ -392,7 +392,9 @@ const App = {
       await this.loadHistory(this.currentSessionId);
       this.subscribeEvents(this.currentSessionId);
       this.fetchStatus();
-      this._statusPollTimer = setInterval(() => this.fetchStatus(), 30000);
+      if (!this._statusPollTimer) {
+        this._statusPollTimer = setInterval(() => this.fetchStatus(), 30000);
+      }
     }
     this.statusText = this.t('statusReady');
     this.loadSystemConfig();
@@ -2725,9 +2727,18 @@ const App = {
 
   watch: {
     currentSessionId(newId) {
-      // Start background ASE poll (30s) as soon as a session becomes active.
-      if (newId && !this._asePollTimer) {
-        this._asePollTimer = setInterval(() => this.fetchAseStatus(), 30000);
+      // 单聊会话激活↔轮询的唯一生命周期 owner：激活时启动 status/ASE 轮询，
+      // 切到群聊(null)时停掉，避免进群再退群后 _statusPollTimer 永久失效 / _asePollTimer 泄漏。
+      if (newId) {
+        if (!this._statusPollTimer) {
+          this._statusPollTimer = setInterval(() => this.fetchStatus(), 30000);
+        }
+        if (!this._asePollTimer) {
+          this._asePollTimer = setInterval(() => this.fetchAseStatus(), 30000);
+        }
+      } else {
+        if (this._statusPollTimer) { clearInterval(this._statusPollTimer); this._statusPollTimer = null; }
+        if (this._asePollTimer) { clearInterval(this._asePollTimer); this._asePollTimer = null; }
       }
     },
     ttsEnabled(val) {
