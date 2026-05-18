@@ -37,6 +37,18 @@ def _migrate_user_persona(card: Dict[str, Any]) -> bool:
     return True
 
 
+# user_portrait_config 默认值的单一真相源（profile_loader 补全、settings API 回退共用）
+DEFAULT_USER_PORTRAIT_CONFIG: Dict[str, Any] = {
+    "enabled": True,
+    "auto_refresh_in_daily_job": True,
+    "min_turns_for_burst_refresh": 100,
+    "min_hours_between_refresh": 6,
+    "use_day_summary_as_input": True,
+    "use_facts_as_input": True,
+    "max_input_conv_turns": 60,
+}
+
+
 def _ensure_user_portrait_defaults(card: Dict[str, Any]) -> None:
     """确保 user_portrait / user_portrait_config 字段存在（仅内存补全）。"""
     card.setdefault("user_portrait", {
@@ -45,15 +57,7 @@ def _ensure_user_portrait_defaults(card: Dict[str, Any]) -> None:
         "refresh_count": 0,
         "last_input_signature": "",
     })
-    card.setdefault("user_portrait_config", {
-        "enabled": True,
-        "auto_refresh_in_daily_job": True,
-        "min_turns_for_burst_refresh": 100,
-        "min_hours_between_refresh": 6,
-        "use_day_summary_as_input": True,
-        "use_facts_as_input": True,
-        "max_input_conv_turns": 60,
-    })
+    card.setdefault("user_portrait_config", dict(DEFAULT_USER_PORTRAIT_CONFIG))
 
 
 class ProfileLoader:

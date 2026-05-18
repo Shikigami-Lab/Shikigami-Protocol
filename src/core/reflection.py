@@ -103,26 +103,6 @@ def _build_system_prompt(
                   ase_section=ase_section)
 
 
-def _format_silence_tier(silent_seconds: float, locale: str = None) -> str:
-    """用户沉默时长：5分钟内=才说过话，之后按分钟、小时、天递进。"""
-    if locale is None:
-        locale = get_locale()
-    if silent_seconds < 300:
-        return get_prompt("reflection.silence_tier.just_spoke", locale=locale,
-                          default=("user just spoke within 5 minutes" if locale == "en" else "5分钟之内，用户才说过话"))
-    if silent_seconds < 3600:
-        return render("reflection.silence_tier.minutes", locale=locale,
-                      default=("user has been silent for $minutes minutes" if locale == "en" else "用户已沉默 $minutes 分钟"),
-                      minutes=int(silent_seconds / 60))
-    if silent_seconds < 86400:
-        return render("reflection.silence_tier.hours", locale=locale,
-                      default=("user has been silent for $hours hours" if locale == "en" else "用户已沉默 $hours 小时"),
-                      hours=int(silent_seconds / 3600))
-    return render("reflection.silence_tier.days", locale=locale,
-                  default=("user has been silent for $days days" if locale == "en" else "用户已沉默 $days 天"),
-                  days=int(silent_seconds / 86400))
-
-
 def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> list:
     """Assemble reflection prompt from registered reflection segments + custom segments."""
     from src.prompt.registry import get_registered
@@ -172,155 +152,6 @@ def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> l
 
     system_content = "\n\n".join(p for p in parts if p)
     locale = ctx.locale or "zh"
-    return [
-        {"role": "system", "content": system_content},
-        {"role": "user", "content": _reflection_user_instruction(locale)},
-    ]
-
-
-def _build_reflection_prompt(
-    recent_turns: list,
-    emotion: Optional[Dict] = None,
-    affinity: Optional[Dict] = None,
-    silent_seconds: float = 0,
-    persona_name: str = "AI",
-    persona_brief: str = "",
-    ase_context: Optional[Dict[str, Any]] = None,
-    prev_reflection: Optional[Dict[str, Any]] = None,
-    context_notes: Optional[list] = None,
-    ase_decision_context: Optional[Dict[str, Any]] = None,
-    last_user_message_time: Optional[float] = None,
-    user_name: str = "用户",
-) -> list:
-    """Build messages for reflection: 单块 system = 内置规则(persona_brief/urgency 等) + 最近对话 + 当前上下文。
-    persona_brief 与情感分类、好感度 LLM 同源：reflection_config.custom_prompt（截断见 get_persona_context_for_secondary_llm），不含 base_prompt。
-    """
-    locale = get_locale()
-    user_label = "User" if locale == "en" else "用户"
-    ctx_parts = []
-
-    # 【你上一轮自省】便于连贯与校准 urgency，减少无依据的跳变
-    if prev_reflection:
-        urgency = prev_reflection.get("urgency")
-        topic = (prev_reflection.get("topic_anchor") or "").strip()
-        updated_at = prev_reflection.get("updated_at") or 0
-        if topic or urgency is not None:
-            line = get_prompt("reflection.prev_reflection_header", locale=locale,
-                              default=("[Your Last Reflection]" if locale == "en" else "【你上一轮自省】"))
-            if topic:
-                line += render("reflection.prev_topic", locale=locale,
-                               default=("Your last noted topic was: $topic" if locale == "en" else "你上次在意的话题是：$topic"), topic=topic)
-            if urgency is not None:
-                line += render("reflection.prev_urgency", locale=locale,
-                               default=("; urgency was $urgency" if locale == "en" else "；urgency 为 $urgency"), urgency=round(urgency, 1))
-            if updated_at > 0:
-                elapsed = time.time() - updated_at
-                if elapsed < 60:
-                    time_ago = render("reflection.silence_tier.just_spoke", locale=locale,
-                                      default=("less than 1 minute" if locale == "en" else "不到1分钟"))
-                elif elapsed < 3600:
-                    time_ago = render("time_context.human_delta.minutes", locale=locale,
-                                      default=("$minutes minutes" if locale == "en" else "$minutes 分钟"), minutes=int(elapsed / 60))
-                elif elapsed < 86400:
-                    time_ago = render("time_context.human_delta.hours", locale=locale,
-                                      default=("$hours hours" if locale == "en" else "$hours 小时"), hours=int(elapsed / 3600))
-                else:
-                    time_ago = render("time_context.human_delta.days", locale=locale,
-                                      default=("$days days" if locale == "en" else "$days 天"), days=int(elapsed / 86400))
-                line += render("reflection.prev_elapsed", locale=locale,
-                               default=("; $time_ago has passed since your last reflection" if locale == "en" else "；距离上次自省已经过去 $time_ago"), time_ago=time_ago)
-            ctx_parts.append(line)
-
-    # Emotion state
-    if emotion:
-        layers = emotion.get("emotion_layers") or []
-        emotion_header = get_prompt("reflection.emotion_label", locale=locale,
-                                    default=("[Current Emotion]" if locale == "en" else "【当前情感】"))
-        if layers:
-            parts = []
-            for lay in layers[:3]:
-                e = lay.get("emotion", "")
-                i = lay.get("intensity", 0.5)
-                if e:
-                    parts.append(f"{e}({int(i * 100)}%)")
-            if parts:
-                ctx_parts.append(emotion_header + ", ".join(parts))
-        else:
-            primary = emotion.get("primary_emotion", "")
-            weight = emotion.get("primary_weight", 0.5)
-            if primary:
-                if locale == "en":
-                    ctx_parts.append(f"{emotion_header} {primary} ({int(weight * 100)}%)")
-                else:
-                    ctx_parts.append(f"{emotion_header}{primary}（{int(weight * 100)}%）")
-
-    # Affinity
-    if affinity:
-        status = affinity.get("status", "")
-        ctx_parts.append(render("reflection.affinity_label", locale=locale,
-                                default=("[Affinity] ($status)" if locale == "en" else "【好感度】（$status）"), status=status))
-
-    # 用户沉默分级
-    ctx_parts.append(render("reflection.user_time_label", locale=locale,
-                            default=("[User Last Spoke] $silence" if locale == "en" else "【用户说话时间】$silence"),
-                            silence=_format_silence_tier(silent_seconds, locale)))
-
-    # 【你（AI）的主动发言】仅当「上次 ASE 后用户未回复」时注入
-    if ase_context is not None:
-        last_speak_time = ase_context.get("last_speak_time")
-        user_replied_since_last_ase = (
-            last_user_message_time is not None
-            and last_speak_time is not None
-            and last_user_message_time > last_speak_time
-        )
-        content = (ase_context.get("last_speak_content") or "").strip()
-        if content and not user_replied_since_last_ase:
-            excerpt = content[:150] + ("…" if len(content) > 150 else "")
-            ctx_parts.append(render("reflection.last_spoke_label", locale=locale,
-                                    default=("You last initiated with: \"$excerpt\"" if locale == "en" else "你上次主动说的是：「$excerpt」"), excerpt=excerpt))
-            secs = ase_context.get("seconds_since_last_speak")
-            if secs is not None:
-                ctx_parts.append(render("reflection.ase_speak_ago", locale=locale,
-                                        default=("[Your Proactive Speech] $minutes minutes since you last initiated" if locale == "en" else "【你的主动发言】距离你上次主动开口已经 $minutes 分钟"),
-                                        minutes=int(secs / 60)))
-            else:
-                ctx_parts.append(get_prompt("reflection.ase_never_spoke", locale=locale,
-                                            default=("[Your Proactive Speech] You have not yet initiated" if locale == "en" else "【你的主动发言】你尚未主动说过话")))
-            ctx_parts.append(get_prompt("reflection.ase_user_no_reply", locale=locale,
-                                        default=("Your last message was a proactive one; the user has not yet replied." if locale == "en" else "上一条消息是你主动说的，用户尚未回复。")))
-        consec = ase_context.get("consecutive_speaks", 0)
-        if consec and int(consec) > 0:
-            ctx_parts.append(render("reflection.ase_consec_speaks", locale=locale,
-                                    default=("You have initiated $consec consecutive times without a reply;" if locale == "en" else "你已连续主动发言 $consec 次，用户均未回复；"),
-                                    consec=int(consec)))
-
-    context_block = "\n\n".join(ctx_parts)
-
-    # 最近对话
-    if recent_turns:
-        turns = recent_turns[-10:]
-        lines = []
-        for m in turns:
-            sender = (m.get("sender") or "").strip()
-            content = (m.get("content") or "")[:300].strip()
-            is_human = sender == user_name or (not sender and m.get("role", "user") == "user")
-            if is_human:
-                lines.append(f"{user_label}：{content}")
-            else:
-                lines.append(f"{persona_name}：{content}")
-        dialogue_text = "\n".join(lines)
-    else:
-        dialogue_text = get_prompt("reflection.no_recent_dialogue", locale=locale,
-                                   default=("No recent conversation." if locale == "en" else "暂无最近对话。"))
-
-    prompt_base = _build_system_prompt(persona_name, persona_brief,
-                                       context_notes or [], ase_decision_context, locale)
-    dialogue_header = get_prompt("reflection.recent_dialogue_header", locale=locale,
-                                 default=("\n\n[Recent Conversation]\n" if locale == "en" else "\n\n【最近对话】\n"))
-    context_header  = get_prompt("reflection.context_header", locale=locale,
-                                 default=("\n\n[Current Context]\n" if locale == "en" else "\n\n【当前上下文】\n"))
-    system_content = prompt_base + dialogue_header + dialogue_text + context_header + context_block
-
     return [
         {"role": "system", "content": system_content},
         {"role": "user", "content": _reflection_user_instruction(locale)},
@@ -549,7 +380,7 @@ class ReflectionEngine:
             merged = get_merged_recent_messages(
                 session, self._app, profile_data, recent_turns_n, cap=None
             )
-            # Convert to {role, content, sender} for _build_reflection_prompt; group messages get prefix in content
+            # Convert to {role, content, sender}; group messages get prefix in content
             recent = []
             for m in merged:
                 role = m.get("role") or "user"

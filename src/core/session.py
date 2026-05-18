@@ -3,7 +3,6 @@ import gc
 import logging
 import os
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -39,16 +38,6 @@ class Session:
     segment_last_fired: Dict[str, float] = field(default_factory=dict, repr=False)
     # Segment once_per_day: segment_id -> last fired date "YYYY-MM-DD"
     segment_last_fired_date: Dict[str, str] = field(default_factory=dict, repr=False)
-
-    @classmethod
-    def create(cls, profile_id: str, display_name: str) -> "Session":
-        sid = uuid.uuid4().hex[:8]
-        return cls(
-            id=sid,
-            profile_id=profile_id,
-            display_name=display_name,
-            storage_root=f"sessions/{sid}",
-        )
 
     @classmethod
     def from_profile(cls, profile_id: str, display_name: str) -> "Session":

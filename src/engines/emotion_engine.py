@@ -580,8 +580,3 @@ class EmotionEngine:
             from src.utils.engine_warnings import set_warning
             set_warning(app, "analysis", f"辅助模型调用失败({type(e).__name__}) — 情绪分类暂停")
             return False
-
-    def emotion_changed(self, session) -> bool:
-        """检查最近一次分类后情绪是否变化。"""
-        state = self.load_state(session)
-        return state.get("primary_emotion") != state.get("_prev_primary")

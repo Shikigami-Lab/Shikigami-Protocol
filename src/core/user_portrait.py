@@ -62,9 +62,12 @@ def _load_profile_card(profile_id: str) -> Dict[str, Any]:
 
 
 def _save_profile_card(profile_id: str, card: Dict[str, Any]) -> None:
+    # 原子写：人格卡是角色的核心文件，崩溃在写入中途会损坏整个角色
     path = _profile_card_path(profile_id)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(card, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def get_changelog(storage_root: str) -> List[Dict[str, Any]]:

@@ -54,11 +54,13 @@ def _load_ase_state(storage_root: str) -> Dict[str, Any]:
 
 
 def _save_ase_state(storage_root: str, state: Dict[str, Any]) -> None:
-    """Persist ASE state to disk (best-effort)."""
+    """Persist ASE state to disk (best-effort, atomic tmp+replace)."""
     path = _ase_state_path(storage_root)
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception as e:
         logger.warning("[ASE] save_ase_state failed (%s): %s", path, e)
 
@@ -815,7 +817,11 @@ class AseEngine:
             state = self._state.setdefault(session.profile_id, {})
             state["last_speak_time"] = time.time()
             state["last_speak_content"] = (full_response[:250] or "").strip()
-            state.setdefault("timestamps_24h", []).append(time.time())
+            # 先按 24h 窗口裁剪再追加，否则过期时间戳会在磁盘上无限累积
+            _now = time.time()
+            _cutoff = _now - 86400
+            state["timestamps_24h"] = [t for t in state.get("timestamps_24h", []) if t > _cutoff]
+            state["timestamps_24h"].append(_now)
             state["consecutive_speaks"] = state.get("consecutive_speaks", 0) + 1
             if injected_builtin_ids:
                 state["hint_last_used"] = _hint_last_used_after_speak(

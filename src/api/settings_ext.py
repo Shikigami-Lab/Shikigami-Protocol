@@ -3338,15 +3338,8 @@ async def get_user_portrait(profile_id: str):
     with open(path, "r", encoding="utf-8") as f:
         card = json.load(f)
     portrait = card.get("user_portrait") or {}
-    cfg = card.get("user_portrait_config") or {
-        "enabled": True,
-        "auto_refresh_in_daily_job": True,
-        "min_turns_for_burst_refresh": 100,
-        "min_hours_between_refresh": 6,
-        "use_day_summary_as_input": True,
-        "use_facts_as_input": True,
-        "max_input_conv_turns": 60,
-    }
+    from src.config.profile_loader import DEFAULT_USER_PORTRAIT_CONFIG
+    cfg = card.get("user_portrait_config") or dict(DEFAULT_USER_PORTRAIT_CONFIG)
     from src.core.user_portrait import get_changelog
     changelog_count = len(get_changelog(storage_root))
     return {
