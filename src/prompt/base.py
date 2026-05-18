@@ -206,4 +206,7 @@ class ReflectionBuildContext:
     store: Optional[Any] = None           # ConversationStore — for user_engagement stats
     memory_manager: Optional[Any] = None  # MemoryManager — for memory_facts segment
     reflection_cfg: Dict[str, Any] = field(default_factory=dict)  # global reflection config
-    trend_items: List[Dict[str, Any]] = field(default_factory=list)  # populated by TrendContextReflectionSegment
+    trend_items: List[Dict[str, Any]] = field(default_factory=list)  # legacy; kept for compat
+    # 主动话题发现：topic_candidates 段落填充候选，_reflect() 据此把 topic_pick 解析成 chosen_topic
+    topic_candidates: List[Any] = field(default_factory=list)        # List[TopicCandidate]
+    topic_discovery_cfg: Dict[str, Any] = field(default_factory=dict)

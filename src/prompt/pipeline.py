@@ -55,7 +55,6 @@ import src.prompt.segments.reflection.ase_context    # noqa: F401
 import src.prompt.segments.reflection.recent_dialogue # noqa: F401
 import src.prompt.segments.ase.morning_greeting      # noqa: F401
 import src.prompt.segments.ase.long_silence_check_in # noqa: F401
-import src.prompt.segments.ase.trend_context         # noqa: F401  (AseTrendContextSegment, cooldown 2h)
 import src.prompt.segments.ase.initiation_frame      # noqa: F401
 import src.prompt.segments.ase.behavioral_guidance   # noqa: F401
 import src.prompt.segments.ase.scene_context         # noqa: F401

@@ -246,3 +246,21 @@ vlm:
   for_chat: true
   for_ase: true
   ase_wait_seconds: 3
+
+# 主动话题发现：ASE 沉默后主动开口时，由自省从多来源选定一个话题、ASE 演出。
+topic_discovery:
+  enabled: true
+  candidate_cap: 8          # 注入自省 prompt 的候选话题上限
+  recent_used_window: 10    # 候选装配时排除最近 N 条已发话题
+  chosen_topic_ttl: 1800    # 自省选定的话题超过此秒数视为过期，ASE 走兜底
+  sources:
+    trend:               { enabled: true }   # 网络趋势（需趋势功能开启）
+    conversation_recall: { enabled: true }   # 对话回忆（需每日摘要开启）
+    user_life:           { enabled: true }   # 用户生活（长期记忆事实）
+    ai_self:             { enabled: true }   # AI 自身状态
+    random_api:
+      enabled: false                          # 随机话题，默认关
+      mode: builtin                           # builtin | http
+      builtin_pool: icebreaker                # icebreaker | trivia | would_you_rather
+      http_url: ""
+      http_json_path: ""

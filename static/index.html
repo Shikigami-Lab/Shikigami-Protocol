@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js"></script>
+  <script src="js/i18n.js?v=20260518a"></script>
 </head>
 <body>
 
@@ -481,6 +481,8 @@
                   <div v-if="aseStatus.reflection && aseStatus.reflection.topic_anchor"
                        style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">
                     {{ t('aseReflectionTopic') }}{{ aseStatus.reflection.topic_anchor }}
+                    <span v-if="aseStatus.reflection.chosen_topic_source">
+                      · {{ t('topicSrc_' + aseStatus.reflection.chosen_topic_source) }}</span>
                   </div>
                   <div v-if="aseStatus.reflection && aseStatus.reflection.thought"
                        class="ase-thought-box">
@@ -1600,6 +1602,100 @@
             </div>
             <div class="hint-block" style="margin-top:10px;font-size:11px;" v-html="t('hintVlmScreenSource')"></div>
 
+          </div>
+        </div>
+
+        <!-- 主动话题（collapsible）— ASE 沉默后主动开口时从多来源选定话题 -->
+        <div class="section-collapsible">
+          <div class="section-collapsible-header"
+               @click="showTopicDiscoverySection = !showTopicDiscoverySection">
+            {{ t('secTopicDiscovery') }}
+            <span>{{ showTopicDiscoverySection ? '▲' : '▼' }}</span>
+          </div>
+          <div v-show="showTopicDiscoverySection" class="section-collapsible-body">
+            <div class="param-row">
+              <span class="param-label" :title="t('titleTopicDiscovery')">{{ t('lblTopicDiscoveryEnabled') }}</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="reflectionForm.topic_discovery.enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="section-divider" style="margin:10px 0 8px;font-size:11px;">{{ t('lblTopicSources') }}</div>
+            <div class="param-row" v-for="sid in ['trend','conversation_recall','user_life','ai_self']" :key="sid">
+              <span class="param-label">{{ t('topicSrc_' + sid) }}</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="reflectionForm.topic_discovery.sources[sid].enabled"
+                       :disabled="!reflectionForm.topic_discovery.enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="param-row">
+              <span class="param-label">{{ t('topicSrc_random_api') }}</span>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="reflectionForm.topic_discovery.sources.random_api.enabled"
+                       :disabled="!reflectionForm.topic_discovery.enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div v-if="reflectionForm.topic_discovery.sources.random_api.enabled"
+                 style="padding-left:12px;border-left:2px solid var(--border);margin:4px 0 4px 4px;">
+              <div class="form-field" style="margin-top:6px;">
+                <div class="form-label">{{ t('lblRandomApiMode') }}</div>
+                <select class="form-select" style="font-size:12px;padding:3px 6px;"
+                        v-model="reflectionForm.topic_discovery.sources.random_api.mode">
+                  <option value="builtin">{{ t('optRandomApiBuiltin') }}</option>
+                  <option value="http">{{ t('optRandomApiHttp') }}</option>
+                </select>
+              </div>
+              <div v-if="reflectionForm.topic_discovery.sources.random_api.mode === 'builtin'"
+                   class="form-field" style="margin-top:6px;">
+                <div class="form-label">{{ t('lblRandomApiPool') }}</div>
+                <select class="form-select" style="font-size:12px;padding:3px 6px;"
+                        v-model="reflectionForm.topic_discovery.sources.random_api.builtin_pool">
+                  <option value="icebreaker">{{ t('optPoolIcebreaker') }}</option>
+                  <option value="trivia">{{ t('optPoolTrivia') }}</option>
+                  <option value="would_you_rather">{{ t('optPoolWyr') }}</option>
+                </select>
+              </div>
+              <template v-else>
+                <div class="form-field" style="margin-top:6px;">
+                  <div class="form-label">{{ t('lblRandomApiUrl') }}</div>
+                  <input type="text" class="form-input"
+                         v-model="reflectionForm.topic_discovery.sources.random_api.http_url"
+                         placeholder="https://api.example.com/random" />
+                </div>
+                <div class="form-field" style="margin-top:6px;">
+                  <div class="form-label">{{ t('lblRandomApiJsonPath') }}</div>
+                  <input type="text" class="form-input"
+                         v-model="reflectionForm.topic_discovery.sources.random_api.http_json_path"
+                         placeholder="slip.advice" />
+                </div>
+              </template>
+            </div>
+
+            <div class="section-divider" style="margin:10px 0 4px;font-size:11px;cursor:pointer;"
+                 @click="topicDiscoveryAdvancedOpen = !topicDiscoveryAdvancedOpen">
+              {{ topicDiscoveryAdvancedOpen ? '▲' : '▼' }} {{ t('lblTopicAdvanced') }}
+            </div>
+            <template v-if="topicDiscoveryAdvancedOpen">
+              <div class="param-row">
+                <span class="param-label">{{ t('lblCandidateCap') }}</span>
+                <input type="number" class="seg-num-input" min="1" max="20"
+                       v-model.number="reflectionForm.topic_discovery.candidate_cap" style="width:60px;" />
+              </div>
+              <div class="param-row">
+                <span class="param-label">{{ t('lblRecentUsedWindow') }}</span>
+                <input type="number" class="seg-num-input" min="0" max="50"
+                       v-model.number="reflectionForm.topic_discovery.recent_used_window" style="width:60px;" />
+              </div>
+              <div class="param-row">
+                <span class="param-label">{{ t('lblChosenTopicTtl') }}</span>
+                <input type="number" class="seg-num-input" min="60" max="86400"
+                       v-model.number="reflectionForm.topic_discovery.chosen_topic_ttl" style="width:80px;" />
+              </div>
+            </template>
+            <div class="hint-block" style="margin-top:10px;font-size:11px;">{{ t('hintTopicDiscovery') }}</div>
           </div>
         </div>
 
@@ -2828,6 +2924,15 @@
                       <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === null }]" @click="profileEnginesForm.ase_enabled = null">{{ t('optInherit') }}</button>
                       <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === true }]" @click="profileEnginesForm.ase_enabled = true">{{ t('optOn') }}</button>
                       <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === false }]" @click="profileEnginesForm.ase_enabled = false">{{ t('optOff') }}</button>
+                    </div>
+                    <div class="engine-override-label" style="margin-top:4px;">{{ t('secTopicDiscovery') }}</div>
+                    <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
+                      <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('topic_discovery') }}</span>
+                    </p>
+                    <div class="engine-tri-toggle">
+                      <button :class="['tri-btn', { active: profileEnginesForm.topic_discovery_enabled === null }]" @click="profileEnginesForm.topic_discovery_enabled = null">{{ t('optInherit') }}</button>
+                      <button :class="['tri-btn', { active: profileEnginesForm.topic_discovery_enabled === true }]" @click="profileEnginesForm.topic_discovery_enabled = true">{{ t('optOn') }}</button>
+                      <button :class="['tri-btn', { active: profileEnginesForm.topic_discovery_enabled === false }]" @click="profileEnginesForm.topic_discovery_enabled = false">{{ t('optOff') }}</button>
                     </div>
                   </div>
 
@@ -5372,7 +5477,7 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/settings.js?v=20260512a"></script>
+<script src="js/settings.js?v=20260518a"></script>
 <script src="js/app.js?v=20260512a"></script>
 </body>
 </html>

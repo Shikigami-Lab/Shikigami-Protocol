@@ -41,18 +41,6 @@ logger = logging.getLogger(__name__)
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
-def _load_persona_evolved_config(profile_id: str) -> Optional[Dict]:
-    """读取 profile.persona_evolved 字段（含 enabled / min_interval_turns）。轻量只读，不抛异常。"""
-    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
-    try:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f).get("persona_evolved") or {}
-    except Exception:
-        pass
-    return {}
-
-
 # 前置过滤：时间相对词（此类事实时效性差，跳过）
 _STALE_WORDS = frozenset(["刚才", "今天", "昨天", "刚刚", "这次", "这会儿", "现在", "今晚", "刚好"])
 
@@ -390,20 +378,9 @@ class MemoryManager:
                            len(facts_list), added_count)
         logger.info("[MemoryManager] auto_extract 完成 profile=%s extracted=%d added=%d",
                     self._profile_id, len(facts_list), added_count)
-
-        # ── 触发人格演化（fire-and-forget，不阻塞对话流）────────────────────
-        # 使用与情绪/好感度引擎相同的 turn_counter % interval 模式
-        _evo_card = _load_persona_evolved_config(self._profile_id)
-        _evo_interval = int((_evo_card or {}).get("min_interval_turns", 200))
-        if (_evo_card or {}).get("enabled", True) and self._turn_counter > 0 and self._turn_counter % _evo_interval == 0:
-            try:
-                from src.core.persona_evolution import trigger_evolution
-                asyncio.ensure_future(
-                    trigger_evolution(self._profile_id, self._storage_root, app,
-                                      turn_counter=self._turn_counter)
-                )
-            except Exception as _e:
-                logger.warning("[MemoryManager] 人格演化触发失败（非致命）: %s", _e)
+        # 人格演化触发已移出此处：旧实现挂在 auto_extract 末尾，会被 memory 总开关
+        # 绑死，且 turn_counter % interval 的判定在频率不整除时会永远命不中。
+        # 现由 chat.py::_fire_persona_evolution_check 按消息计数独立触发。
 
     def _build_day_summary_context(self, date_str: str, msg_count: int, profile: Dict, app) -> Dict[str, str]:
         """收集日摘要所需的上下文变量：角色名、近期日记、好感状态、活跃度备注。"""

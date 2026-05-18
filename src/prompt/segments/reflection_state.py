@@ -57,6 +57,16 @@ class ReflectionStateSegment(PromptSegment):
             cfg = app.state.config.get_reflection_config()
             if not cfg.get("enabled"):
                 return SegmentResult(fired=False)
+            # 人格级覆盖：该人格单独关闭自省时不注入，避免加载过期自省内容
+            try:
+                from src.config.effective_config import get_effective_engine_config
+                eff = get_effective_engine_config(
+                    app, getattr(session, "profile_id", "") or "", "reflection"
+                )
+                if eff.get("enabled", True) is False:
+                    return SegmentResult(fired=False)
+            except Exception:
+                pass
             ttl = cfg.get("state_ttl_seconds", 600)
         else:
             ttl = 600

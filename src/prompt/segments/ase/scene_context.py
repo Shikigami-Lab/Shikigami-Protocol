@@ -50,10 +50,11 @@ class AseSceneContextSegment(PromptSegment):
         topic_anchor = reflection_state.get("topic_anchor", "")
         style_hint = (reflection_state.get("style_hint") or "").strip()
         speak_reason = reflection_state.get("speak_reason", "none")
-        trend_items = reflection_state.get("trend_items", [])
         vlm_description = extras.get("ase_vlm_description", "")
         last_ase_content = extras.get("ase_last_content", "")
         greeting_hint = extras.get("ase_greeting_hint", "")
+        chosen_topic = extras.get("ase_chosen_topic")   # 主动话题发现：自省选定的话题
+        user_name = extras.get("user_name") or ("them" if locale == "en" else "对方")
 
         from datetime import datetime
         hour = datetime.now().hour
@@ -140,25 +141,32 @@ class AseSceneContextSegment(PromptSegment):
                                              else "你一直留意着：$thought"),
                                     thought=thought))
 
-        # 趋势条目（有就展示，不跟 thought 互斥）
-        if speak_reason == "trend_share" and trend_items:
+        # 主动话题发现：自省选定的话题（已决策块）——「你已经决定要说」，无 opt-out
+        if chosen_topic:
             has_scene_content = True
+            material = (chosen_topic.get("material") or "").strip()
+            angle = (chosen_topic.get("angle") or "").strip()
+            framing = (chosen_topic.get("framing_hint") or "").strip()
             if locale == "en":
-                lines = ["You came across some recent news and want to share it with them:"]
-                for item in trend_items[:2]:
-                    label = item.get("source", "")
-                    title = item.get("title", "")
-                    lines.append(f"· {title}" + (f" (via {label})" if label else ""))
+                block = [f"[What You Want to Say] You've been thinking, and you want to "
+                         f"bring this up with {user_name} on your own initiative:"]
+                if material:
+                    block.append(material)
+                if angle:
+                    block.append(f"How you plan to lead into it: {angle}")
+                if framing:
+                    block.append(framing)
             else:
-                lines = ["你注意到了一些近期动态，想和主人聊聊："]
-                for item in trend_items[:2]:
-                    label = item.get("source", "")
-                    title = item.get("title", "")
-                    lines.append(f"· {title}" + (f"（{label}）" if label else ""))
-            parts.append("\n".join(lines))
-
-        # topic_anchor（补充上下文，不替代 thought）
-        if topic_anchor:
+                block = [f"【你想说的事】你刚刚想到，想主动找{user_name}聊这个："]
+                if material:
+                    block.append(material)
+                if angle:
+                    block.append(f"你打算这样切入：{angle}")
+                if framing:
+                    block.append(framing)
+            parts.append("\n".join(block))
+        elif topic_anchor:
+            # 无 chosen_topic 时（兜底路径）仍可用 topic_anchor 作弱提示
             has_scene_content = True
             parts.append(render("ase.topic_alone", locale=locale,
                                 default=("You recall a previous conversation about \"$topic_anchor\"."

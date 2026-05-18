@@ -2225,6 +2225,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
     en = overrides.get("energy", {})
     rf = overrides.get("reflection", {})
     ase = overrides.get("ase", {})
+    td = overrides.get("topic_discovery", {})
 
     # 全局默认值（来自 app.yaml），供前端「继承」模式显示实际生效值
     cfg = getattr(getattr(request.app, "state", None), "config", None)
@@ -2245,6 +2246,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
             "energy_interval":      g_en.get("refresh_interval", 300),
             "reflection_enabled":   g_rf.get("enabled", True),
             "ase_enabled":          g_ase.get("enabled", True),
+            "topic_discovery_enabled": cfg.get_topic_discovery_config().get("enabled", True),
         }
 
     return {
@@ -2257,6 +2259,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
         "energy_interval":       en.get("refresh_interval"),
         "reflection_enabled":    rf.get("enabled"),
         "ase_enabled":           ase.get("enabled"),
+        "topic_discovery_enabled": td.get("enabled"),
         "global_defaults":       global_defaults,
     }
 
@@ -2271,6 +2274,7 @@ class ProfileEngineConfigBody(BaseModel):
     energy_interval:      Optional[int]   = None
     reflection_enabled:   Optional[bool]  = None
     ase_enabled:          Optional[bool]  = None
+    topic_discovery_enabled: Optional[bool] = None
 
 
 @router.put("/profiles/{profile_id}/engine_config")
@@ -2301,6 +2305,7 @@ async def save_profile_engine_config(profile_id: str, body: ProfileEngineConfigB
     _set("energy",      "enabled",                  body.energy_enabled)
     _set("reflection",  "enabled",                  body.reflection_enabled)
     _set("ase",         "enabled",                  body.ase_enabled)
+    _set("topic_discovery", "enabled",              body.topic_discovery_enabled)
     if body.emotion_freq is not None:
         ov.setdefault("emotion", {})["classification_frequency"] = max(1, min(100, body.emotion_freq))
     if body.affinity_freq is not None:
@@ -2850,6 +2855,7 @@ async def get_reflection_config(request: Request):
     ref  = config.get_reflection_config()
     ase  = config.get_ase_config()
     vlm  = config.get_vlm_config()
+    td   = config.get_topic_discovery_config()
     sec_ref = config.secondary_models.get("reflection", {})
 
     # Build per-mode params merging YAML values over defaults
@@ -2904,6 +2910,14 @@ async def get_reflection_config(request: Request):
         "vlm_for_chat":         vlm.get("for_chat", True),
         "vlm_for_ase":          vlm.get("for_ase", True),
         "vlm_ase_wait_seconds": vlm.get("ase_wait_seconds", 3),
+        # Topic discovery（主动话题发现）
+        "topic_discovery": {
+            "enabled":            td.get("enabled", True),
+            "candidate_cap":      td.get("candidate_cap", 8),
+            "recent_used_window": td.get("recent_used_window", 10),
+            "chosen_topic_ttl":   td.get("chosen_topic_ttl", 1800),
+            "sources":            td.get("sources", {}),
+        },
     }
 
 
@@ -2938,6 +2952,8 @@ class ReflectionConfigBody(BaseModel):
     vlm_for_chat:         bool = True
     vlm_for_ase:          bool = True
     vlm_ase_wait_seconds: int  = 3
+    # Topic discovery（主动话题发现）—— 整块可选，前端不传则不改动
+    topic_discovery:      Optional[Dict[str, Any]] = None
 
 
 @router.post("/settings/reflection")
@@ -3015,12 +3031,27 @@ async def save_reflection_config(request: Request, body: ReflectionConfigBody):
     vlm["for_ase"]           = body.vlm_for_ase
     vlm["ase_wait_seconds"]  = body.vlm_ase_wait_seconds
 
+    # ── topic_discovery section（主动话题发现）─────────────────────────────
+    td = data.setdefault("topic_discovery", {})
+    if body.topic_discovery is not None:
+        bt = body.topic_discovery
+        for key, caster in (("enabled", bool), ("candidate_cap", int),
+                            ("recent_used_window", int), ("chosen_topic_ttl", int)):
+            if key in bt and bt[key] is not None:
+                td[key] = caster(bt[key])
+        if isinstance(bt.get("sources"), dict):
+            td_sources = td.setdefault("sources", {})
+            for sid, sval in bt["sources"].items():
+                if isinstance(sval, dict):
+                    td_sources.setdefault(sid, {}).update(sval)
+
     _save_yaml(y, data)
 
     # ── Hot-reload ─────────────────────────────────────────────────────────
     config.reflection = dict(ref)
     config.ase        = dict(ase)
     config.vlm        = dict(vlm)
+    config.topic_discovery = dict(td)
     config.secondary_models["reflection"] = dict(sec_ref)
 
     # ── 引擎启停：UI 开关改变时，无需重启服务器即可生效 ────────────────────
@@ -3163,25 +3194,24 @@ async def get_persona_evolution(profile_id: str):
     storage_root = os.path.join(_PROFILES_DIR, profile_id)
     from src.core.persona_evolution import get_changelog
 
-    # 读取 turn_counter 计算距下次演化轮数
+    # 距下次演化：统计自上次演化（evolved_at）以来的 AI 回复数（与 chat.py 触发口径一致）
     evolved = card.get("persona_evolved") or {}
     interval = int(evolved.get("min_interval_turns", 200))
-    turn_counter = 0
-    meta_path = os.path.join(storage_root, "memory_meta.json")
+    last_ts = float(evolved.get("evolved_at") or 0)
+    turns_since = 0
     try:
-        if os.path.exists(meta_path):
-            with open(meta_path, "r", encoding="utf-8") as mf:
-                turn_counter = int(json.load(mf).get("turn_counter", 0))
+        from src.memory.conversation_store import ConversationStore
+        turns_since = ConversationStore(storage_root, max_turns=0).count_user_messages_since(last_ts)
     except Exception:
         pass
-    turns_until_next = interval - (turn_counter % interval) if interval > 0 else 0
+    turns_until_next = max(0, interval - turns_since) if interval > 0 else 0
 
     return {
         "base_prompt_original": card.get("base_prompt", ""),
         "style_constraint_original": card.get("style_constraint", ""),
         "persona_evolved": evolved,
         "changelog": get_changelog(storage_root),
-        "turn_counter": turn_counter,
+        "turn_counter": turns_since,
         "turns_until_next": turns_until_next,
     }
 

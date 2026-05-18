@@ -300,7 +300,7 @@ const SettingsMixin = {
       userPersonaSaving: false,
       _userPersonaFormLoaded: false,
       _userPersonaSaveTimer: null,
-      profileEnginesForm: { emotion_enabled: null, emotion_freq: '', affinity_enabled: null, affinity_freq: '', affinity_delta_clamp: '', energy_enabled: null, energy_interval: '', reflection_enabled: null, ase_enabled: null },
+      profileEnginesForm: { emotion_enabled: null, emotion_freq: '', affinity_enabled: null, affinity_freq: '', affinity_delta_clamp: '', energy_enabled: null, energy_interval: '', reflection_enabled: null, ase_enabled: null, topic_discovery_enabled: null },
       /** 人格引擎页「继承」时对应的全局默认值（来自 GET /profiles/:id/engine_config 的 global_defaults） */
       profileEngineGlobalDefaults: null,
       profileEnginesSaving: false,
@@ -313,6 +313,8 @@ const SettingsMixin = {
       showEmbeddingSection: false,
       showReflectionModelSection: false,
       showVlmModelSection: false,
+      showTopicDiscoverySection: false,
+      topicDiscoveryAdvancedOpen: false,
       analysisModelEnabled: false,
       analysisModelPreset: '',
       analysisModelSaving: false,
@@ -483,6 +485,22 @@ const SettingsMixin = {
         vlm_for_chat:               true,
         vlm_for_ase:                true,
         vlm_ase_wait_seconds:       3,
+        topic_discovery: {
+          enabled:            true,
+          candidate_cap:      8,
+          recent_used_window: 10,
+          chosen_topic_ttl:   1800,
+          sources: {
+            trend:               { enabled: true },
+            conversation_recall: { enabled: true },
+            user_life:           { enabled: true },
+            ai_self:             { enabled: true },
+            random_api: {
+              enabled: false, mode: 'builtin', builtin_pool: 'icebreaker',
+              http_url: '', http_json_path: '',
+            },
+          },
+        },
       },
       reflectionSaving: false,
       vlmSaving: false,
@@ -2241,6 +2259,7 @@ const SettingsMixin = {
           energy_interval:       _v(data.energy_interval),
           reflection_enabled:    data.reflection_enabled ?? null,
           ase_enabled:           data.ase_enabled        ?? null,
+          topic_discovery_enabled: data.topic_discovery_enabled ?? null,
         };
         this.profileEngineGlobalDefaults = data.global_defaults && typeof data.global_defaults === 'object'
           ? { ...data.global_defaults }
@@ -2279,6 +2298,9 @@ const SettingsMixin = {
       }
       if (part === 'ase') {
         return g.ase_enabled ? t('optOn') : t('optOff');
+      }
+      if (part === 'topic_discovery') {
+        return g.topic_discovery_enabled ? t('optOn') : t('optOff');
       }
       return '—';
     },
@@ -2376,6 +2398,7 @@ const SettingsMixin = {
         body.energy_enabled      = this.profileEnginesForm.energy_enabled;
         body.reflection_enabled  = this.profileEnginesForm.reflection_enabled;
         body.ase_enabled         = this.profileEnginesForm.ase_enabled;
+        body.topic_discovery_enabled = this.profileEnginesForm.topic_discovery_enabled;
         // frequency / interval overrides
         if (this.profileEnginesForm.emotion_freq !== '') {
           const v = parseInt(this.profileEnginesForm.emotion_freq, 10);

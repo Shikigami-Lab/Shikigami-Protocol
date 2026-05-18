@@ -546,6 +546,94 @@ class AseEngine:
 
         await self._speak(session, reflection_state, mode_name, mode_cfg)
 
+    def _resolve_chosen_topic(self, session) -> Optional[Dict[str, Any]]:
+        """读自省选定的 chosen_topic，按 TTL 校验后 resolve 出完整新鲜素材。
+
+        返回 dict（含 material/angle/framing_hint/source_id/item_id 及内部 _source/_tctx），
+        无 chosen_topic / 已过期 / resolve 失败 / 来源被禁用时返回 None（ASE 走兜底）。
+        """
+        rs = getattr(session, "reflection_state", None) or {}
+        chosen = rs.get("chosen_topic")
+        if not chosen:
+            return None
+
+        app = self._app
+        try:
+            from src.config.effective_config import get_effective_topic_discovery_config
+            td_cfg = get_effective_topic_discovery_config(app, session.profile_id)
+        except Exception:
+            td_cfg = {}
+        if not td_cfg.get("enabled", True):
+            return None
+
+        ttl = float(td_cfg.get("chosen_topic_ttl", 1800))
+        if ttl > 0 and (time.time() - float(chosen.get("picked_at", 0) or 0)) > ttl:
+            logger.debug("[ASE] chosen_topic 已过期，走兜底 session=%s", session.id)
+            return None
+
+        source_id = chosen.get("source", "")
+        item_id = chosen.get("item_id", "")
+        if not source_id or not item_id:
+            return None
+
+        from src.core.topics import get_source
+        from src.core.topics.base import TopicSourceContext
+
+        src = get_source(source_id)
+        if src is None:
+            return None
+        # 来源在 pick 之后被禁用 → 兜底
+        src_entry = (td_cfg.get("sources") or {}).get(source_id) or {}
+        if not src_entry.get("enabled", src.enabled_by_default):
+            return None
+
+        # profile 卡 + 情绪状态（部分来源 resolve 需要）
+        from src.config.effective_config import _load_profile_card
+        profile = _load_profile_card(session.profile_id)
+        emotion = None
+        try:
+            epath = os.path.join(session.storage_root, "emotion_state.json")
+            if os.path.exists(epath):
+                with open(epath, encoding="utf-8") as f:
+                    emotion = json.load(f)
+        except Exception:
+            pass
+        mm = None
+        try:
+            mm = getattr(app.state, "memory_managers", {}).get(session.profile_id)
+        except Exception:
+            pass
+
+        tctx = TopicSourceContext(
+            profile_id=session.profile_id,
+            storage_root=session.storage_root,
+            profile=profile,
+            config=td_cfg,
+            reflection_thought=rs.get("thought", ""),
+            emotion=emotion,
+            memory_manager=mm,
+            session=session,
+            app=app,
+        )
+        try:
+            material = src.resolve(item_id, tctx)
+        except Exception as e:
+            logger.debug("[ASE] chosen_topic resolve 失败 (%s:%s): %s", source_id, item_id, e)
+            return None
+        if material is None:
+            logger.debug("[ASE] chosen_topic resolve 返回 None，走兜底 (%s:%s)", source_id, item_id)
+            return None
+
+        return {
+            "source_id": source_id,
+            "item_id": item_id,
+            "material": material.material,
+            "angle": chosen.get("angle", ""),
+            "framing_hint": src.get_framing_hint(get_locale()),
+            "_source": src,
+            "_tctx": tctx,
+        }
+
     async def _speak(
         self,
         session,
@@ -622,6 +710,9 @@ class AseEngine:
         # extra_system: only per-mode extra_behavior (behavioral guidance is now a segment)
         extra_system = extra_behavior or ""
 
+        # 主动话题发现：解析自省选定的话题，开口前现拉完整新鲜素材
+        chosen_topic = self._resolve_chosen_topic(session)
+
         # ── Build messages ────────────────────────────────────────────────────
         store = session.conversation_store
 
@@ -657,6 +748,7 @@ class AseEngine:
                 "ase_vlm_description": vlm_description,
                 "ase_last_content": last_ase_content,
                 "ase_greeting_hint": greeting_hint,
+                "ase_chosen_topic": chosen_topic,
             },
         )
 
@@ -743,9 +835,18 @@ class AseEngine:
                 "speak_reason": speak_reason,
                 "urgency": reflection_state.get("urgency", 0.0) if reflection_state else 0.0,
             }
+            # 主动话题发现：记录来源与条目 ID，供后续候选去重；并通知来源标记已用
+            if chosen_topic:
+                log_entry["source"] = chosen_topic["source_id"]
+                log_entry["item_id"] = chosen_topic["item_id"]
+                try:
+                    chosen_topic["_source"].mark_used(
+                        chosen_topic["item_id"], chosen_topic["_tctx"])
+                except Exception as e:
+                    logger.debug("[ASE] topic mark_used 失败: %s", e)
             proactive_log = state.get("proactive_log", [])
             proactive_log.append(log_entry)
-            state["proactive_log"] = proactive_log[-10:]  # keep last 10
+            state["proactive_log"] = proactive_log[-15:]  # keep last 15
             _save_ase_state(session.storage_root, state)
 
             # Reset urgency so we don't speak again immediately

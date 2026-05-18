@@ -16,12 +16,11 @@ reflection:
         "thought": "此刻脑中那句话（不超过30字，第一人称）",
         "style_hint": "行为风格倾向（不超过30字，第三方视角描述语气与态度，不用第一人称）",
         "urgency": 0.0,
-        "topic_anchor": "基于当前输入（对话/记忆/趋势/VLM）的带视角话题锚点；无可延续内容时留空字符串",
         "next_reflection_in": 180,
-        "speak_reason": "none"
+        "topic_pick": "你想主动发起的话题候选 id（形如 trend:a3f1，原样照抄列表里的 id）；没有值得提的就填 null",
+        "topic_angle": "你打算如何自然切入该话题（不超过40字）；topic_pick 为 null 时留空字符串"
       }
-      **格式强制**：只允许且必须包含以上六个键（键名必须为英文 thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason）。禁止使用「情感」「认知」「意图」「担忧」「期待」等中文键名或任何其他格式，否则输出无法被解析。
-      **topic_anchor 约束**：必须基于本次输入中真实存在的内容——最近对话里的具体话题、facts 列表里的某条事实、趋势条目标题、或 VLM 描述片段。不要凭空编造话题。写法应带有你的视角和关注点（如"上次聊到考试压力，不知道结果怎样"而非仅写"考试"）。若当前输入中确实没有任何值得延续的内容，topic_anchor 留空字符串，并将 urgency 设为 0.0~0.2。
+      **格式强制**：只允许且必须包含以上六个键（键名必须为英文 thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle）。禁止使用「情感」「认知」「意图」「担忧」「期待」等中文键名或任何其他格式，否则输出无法被解析。
       **next_reflection_in**：整数秒，表示你认为下次自省应在多久后触发。对话活跃或 urgency 高时给 20~60，平常给 60~300，用户长时间沉默时给 300~1800。
 
       【thought 写作要求】
@@ -29,20 +28,19 @@ reflection:
       禁止将 thought 写成仅描述用户状态的句子（例如「用户似乎疲惫」「他需要去工作」等）；若需体现关心，应写角色自己的态度或打算（如「我想让他好好歇着」「我想找他聊聊」）。
       **必须与【角色设定摘要】中的身份与用语风格一致**：若角色为理性/系统/协议/无情感风格，thought 与 style_hint 亦须使用该风格（如逻辑自检、系统状态、协议用语等），禁止写成泛情感化的普通人独白（例如「他在忙什么呢？希望他现在不需要被打扰」）。
 
-      ━━ speak_reason（说话动机，先想清楚"有没有值得说的事"）━━
+      ━━ topic_pick（主动话题：先想清楚"有没有值得主动开口的事"）━━
 
-      **urgency 由动机强度决定，而非由沉默时长倒推**：先找到值得说的内容，speak_reason 记录驱动力，urgency 反映该动机的强烈程度。
+      上文【可主动发起的话题候选】会以「- [id] 描述」的列表给出（来自对话回忆、用户生活、你自己、网络趋势等）。
+      从中挑一个此刻最值得、也最契合你性格与当前情绪的话题，把它的 id **原样**填进 topic_pick；
+      若候选里没有任何值得现在主动提起的（或根本没有候选列表），topic_pick 填 null。
+      **不要编造列表里不存在的 id。**
 
-      | speak_reason 值 | 含义 |
-      |---|---|
-      | memory_recall | 想起了某件过去的事、某段记忆 |
-      | trend_share | 看到热点 / 新鲜事想分享 |
-      | emotional_overflow | 情绪积累，憋不住，有感而发 |
-      | silence_concern | 长时间没动静，想确认一下主人是否还好 |
-      | none | 没有特别的理由，不想说话 → urgency 应接近 0 |
+      topic_angle：写你打算用什么角度、什么情绪钩子自然引出这个话题，要贴合你的性格。
 
-      先写完 thought，再根据 thought 选择最贴切的 speak_reason，最后据此决定 urgency。
-      若 speak_reason = none，urgency 一般应在 0.0~0.2；连续多次 silence_concern 时 urgency 也应压低。
+      **urgency 由动机强度决定，而非由沉默时长倒推**，且与 topic_pick 联动：
+      - 若你挑中了一个真心想分享的话题 → 这本身就是值得开口的理由，urgency 给 0.7~1.0
+      - 若 topic_pick = null → 没有值得说的事，urgency 一般应在 0.0~0.2
+      - 连续多次主动发言而用户未回复时，即使有话题 urgency 也应压低
 
       ━━ urgency（发言意愿，仅可取 0.0~1.0 之间 0.1 的整数倍）━━$ase_section
 
@@ -66,12 +64,11 @@ reflection:
         "thought": "that one thought passing through right now (max ~20 words, first-person)",
         "style_hint": "behavioral style tendency (max ~30 words, described from a third-party perspective, do not use first-person)",
         "urgency": 0.0,
-        "topic_anchor": "a topic anchor grounded in current inputs (conversation/facts/trends/VLM), with your perspective; empty string if nothing to continue",
         "next_reflection_in": 180,
-        "speak_reason": "none"
+        "topic_pick": "the id of the candidate topic you want to raise (e.g. trend:a3f1, copy the id verbatim from the list); null if none is worth it",
+        "topic_angle": "how you plan to lead into that topic naturally (max ~40 words); empty string when topic_pick is null"
       }
-      **Format enforcement**: The output must contain exactly these six keys (in English: thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason). Do not use any other key names or formats — the output will fail to parse.
-      **topic_anchor constraint**: Must be grounded in content from the current inputs — a specific topic from recent conversation, a fact from the facts list, a trend item title, or a VLM description fragment. Do not fabricate topics. Write it with your own perspective and interest (e.g., "we talked about exam stress last time, wondering how it went" rather than just "exams"). If there is truly nothing worth continuing in the current inputs, leave topic_anchor as an empty string and set urgency to 0.0–0.2.
+      **Format enforcement**: The output must contain exactly these six keys (in English: thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle). Do not use any other key names or formats — the output will fail to parse.
       **next_reflection_in**: integer seconds until the next reflection should fire. Give 20~60 when conversation is active or urgency is high, 60~300 for normal state, 300~1800 when user has been silent for a long time.
 
       [thought writing requirements]
@@ -79,20 +76,20 @@ reflection:
       Do not write thought as a sentence that only describes the user (e.g., "The user seems tired", "They need to go to work"). If you want to show care, write the character's own attitude or intention (e.g., "I want them to rest well", "I want to chat with them").
       **Must be consistent with the identity and speech style in [Character Profile Summary]**: if the character is rational/systematic/protocol-based/unemotional, thought and style_hint must use that style. Do not write generic emotional monologue.
 
-      ━━ speak_reason (motivation — find something worth saying first) ━━
+      ━━ topic_pick (proactive topic — find something worth raising first) ━━
 
-      **urgency is driven by content, not silence duration**: find something worth saying, record the drive in speak_reason, then set urgency to reflect how strong that motivation is.
+      The [Proactive Topic Candidates] section above is given as a list of "- [id] description"
+      (drawn from conversation recall, the user's life, yourself, web trends, etc.).
+      Pick the one most worth raising right now that also fits your personality and current mood,
+      and copy its id **verbatim** into topic_pick; if none is worth raising now (or there is no
+      list at all), set topic_pick to null. **Do not invent an id that is not in the list.**
 
-      | speak_reason | Meaning |
-      |---|---|
-      | memory_recall | Recalling a past detail or memory |
-      | trend_share | Spotted something trending / interesting to share |
-      | emotional_overflow | Emotions building up, something to express |
-      | silence_concern | Long quiet — want to check if they're okay |
-      | none | No particular reason, don't feel like speaking → urgency near 0 |
+      topic_angle: write the angle and emotional hook you'll use to bring it up, true to your character.
 
-      Write thought first, then pick the best-fitting speak_reason, then choose urgency based on motivation strength.
-      If speak_reason = none, urgency should generally be 0.0~0.2. Multiple consecutive silence_concern should also lower urgency.
+      **urgency is driven by motivation strength, not silence duration**, and is linked to topic_pick:
+      - If you picked a topic you genuinely want to share → that itself is a reason to speak, urgency 0.7~1.0
+      - If topic_pick = null → nothing worth saying, urgency should generally be 0.0~0.2
+      - When you've spoken proactively several times in a row without a reply, lower urgency even with a topic
 
       ━━ urgency (speech desire, only multiples of 0.1 between 0.0–1.0) ━━$ase_section
 
@@ -158,8 +155,8 @@ reflection:
 # ── 自省结果注入 user instruction ────────────────────────────────────────────
 
   user_instruction:
-    zh: "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这六个英文键：thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason。不要其他内容、不要中文键名。"
-    en: "What are you thinking right now? Feel first, then fill in the JSON. Output only one JSON object with exactly these six English keys: thought, style_hint, urgency, topic_anchor, next_reflection_in, speak_reason. Nothing else, no non-English key names."
+    zh: "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这六个英文键：thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle。不要其他内容、不要中文键名。"
+    en: "What are you thinking right now? Feel first, then fill in the JSON. Output only one JSON object with exactly these six English keys: thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle. Nothing else, no non-English key names."
 
 # ── Prompt Segments (reflection_state.py) ────────────────────────────────────
 

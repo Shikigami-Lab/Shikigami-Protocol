@@ -191,10 +191,12 @@ class EmotionEngine:
         skip_if_active_secs: float = 300.0,
         neutral_emotion: str = _EMOTION_DECAY_NEUTRAL,
     ) -> bool:
-        """情绪硬截断衰减：静默超过 decay_full_secs 后，把多层情绪整体重置为中性。
+        """情绪硬截断衰减：用户静默超过 decay_full_secs 后，把多层情绪整体重置为中性。
 
-        基准时间取 state["last_updated"]（每次 LLM 分类都会刷新），所以"静默"
-        指的是"距上次情绪被改写的间隔"。这与能量恢复的对话活跃判断保持一致。
+        基准时间取 session.last_user_message_time（用户沉默时长）。
+        注意：不能用 state["last_updated"] —— 它会被 apply_time_recovery /
+        apply_message_cost / apply_emotion_to_energy 频繁刷新成 now，
+        导致 elapsed 永远归零、衰减永不触发。
 
         返回 True 表示发生了重置（用于日志/统计）。
         """
@@ -203,17 +205,19 @@ class EmotionEngine:
         if full_secs <= 0:
             return False
 
-        if skip_if_active_secs > 0:
-            last_msg = getattr(session, "last_user_message_time", 0.0)
-            silent_secs = now - last_msg
-            if silent_secs < skip_if_active_secs:
-                return False
-
         state = self.load_state(session)
         if state.get("primary_emotion") == neutral_emotion:
             return False
 
-        elapsed = now - state.get("last_updated", now)
+        last_msg = getattr(session, "last_user_message_time", 0.0) or 0.0
+        if last_msg <= 0:
+            return False  # 无法判定沉默时长，跳过
+        silent_secs = now - last_msg
+
+        if skip_if_active_secs > 0 and silent_secs < skip_if_active_secs:
+            return False
+
+        elapsed = silent_secs
         if elapsed < full_secs:
             return False
 

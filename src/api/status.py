@@ -167,6 +167,14 @@ async def get_ase_status(session_id: str, request: Request):
     config = request.app.state.config
     ase_cfg = config.get_ase_config()
     ase_enabled = bool(ase_cfg.get("enabled", False))
+    # 人格级覆盖：该人格单独关闭 ASE 时，UI 应显示「已禁用」
+    try:
+        from src.config.effective_config import get_effective_engine_config
+        _eff_ase = get_effective_engine_config(request.app, session.profile_id, "ase")
+        if _eff_ase.get("enabled", True) is False:
+            ase_enabled = False
+    except Exception:
+        pass
     mode_name = getattr(session, "ase_mode", "medium")
     # 与 ASE 引擎一致：session 未显式设置时使用配置中的默认模式，UI 才能显示真实模式（高/低/游戏等）
     if mode_name == "medium":
@@ -258,6 +266,14 @@ async def get_ase_status(session_id: str, request: Request):
     refl_idle_after = float(refl_cfg.get("idle_throttle_after_seconds", 0))
     refl_idle_interval = int(refl_cfg.get("idle_interval_seconds", refl_interval * 5))
     refl_enabled = bool(refl_cfg.get("enabled", False))
+    # 人格级覆盖：该人格单独关闭自省时，UI 应显示「自省已禁用」并隐藏过期内容
+    try:
+        from src.config.effective_config import get_effective_engine_config
+        _eff_refl = get_effective_engine_config(request.app, session.profile_id, "reflection")
+        if _eff_refl.get("enabled", True) is False:
+            refl_enabled = False
+    except Exception:
+        pass
 
     refl_is_idle = refl_idle_after > 0 and silent_seconds >= refl_idle_after
     effective_refl_interval = refl_idle_interval if refl_is_idle else refl_interval
@@ -288,9 +304,15 @@ async def get_ase_status(session_id: str, request: Request):
         refl_next_in = None
 
     reflection_out = {
-        "thought": reflection_state.get("thought", ""),
+        # 自省被禁用时清空内容，避免 UI 继续显示上一次的过期自省
+        "thought": reflection_state.get("thought", "") if refl_enabled else "",
         "urgency": urgency,
-        "topic_anchor": reflection_state.get("topic_anchor", ""),
+        "topic_anchor": reflection_state.get("topic_anchor", "") if refl_enabled else "",
+        # 主动话题发现：当前选定话题的来源（供面板显示「· 来自对话回忆」）
+        "chosen_topic_source": (
+            (reflection_state.get("chosen_topic") or {}).get("source", "")
+            if refl_enabled else ""
+        ),
         "updated_ago": refl_updated_ago,
         "next_in": refl_next_in,           # 距下次自省的真实剩余秒数
         "interval": effective_refl_interval,
