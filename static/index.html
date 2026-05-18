@@ -1528,13 +1528,7 @@
 
         <!-- VLM model (collapsible) — 图像识别 -->
         <collapsible-section :title="t('secVlm')">
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableVlm') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.vlm_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableVlm')" v-model="reflectionForm.vlm_enabled"></toggle-row>
 
             <div class="form-field" style="margin-top:8px;">
               <div class="form-label" :title="t('titleVlmModel')">{{ t('lblVlmModel') }}</div>
@@ -1557,22 +1551,10 @@
             </div>
 
             <div class="section-divider" style="margin:10px 0 8px;font-size:11px;">{{ t('secVlmUsage') }}</div>
-            <div class="param-row">
-              <span class="param-label" :title="t('titleVlmForChat')">{{ t('lblVlmForChat') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.vlm_for_chat"
-                       :disabled="!reflectionForm.vlm_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="param-row">
-              <span class="param-label" :title="t('titleVlmForAse')">{{ t('lblVlmForAse') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.vlm_for_ase"
-                       :disabled="!reflectionForm.vlm_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblVlmForChat')" :title="t('titleVlmForChat')"
+                        v-model="reflectionForm.vlm_for_chat" :disabled="!reflectionForm.vlm_enabled"></toggle-row>
+            <toggle-row :label="t('lblVlmForAse')" :title="t('titleVlmForAse')"
+                        v-model="reflectionForm.vlm_for_ase" :disabled="!reflectionForm.vlm_enabled"></toggle-row>
             <div class="param-row">
               <span class="param-label" :title="t('titleVlmWaitSeconds')">{{ t('lblVlmWaitSeconds') }}</span>
               <input type="number" class="seg-num-input" min="1" max="10"
@@ -1586,31 +1568,17 @@
 
         <!-- 主动话题（collapsible）— ASE 沉默后主动开口时从多来源选定话题 -->
         <collapsible-section :title="t('secTopicDiscovery')">
-            <div class="param-row">
-              <span class="param-label" :title="t('titleTopicDiscovery')">{{ t('lblTopicDiscoveryEnabled') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.topic_discovery.enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblTopicDiscoveryEnabled')" :title="t('titleTopicDiscovery')"
+                        v-model="reflectionForm.topic_discovery.enabled"></toggle-row>
 
             <div class="section-divider" style="margin:10px 0 8px;font-size:11px;">{{ t('lblTopicSources') }}</div>
-            <div class="param-row" v-for="sid in ['trend','conversation_recall','user_life','ai_self']" :key="sid">
-              <span class="param-label">{{ t('topicSrc_' + sid) }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.topic_discovery.sources[sid].enabled"
-                       :disabled="!reflectionForm.topic_discovery.enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="param-row">
-              <span class="param-label">{{ t('topicSrc_random_api') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.topic_discovery.sources.random_api.enabled"
-                       :disabled="!reflectionForm.topic_discovery.enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row v-for="sid in ['trend','conversation_recall','user_life','ai_self']" :key="sid"
+                        :label="t('topicSrc_' + sid)"
+                        v-model="reflectionForm.topic_discovery.sources[sid].enabled"
+                        :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
+            <toggle-row :label="t('topicSrc_random_api')"
+                        v-model="reflectionForm.topic_discovery.sources.random_api.enabled"
+                        :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
             <div v-if="reflectionForm.topic_discovery.sources.random_api.enabled"
                  style="padding-left:12px;border-left:2px solid var(--border);margin:4px 0 4px 4px;">
               <div class="form-field" style="margin-top:6px;">
@@ -5375,7 +5343,7 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260512a"></script>
-<script src="js/components.js?v=20260518e"></script>
+<script src="js/components.js?v=20260518f"></script>
 <script src="js/settings.js?v=20260518e"></script>
 <script src="js/app.js?v=20260518d"></script>
 </body>

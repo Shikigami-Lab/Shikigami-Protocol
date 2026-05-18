@@ -43,4 +43,29 @@ window.SK_COMPONENTS = {
       </div>`,
   },
 
+  /* 开关行：param-row + 一段 label + toggle-switch 开关。
+       <toggle-row :label="t('lblX')" v-model="form.x" />
+       <toggle-row :label="…" :title="t('titleX')" v-model="…" :disabled="…" />
+     param-row 上的 style / 额外 class / v-for / v-if 会经 attribute fallthrough
+     自动落到根 div，无需额外 prop。需要 change 副作用时父用 @update:model-value。
+     label 需要富内容（图标等）时用默认插槽取代 label prop。 */
+  'toggle-row': {
+    props: {
+      label:      { type: String, default: '' },
+      title:      { type: String, default: '' },
+      modelValue: { default: false },
+      disabled:   { type: Boolean, default: false },
+    },
+    emits: ['update:modelValue'],
+    template: `
+      <div class="param-row">
+        <span class="param-label" :title="title || null"><slot>{{ label }}</slot></span>
+        <label class="toggle-switch">
+          <input type="checkbox" :checked="modelValue" :disabled="disabled"
+                 @change="$emit('update:modelValue', $event.target.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>`,
+  },
+
 };
