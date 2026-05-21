@@ -12,21 +12,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - GitHub Releases no longer ship pre-built desktop installers (`.exe` / `.dmg` / `.AppImage`). Tags still trigger a release with generated notes; use GitHub’s source archives or clone the repository.
 
-### In Progress
-
-- [ASE/Reflection] Better ASE — more natural and surprising proactive speech (see `docs/ARCHITECTURE_REFERENCE.en.md` / `.zh.md` for reflection & ASE overview):
-  - **speak_reason field**: Reflection now outputs a 6th JSON field (`speak_reason`) identifying the motivation type (`memory_recall` / `trend_share` / `emotional_overflow` / `silence_concern` / `none`). Urgency is now driven by motivation strength, not just silence duration.
-  - **Proactive topic dedup** (`reflection_proactive_log`, priority 65): Injects the last 10 proactive speech entries into reflection so the AI avoids repeating the same topics. Consecutive `silence_concern` entries also trigger urgency suppression.
-  - **Memory injection for surprise** (`reflection_memory_facts`, priority 70): Fetches high-weight long-term facts and injects them as optional conversation seeds, enabling the "how did she remember that?" effect.
-  - **User engagement awareness** (`reflection_user_engagement`, priority 52): Unconditionally injects message frequency stats, time-of-day context, and 3-day participation trend so urgency decisions are informed by actual user activity patterns.
-  - **Recent dialogue max_turns config** (`reflection.recent_dialogue_max_turns`, default 8): Caps the recent dialogue injected into reflection by turn count rather than characters. Configurable globally and surfaced in Settings → Reflection.
-  - **speak_reason → ASE speech context**: `ReflectionStateSegment` injects a motivation guidance hint when speak_reason is non-none, informing how the AI should approach its proactive message.
-  - **UI**: New "自省功能模块 / Reflection modules" section in persona editor Prompt Enhancement; new max_turns input in global Reflection settings.
-
 ### Planned
 
 ### Known Issues
 
+
+---
+
+## [0.10.17] — 2026-05-18
+
+### Added
+- [ASE] **Proactive topic discovery** — when the AI speaks up after a silence, reflection picks a concrete topic from five pluggable sources (conversation recall / the user's life / the AI itself / web trends / an optional random-topic API), and the AI performs it in character. New `topic_discovery` config block and a "Proactive Topics" section in Settings → Reflection/ASE.
+- [Memory] **User Portrait** — the AI maintains an evolving portrait of the user, refreshed automatically (daily job + conversation-volume burst), with a 20-entry history and rollback.
+- [Memory] **Memory change log + rollback** — the daily memory/forgetting job now records a 20-entry change history (weight changes, added summary facts, vectors removed). Each run can be inspected and rolled back from Settings → Memory.
+- [Emotion] **Dynamic emotion decay** — emotion now automatically fades back toward calm after a configurable period of user silence.
+- [Reflection] Proactive-speech context injection — recent-proactive-log dedup, high-weight memory recall, and user-engagement stats — making proactive speech more grounded and less repetitive.
+
+### Changed
+- [Reflection] Reflection now selects a concrete proactive topic (`topic_pick` / `topic_angle`) instead of a free-text anchor; ASE pulls the fresh source material at speak time.
+- [UI] Introduced a design-token system (spacing / radius / font-size / shadow / transition) with theme-adaptive derived colors, and began extracting reusable Vue components (collapsible sections, toggle rows, tri-state toggles).
+
+### Fixed
+- [Reflection/ASE] A personality with reflection or ASE individually disabled no longer leaks stale reflection state into chat prompts or the status panel.
+- [Emotion] Emotion auto-decay now actually triggers — it was previously reset every cycle by the energy-recovery timestamp.
+- [Persona Evolution] Automatic persona evolution is no longer silently disabled when memory extraction is off, and no longer misses its trigger when frequencies don't divide evenly.
+- [Memory] Fixed an ASE memory-manager construction bug that silently broke memory segments during proactive speech.
+- [Config] Unified the `max_history_turns` default across code and config; settings no longer silently regress the value on save.
+- [UI] Inherited per-personality config fields now show the real global value as their placeholder instead of a hardcoded number.
+- [UI] Fixed grayed-out card backgrounds and theme-breaking hardcoded warning colors; ASE status labels are now translated.
+- [Chat] Fixed a duplicate stream-completion signal sent on empty / error responses.
+- [Memory] Fixed a timezone inconsistency in day-summary date bucketing.
 
 ---
 
