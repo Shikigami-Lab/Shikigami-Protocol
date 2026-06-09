@@ -338,6 +338,11 @@ async def trigger_evolution(
         logger.error("[PersonaEvolution] evolve prompt 未找到")
         return None
 
+    # 长度自适应：软上限按原始 base_prompt 长度动态算（尊重原作量级），不少于 1500
+    soft_cap = max(1500, int(len(base_prompt_original) * 1.5))
+    hard_cap = int(soft_cap * 1.15)
+    current_length = len(current_base)
+
     system_text = Template(system_prompt).safe_substitute(
         persona_name=persona_name,
         core_anchor=core_anchor,
@@ -347,6 +352,8 @@ async def trigger_evolution(
         conversation_context=conversation_text or ("（无近期对话）" if locale == "zh" else "(no recent conversation)"),
         affinity_status=affinity_status,
         evolution_count=str(evolution_count),
+        current_length=str(current_length),
+        soft_cap=str(soft_cap),
     )
     user_text = get_prompt("persona_evolution.evolve_user", locale=locale) or \
         ("请根据以上记忆依据，对当前人格做出微小修正。只输出 JSON 对象，不要任何前缀或解释。"
@@ -391,6 +398,46 @@ async def trigger_evolution(
     if not new_base:
         logger.warning("[PersonaEvolution] LLM 返回 base_prompt 为空，跳过 profile=%s", profile_id)
         return None
+
+    # ── 硬兜底：超过 hard_cap 重试一次强化压缩；仍超则跳过本次演化 ──────────────
+    if len(new_base) > hard_cap:
+        followup = (
+            f"新版 base_prompt 当前 {len(new_base)} 字，超过硬上限 {hard_cap} 字。"
+            f"请重新输出：保留本次的 2～4 处改动，同时更激进地压缩冗余/过时段落，"
+            f"使 base_prompt 总长 ≤ {soft_cap} 字。仅输出 JSON 对象，不要任何前缀或解释。"
+            if locale == "zh" else
+            f"The new base_prompt is currently {len(new_base)} chars, exceeding the hard cap of "
+            f"{hard_cap}. Re-output: keep this round's 2–4 changes but compress redundant/stale "
+            f"passages more aggressively so base_prompt ≤ {soft_cap} chars. Output only the JSON, "
+            f"no prefix or explanation."
+        )
+        retry_messages = messages + [
+            {"role": "assistant", "content": raw},
+            {"role": "user", "content": followup},
+        ]
+        try:
+            raw = await _llm_call(retry_messages, app, role="persona_evolve_retry", profile_id=profile_id)
+            data = json.loads(_strip_fence(raw))
+            new_base = (data.get("base_prompt") or "").strip()
+            new_style = (data.get("style_constraint") or new_style).strip()
+            raw_summary = data.get("change_summary") or change_summary
+            if isinstance(raw_summary, list):
+                change_summary = "\n".join(
+                    f"- {str(item).strip().lstrip('-').strip()}"
+                    for item in raw_summary if str(item).strip()
+                )
+            else:
+                change_summary = str(raw_summary).strip()
+            reason = (data.get("reason") or reason).strip()
+        except Exception as e:
+            logger.warning("[PersonaEvolution] 压缩重试失败 profile=%s: %s", profile_id, e)
+            return None
+        if not new_base or len(new_base) > hard_cap:
+            logger.info("[PersonaEvolution] 重试后仍超长(%d > %d)或为空，跳过本次演化 profile=%s",
+                        len(new_base), hard_cap, profile_id)
+            return None
+        logger.info("[PersonaEvolution] 压缩重试成功 profile=%s 新长度=%d (soft=%d hard=%d)",
+                    profile_id, len(new_base), soft_cap, hard_cap)
 
     # ── 写入 profile.json["persona_evolved"] ─────────────────────────────────
     now_ts = int(time.time())

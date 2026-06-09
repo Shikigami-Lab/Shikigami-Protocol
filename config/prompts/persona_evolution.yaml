@@ -101,6 +101,19 @@ persona_evolution:
       6. **保留结构**：原版中的章节标题与层级（如【核心身份】【行为模式】等）必须原样保留，不得新增或删除章节；改动发生在章节内部的具体描述里。
       7. **禁止幻觉**：不得添加原设定中未出现的人名、地点、背景事件或特质——只能基于记忆里**用户实际提到过**的内容。
 
+      ━━ 长度自适应 ━━
+
+      当前 base_prompt 长度：$current_length 字
+      软上限：$soft_cap 字
+
+      - 若 $current_length < $soft_cap：按上文规则正常做 2～4 处改动即可，不必刻意压缩。
+      - 若 $current_length ≥ $soft_cap：本次输出的新 base_prompt **必须 ≤ $soft_cap 字**。
+        除了做 2～4 处改动，还必须主动压缩：
+          · 合并意思相近或重复的描述
+          · 删去久未被记忆/对话呼应的细枝末节（不动 core_anchor 涉及的核心、不删整段章节）
+          · 抹掉一段老的、加上一段新的——压缩与改动并行进行
+        不要为了凑字数硬塞内容。
+
       ━━ 输出格式 ━━
       只输出一个 JSON 对象，不要任何前缀或解释：
       {
@@ -151,6 +164,20 @@ persona_evolution:
          - When the original prompt is plain and grounded but the memory/dialogue is full of ornate rhetoric, **trust the original** — do not let dialogue style drag the persona along.
       6. **Preserve structure**: section headers and hierarchy from the original (e.g. [Core Identity], [Behavior Patterns]) must remain intact; do not add or remove sections. Changes happen in the descriptions inside the sections.
       7. **No hallucination**: do not add names, locations, backstory, or traits not present in the original. Only build on what the user has **actually mentioned** in memory.
+
+      ━━ Length self-regulation ━━
+
+      Current base_prompt length: $current_length chars
+      Soft cap: $soft_cap chars
+
+      - If $current_length < $soft_cap: just make 2–4 changes as instructed above, no need to compress.
+      - If $current_length ≥ $soft_cap: the new base_prompt you output **must be ≤ $soft_cap chars**.
+        In addition to the 2–4 changes, you MUST actively compress:
+          · merge near-duplicate or redundant descriptions
+          · drop minor details that haven't been echoed by memory/conversation for a long time
+            (do not touch the core covered by core_anchor; do not delete whole sections)
+          · trim an old fragment AND add a new one — compression and change happen together
+        Do not pad to fill space.
 
       ━━ Output Format ━━
       Output only a JSON object, no prefix or explanation:
