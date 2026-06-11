@@ -373,6 +373,11 @@ class AseEngine:
                 if not current or current.id != session.id:
                     await asyncio.sleep(check_interval)
                     continue
+                # Session 对象可能已被替换（编辑人格保存 / 重新勾选「加载到聊天」都会
+                # 用 add_session/load_session 覆盖同 id 的 session）。必须切换到 live
+                # 对象，否则读到的是旧对象的 reflection_state——urgency 永远 0，
+                # ASE 永远 low_urgency 跳过，而状态面板读新对象显示一切正常。
+                session = current
                 # 人格级别覆盖：该人格单独关闭了 ASE 则跳过
                 try:
                     from src.config.effective_config import get_effective_engine_config
@@ -395,7 +400,12 @@ class AseEngine:
                 silent_seconds = now - effective_last
                 min_silent = float(mode_cfg.get("min_silent_seconds", 300))
                 silence_remaining = max(0.0, min_silent - silent_seconds)
-                sleep_secs = min(check_interval, max(1.0, silence_remaining))
+                # 窗口未开：在开窗时刻附近醒来；窗口已开：按正常节奏 check_interval 检查
+                # （此前窗口已开时 max(1.0, 0) 退化成 1 秒忙循环，刷爆 ase.log）
+                if silence_remaining > 0:
+                    sleep_secs = min(check_interval, max(1.0, silence_remaining))
+                else:
+                    sleep_secs = check_interval
                 profile_state["next_check_at"] = time.time() + sleep_secs
                 profile_state["this_round_sleep_secs"] = sleep_secs
                 _save_ase_state(session.storage_root, profile_state)
