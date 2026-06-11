@@ -581,8 +581,10 @@ class MemoryManager:
 
     async def run_consolidation_batch(
         self, app: Any, profile: Dict[str, Any], batch: List[Any]
-    ) -> Tuple[bool, int]:
-        """将一批「已很淡」的事实交给 LLM 合并为 1～2 条新事实，先写新再删旧。返回 (成功, 新写入条数)。"""
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """将一批「已很淡」的事实交给 LLM 合并为 1～2 条新事实，新摘要入库 + 移除旧事实向量（事实库不删）。
+        返回 (成功, detail)；detail 含 added/added_contents/vectors_removed/vectors_removed_contents/count，
+        供记忆变更日志记录，失败或无事可做时为 {}。"""
         if not batch:
             return True, {}
         valid_categories = {"habit", "preference", "taboo", "relationship", "location", "milestone", "ai_insight", "other"}

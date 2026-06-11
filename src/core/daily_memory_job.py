@@ -134,7 +134,7 @@ def _run_weight_decay(mgr, cfg: Dict[str, Any], yesterday: str) -> List[Dict[str
     for f in mgr.facts.get_all():
         if f.pinned or f.id in reinforced:
             continue
-        new_w = round(max(min_w, f.weight * decay), 2)
+        new_w = round(max(min_w, f.weight * decay), 4)
         if new_w != f.weight:
             old_w = f.weight
             mgr.facts.update(f.id, weight=new_w)
@@ -163,7 +163,7 @@ def _run_reinforcement(mgr, cfg: Dict[str, Any], yesterday: str) -> List[Dict[st
         fact = mgr.facts.get_by_id(fid)
         if not fact:
             continue
-        new_w = round(min(2.0, fact.weight * 1.01), 2)
+        new_w = round(min(2.0, fact.weight * 1.01), 4)
         if new_w > fact.weight:
             old_w = fact.weight
             mgr.facts.update(fid, weight=new_w)
@@ -374,7 +374,7 @@ def preview_forgetting_for_profile(
         for f in mgr.facts.get_all():
             if f.pinned or f.id in reinforced:
                 continue
-            new_w = round(max(min_w, f.weight * decay), 2)
+            new_w = round(max(min_w, f.weight * decay), 4)
             if new_w != f.weight:
                 count += 1
         out["decay"]["would_affect_count"] = count
@@ -589,7 +589,10 @@ async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool 
 
 
 async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
-    """对一个人格跑完整每日任务：先日摘要再遗忘，最后画像刷新。无对话时仍写安静日记，但跳过遗忘任务。"""
+    """对一个人格跑完整每日任务：先日摘要再遗忘，最后画像刷新。无对话时仍写安静日记，但跳过遗忘任务。
+
+    幂等：今天已跑过（last_daily_run.json）则跳过，避免「启动补跑 + 00:05 定时」同一天重复衰减。
+    """
     sm = getattr(app.state, "session_manager", None)
     if not sm:
         return
@@ -599,6 +602,11 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
             session = s
             break
     if not session:
+        return
+
+    today_str = date.today().strftime("%Y-%m-%d")
+    if _load_last_daily_run(session.storage_root) == today_str:
+        logger.debug("[daily_memory_job] profile %s 今天已跑过每日任务，跳过", profile_id)
         return
 
     await run_day_summary_for_profile(profile_id, yesterday, app)
@@ -613,9 +621,36 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
     _save_last_daily_run(session.storage_root, date.today().strftime("%Y-%m-%d"))
 
 
+async def _catch_up_missed_runs(app) -> None:
+    """启动补跑：桌面应用在 00:05 常处于关机状态，错过的每日任务在启动时补一次。
+    依据 last_daily_run.json（每人格独立），今天没跑过的才补。"""
+    sm = getattr(app.state, "session_manager", None)
+    if not sm:
+        return
+    today_str = date.today().strftime("%Y-%m-%d")
+    yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    for s in sm.list_sessions():
+        if _load_last_daily_run(s.storage_root) == today_str:
+            continue
+        logger.info("[daily_memory_job] 启动补跑每日任务 profile=%s", s.profile_id)
+        try:
+            await run_daily_for_profile(s.profile_id, yesterday, app)
+        except Exception as e:
+            logger.exception("[daily_memory_job] 补跑 profile %s 失败: %s", s.profile_id, e)
+
+
 async def run_daily_memory_loop(app) -> None:
-    """每日任务主循环：sleep 到下一日 00:05（或可配置时刻），遍历已加载且昨日有对话的 session 执行任务。"""
+    """每日任务主循环：sleep 到下一日 00:05（或可配置时刻），遍历已加载且昨日有对话的 session 执行任务。
+    启动 90 秒后先做一次补跑（见 _catch_up_missed_runs）。"""
     logger.info("[daily_memory_job] 每日记忆/遗忘循环已启动")
+    try:
+        await asyncio.sleep(90)  # 避开启动高峰（TTS 预热、引擎启动）
+        await _catch_up_missed_runs(app)
+    except asyncio.CancelledError:
+        logger.info("[daily_memory_job] 每日循环已取消")
+        return
+    except Exception as e:
+        logger.exception("[daily_memory_job] 启动补跑异常: %s", e)
     while True:
         try:
             today = date.today()

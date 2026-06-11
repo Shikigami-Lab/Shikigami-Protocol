@@ -99,7 +99,7 @@ async def rollback(storage_root: str, run_id: str, mgr) -> Dict[str, Any]:
             skipped += 1
             continue
         try:
-            mgr.facts.update(fid, weight=round(fact.weight * (float(old) / float(new)), 2))
+            mgr.facts.update(fid, weight=round(fact.weight * (float(old) / float(new)), 4))
             restored += 1
         except Exception as e:
             logger.debug("[memory_changelog] 权重回滚跳过 %s: %s", fid, e)
