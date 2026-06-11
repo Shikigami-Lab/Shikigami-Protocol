@@ -4658,7 +4658,7 @@
                   <span :class="['mem-fact-content', fact.pinned ? 'pinned' : '']">{{ fact.content }}</span>
                   <span v-if="fact.emotional_note" class="mem-emotional-badge">{{ fact.emotional_note }}</span>
                   <span :class="['mem-source-badge', fact.source === 'manual' ? 'manual' : 'auto']">{{ fact.source }}</span>
-                  <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null && fact.weight !== undefined ? Number(fact.weight) : 1 }}</span>
+                  <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null ? Math.round(Number(fact.weight) * 100) / 100 : 1 }}</span>
                   <span style="font-size:11px;color:var(--text-secondary);" :title="new Date(fact.updated_at * 1000).toLocaleString()">{{ new Date(fact.updated_at * 1000).toLocaleDateString() }}</span>
                   <button :class="['icon-btn', fact.pinned ? 'pinned-active' : '']" :title="fact.pinned ? t('titlePinned') : t('titleNotPinned')" @click="toggleMemoryFactPin(fact)">📌</button>
                   <button class="icon-btn" :title="t('titleEditFact')" @click="startEditMemoryFact(fact)">✎</button>
@@ -5257,7 +5257,7 @@
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260518i"></script>
 <script src="js/components.js?v=20260518i"></script>
-<script src="js/settings.js?v=20260518i"></script>
+<script src="js/settings.js?v=20260611a"></script>
 <script src="js/app.js?v=20260518i"></script>
 </body>
 </html>

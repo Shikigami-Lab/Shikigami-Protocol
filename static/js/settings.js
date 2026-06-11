@@ -1704,7 +1704,10 @@ const SettingsMixin = {
         });
         const data = await res.json();
         if (data.ok) {
-          if (typeof this.loadSessions === 'function') await this.loadSessions();
+          // 取消勾选当前人格时服务端会切到别的会话，须用 sync 同步聊天记录/事件订阅，
+          // 只刷 loadSessions 会出现「标题切到 B、气泡还是 A」
+          if (typeof this.syncSessionsFromServer === 'function') await this.syncSessionsFromServer();
+          else if (typeof this.loadSessions === 'function') await this.loadSessions();
           this.showToast(loadIntoChat ? '✓ 已加入侧栏，可与其对话' : '✓ 已从侧栏移除，仅作储存（群聊用到时会按需加载）', 'success');
         } else { p.load_into_chat = prev; this.showToast(`保存失败: ${data.detail || data.error || ''}`, 'error'); }
       } catch (e) {
