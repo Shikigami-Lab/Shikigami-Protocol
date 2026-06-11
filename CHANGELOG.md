@@ -19,6 +19,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.10.18] — 2026-06-11
+
+### Fixed
+
+- [ASE] Proactive speech could get permanently stuck after editing a profile or re-checking "load into chat": those flows replace the in-memory Session object, but the ASE loop kept reading the stale one — its urgency stayed 0 forever (every check skipped as `low_urgency`) while the status panel, reading the live object, showed all gates green. The loop now always operates on the live current session.
+- [ASE] Once the silence window opened, the adaptive sleep degenerated into a 1-second busy loop (thousands of checks per hour, flooding `ase.log`). It now sleeps the normal `check_interval` once the window is open and only wakes early to catch the window opening.
+- [UI] Unchecking "load into chat" on the profile you are currently viewing switched the header to another character but kept showing the old character's chat bubbles (and stayed subscribed to its event stream). The settings page now runs the full session re-sync.
+- [Memory] Daily weight decay was a silent no-op: with the default `daily_decay_factor: 0.998`, the per-step change (~0.002) was rounded away by 2-decimal weight precision, so facts never actually decayed (and facts below weight 0.5 could never be reinforced). Weights now keep 4-decimal precision internally; the UI still displays 2 decimals.
+- [Memory] The daily memory job (day summary, forgetting, portrait refresh) only ran if the app happened to be running at its scheduled time (default 00:05). It now catches up on startup: ~90s after launch, any profile that hasn't run today's job gets it run once (idempotent per day via `last_daily_run.json`, which was previously written but never read).
+
+---
+
 ## [0.10.17] — 2026-05-18
 
 ### Added
