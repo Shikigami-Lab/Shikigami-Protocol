@@ -73,7 +73,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [Fix] Fixed redundant status lines displaying in the SenseVoice configuration UI.
 - [Fix] Synchronized default port mismatch between Electron and Python backend.
 - [Fix] Corrected documentation path references in Linux/macOS `init.sh` scripts.
-- [Docs] Cleaned up broken links (e.g., `CONTRIBUTING`) and removed references to internal private files (e.g., `CLAUDE.md`).
+- [Docs] Cleaned up broken links (e.g., `CONTRIBUTING`) and removed references to internal working files.
 
 ### Optimized
 - [CI/CD] Optimized GitHub Actions consumption by adding `workflow_dispatch` manual triggers and `paths-ignore` filtering.

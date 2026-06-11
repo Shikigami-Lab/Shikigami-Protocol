@@ -13,8 +13,9 @@
     "build-mac": "electron-builder --mac",
     "build-linux": "electron-builder --linux",
     "build-all": "electron-builder -mwl",
-    "release": "npm version patch && git push origin HEAD --follow-tags",
-    "release-minor": "npm version minor && git push origin HEAD --follow-tags"
+    "leak-check": "python scripts/leak_check.py",
+    "release": "python scripts/leak_check.py && npm version patch && git push origin HEAD --follow-tags",
+    "release-minor": "python scripts/leak_check.py && npm version minor && git push origin HEAD --follow-tags"
   },
   "build": {
     "appId": "com.shikigami.protocol",

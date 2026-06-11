@@ -85,7 +85,6 @@ scripts/*
 Thumbs.db
 /.tmp.driveupload
 /.tmp.drivedownload
-CLAUDE.md
 /docs/private
 /build
 server.spec
@@ -96,10 +95,7 @@ python_embed.zip
 get-pip.py
 user_packages/
 /assets/readme/raw
-/.claude
-.claude/settings.json
 test_models.py
 test_models_results.md
 test_models_lmstudio.py
 test_models_lmstudio_results.md
-/docs/superpowers
