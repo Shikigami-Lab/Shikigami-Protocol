@@ -29,6 +29,23 @@ def _recently_used_refs(storage_root: str, window: int) -> set:
     return refs
 
 
+def _recent_spoken_sources(storage_root: str, n: int) -> list:
+    """最近 n 次实际开口的话题来源（新→旧），跳过无话题的兜底发言。"""
+    from src.core.ase import _load_ase_state
+    out: list = []
+    for entry in reversed(_load_ase_state(storage_root).get("proactive_log") or []):
+        s = entry.get("source")
+        if s:
+            out.append(s)
+        if len(out) >= n:
+            break
+    return out
+
+
+# 「向内」的来源：回忆与自身状态。连续开口都在其中时提示换换口味。
+_INWARD_SOURCES = {"conversation_recall", "user_life", "ai_self"}
+
+
 @register
 class ReflectionTopicCandidatesSegment(PromptSegment):
     segment_id = "reflection_topic_candidates"
@@ -71,9 +88,19 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
             memory_manager=ctx.memory_manager,
         )
 
+        # ai_self 选中冷却：上一轮已连选 ≥2 次（选中但一直没真正开口）时，本轮不再供其候选，
+        # 否则自省会无限复读自己的 thought（实测 topic_pick 历史中 ai_self 占比畸高）
+        prev_chosen = prev.get("chosen_topic") or {}
+        skip_source_ids: set = set()
+        if prev_chosen.get("source") == "ai_self" and int(prev_chosen.get("consec_picks", 1)) >= 2:
+            skip_source_ids.add("ai_self")
+
         # 每个来源各自收集候选
         per_source: list[list] = []
         for src in sources:
+            if src.source_id in skip_source_ids:
+                per_source.append([])
+                continue
             try:
                 per_source.append(list(src.get_candidates(tctx) or []))
             except Exception as e:
@@ -101,16 +128,33 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
             header = ("[Proactive Topic Candidates] Pick the one most worth raising right "
                       "now and put its id in topic_pick; if none is worth it, set topic_pick to null.")
             footer = ("If you picked a topic you genuinely want to share, that itself is grounds "
-                      "to raise urgency. Put how you'd naturally bring it up in topic_angle.")
+                      "to raise urgency. Put how you'd naturally bring it up in topic_angle. "
+                      "Fresh outside topics (trends) are worth picking now and then even if they "
+                      "differ from what you usually talk about — sharing news is its own kind of "
+                      "closeness; don't dwell only on memories.")
         else:
             header = ("【可主动发起的话题候选】从中挑一个此刻最值得聊的，把它的 id 填进 topic_pick；"
                       "若都不值得提，topic_pick 填 null。")
             footer = ("如果你挑中了一个真心想分享的话题，这本身就是抬高 urgency 的理由。"
-                      "topic_angle 里写你打算怎样自然切入。")
+                      "topic_angle 里写你打算怎样自然切入。"
+                      "外界的新鲜见闻（趋势类候选）即使和你们平时聊的不同，偶尔分享也是一种亲近，"
+                      "不必总停留在回忆里。")
 
         lines = [header]
         for c in candidates:
             lines.append(f"- [{c.ref}] {c.summary}")
         lines.append("")
         lines.append(footer)
+
+        # 轮换提示：最近几次开口都是「向内」的话题且本轮有外部候选时，明确鼓励换口味
+        recent_sources = _recent_spoken_sources(storage_root, 2)
+        has_external = any(not c.ref.startswith(tuple(f"{s}:" for s in _INWARD_SOURCES))
+                           for c in candidates)
+        if has_external and len(recent_sources) >= 2 and all(
+                s in _INWARD_SOURCES for s in recent_sources):
+            lines.append("")
+            lines.append("Note: your last few initiations all drew on memories or your own state — "
+                         "favor a fresh external topic this time."
+                         if locale == "en" else
+                         "提示：你最近几次主动开口都围绕回忆或你自己的状态，这次优先考虑新鲜的外部话题。")
         return SegmentResult(messages=[{"role": "system", "content": "\n".join(lines)}])

@@ -32,6 +32,7 @@ reflection:
 
       上文【可主动发起的话题候选】会以「- [id] 描述」的列表给出（来自对话回忆、用户生活、你自己、网络趋势等）。
       从中挑一个此刻最值得、也最契合你性格与当前情绪的话题，把它的 id **原样**填进 topic_pick；
+      「契合性格」不等于只翻回忆——新鲜的外部见闻同样可以用你自己的方式去聊，分享见闻本身就是一种亲近。
       若候选里没有任何值得现在主动提起的（或根本没有候选列表），topic_pick 填 null。
       **不要编造列表里不存在的 id。**
 
@@ -83,7 +84,9 @@ reflection:
       The [Proactive Topic Candidates] section above is given as a list of "- [id] description"
       (drawn from conversation recall, the user's life, yourself, web trends, etc.).
       Pick the one most worth raising right now that also fits your personality and current mood,
-      and copy its id **verbatim** into topic_pick; if none is worth raising now (or there is no
+      and copy its id **verbatim** into topic_pick; "fits your personality" does not mean memories
+      only — fresh outside news can be told in your own voice, and sharing it is its own kind of closeness.
+      If none is worth raising now (or there is no
       list at all), set topic_pick to null. **Do not invent an id that is not in the list.**
 
       topic_angle: write the angle and emotional hook you'll use to bring it up, true to your character.

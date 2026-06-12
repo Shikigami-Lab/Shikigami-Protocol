@@ -43,7 +43,7 @@ import src.tools.timer.segment               # noqa: F401  (ActiveTimersSegment)
 import src.prompt.segments.reflection_state  # noqa: F401  (ReflectionStateSegment)
 import src.prompt.segments.current_context  # noqa: F401  (单聊时注明当前为一对一私聊)
 import src.prompt.segments.lorebook         # noqa: F401  (LoreBookSegment, keyword-triggered)
-# TrendAwarenessSegment 不加入聊天 pipeline：趋势通过 Reflection→ASE 路径主动发言，不在对话中插入
+import src.prompt.segments.trend_awareness  # noqa: F401  (TrendAwarenessSegment, cooldown 4h；段落设置可关)
 import src.prompt.segments.weather          # noqa: F401  (WeatherSegment, cooldown 2h)
 import src.prompt.segments.reflection.persona        # noqa: F401
 import src.prompt.segments.reflection.ase_config     # noqa: F401

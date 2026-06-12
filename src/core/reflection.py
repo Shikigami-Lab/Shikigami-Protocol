@@ -665,12 +665,18 @@ class ReflectionEngine:
             match = next((c for c in getattr(ctx, "topic_candidates", [])
                           if getattr(c, "ref", None) == topic_pick), None)
             if match is not None:
+                # 连选计数：同一来源被连续选中的轮数（选中但未开口时会反复出现），
+                # topic_candidates 段用它对 ai_self 做选中级冷却
+                _prev_chosen = (getattr(session, "reflection_state", None) or {}).get("chosen_topic") or {}
+                consec_picks = (int(_prev_chosen.get("consec_picks", 1)) + 1
+                                if _prev_chosen.get("source") == match.source_id else 1)
                 chosen_topic = {
                     "source": match.source_id,
                     "item_id": match.item_id,
                     "angle": result.get("topic_angle", ""),
                     "summary": match.summary,
                     "picked_at": time.time(),
+                    "consec_picks": consec_picks,
                 }
                 derived_topic_anchor = match.summary
                 derived_speak_reason = SOURCE_TO_SPEAK_REASON.get(match.source_id, "none")

@@ -8,6 +8,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- [Trends] The "recent web trends" chat segment (`trend_awareness`) was never registered with the prompt pipeline, so normal conversations never saw any fetched trends — it now actually injects (4h cooldown, can be turned off per profile in segment settings).
+- [Trends] The fetcher now sends a browser User-Agent; several sites reject bot-style UAs outright. Note that Reddit's unauthenticated `.json` API is now fully blocked regardless of UA — use an `rss` source with the `/.rss` endpoint instead.
+
+### Changed
+
+- [ASE/Reflection] Trend topic candidates now carry a snippet excerpt, so the reflection model can judge whether a bare headline is actually worth raising.
+- [ASE/Reflection] Topic-selection balancing: the prompt now explicitly counts fresh outside topics as legitimate picks; `ai_self` (the AI's own thought) is cooled down for a round after being picked twice in a row; and when recent initiations all drew on memories or the AI's own state, the candidate list nudges toward an external topic.
+
 ### Build / Release
 
 - GitHub Releases no longer ship pre-built desktop installers (`.exe` / `.dmg` / `.AppImage`). Tags still trigger a release with generated notes; use GitHub’s source archives or clone the repository.
