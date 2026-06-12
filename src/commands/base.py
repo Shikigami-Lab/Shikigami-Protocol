@@ -75,6 +75,11 @@ async def dispatch_command(message: str, session, app) -> CommandResult:
             from src.commands.todo_cmds import handle_todo
             return await handle_todo(sub, args, session, app)
 
+        # /topic [来源] — 让 AI 立刻主动起一个新话题
+        if cmd == "topic":
+            from src.commands.topic_cmds import handle_topic
+            return await handle_topic(sub, args, session, app)
+
         # /help
         if cmd == "help":
             from src.commands.memory_cmds import handle_help
@@ -85,7 +90,7 @@ async def dispatch_command(message: str, session, app) -> CommandResult:
             context_for_llm=(
                 f"[命令执行结果 · {msg}]\n"
                 f"未知命令「/{cmd}」。请告知用户可用命令：/fact list, /fact add, "
-                f"/fact delete, /recall, /memory status, /todo, /timer, /help"
+                f"/fact delete, /recall, /memory status, /todo, /topic, /timer, /help"
             )
         )
 

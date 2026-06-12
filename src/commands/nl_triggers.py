@@ -217,6 +217,46 @@ class WebSearchNLTrigger(NLTrigger):
         )
 
 
+# ── TopicNLTrigger ────────────────────────────────────────────────────────────
+
+_TOPIC_PATTERNS = _re.compile(
+    r"(换个话题|聊点别的|聊点新的|聊点新鲜的|说点别的|说点新鲜的|"
+    r"有什么新鲜事|有啥新鲜事|讲点新鲜事|"
+    r"change the topic|talk about something (else|new)|anything new)",
+    _re.IGNORECASE,
+)
+# 去掉触发词后允许残留的语气词/称呼填充（"那我们换个话题吧" → 残留 "那我们"）
+_TOPIC_FILLER = _re.compile(
+    r"(?i)(let'?s|so|then|okay|ok|hey|well|now|那我们|那就|我们|咱们|那|就|来|你|"
+    r"好不好|行不行|好吗|可以吗|怎么样|呗)"
+    r"|[吧呗呀啊吗呢哦喔嘛诶哈~～!！?？。，,.\s]+"
+)
+
+
+class TopicNLTrigger(NLTrigger):
+    """找话题自然语言触发器：复用 /topic 的零 LLM 调用选材逻辑。
+
+    仅在「裸请求」时触发：去掉触发词与语气词后消息基本为空。
+    "换个话题，聊聊你昨天说的那个" 这类用户已点题的消息不被劫持。
+    """
+
+    def detect(self, msg: str) -> bool:
+        m = msg.strip()
+        if len(m) > 36 or not _TOPIC_PATTERNS.search(m):
+            return False
+        rest = _TOPIC_FILLER.sub("", _TOPIC_PATTERNS.sub("", m))
+        return len(rest) <= 2
+
+    async def execute(self, msg: str, session, app) -> Optional[CommandResult]:
+        from src.commands.topic_cmds import pick_topic_material, _format_context
+        picked = pick_topic_material(session, app)
+        if picked is None:
+            # 无素材时不注入，让 AI 按本性自行转换话题
+            return None
+        return CommandResult(context_for_llm=_format_context(picked, msg.strip()))
+
+
 # ── 注册默认触发器 ─────────────────────────────────────────────────────────────
 register_nl_trigger(TimerNLTrigger())
 register_nl_trigger(WebSearchNLTrigger())
+register_nl_trigger(TopicNLTrigger())

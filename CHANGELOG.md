@@ -8,6 +8,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- [Commands] **`/topic` — ask for a fresh topic on demand.** Picks material from the topic-discovery sources (preferring external ones: web trends / random topics, falling back to the user's life / conversation recall / the AI itself) and injects it into the very same reply — zero extra LLM calls. `/topic trend|回忆|生活|自己|随机` forces a source. Also triggers on bare natural-language requests like "换个话题" / "聊点新鲜的" / "anything new?" (pointed requests like "换个话题，聊聊X" are left alone).
+
 ### Fixed
 
 - [Trends] The "recent web trends" chat segment (`trend_awareness`) was never registered with the prompt pipeline, so normal conversations never saw any fetched trends — it now actually injects (4h cooldown, can be turned off per profile in segment settings).

@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260518i"></script>
+  <script src="js/i18n.js?v=20260612a"></script>
 </head>
 <body>
 
@@ -757,6 +757,12 @@
             <div class="tp-cmd-item" @click="insertCommand('/memory status')">
               <span class="tp-cmd-name">/memory status</span>
               <span class="tp-cmd-desc">{{ t('cmdMemoryStatusDesc') }}</span>
+            </div>
+
+            <div class="tp-cmd-group">{{ t('commandsGroupTopic') }}</div>
+            <div class="tp-cmd-item" @click="insertCommand('/topic')">
+              <span class="tp-cmd-name">/topic</span>
+              <span class="tp-cmd-desc">{{ t('cmdTopicDesc') }}</span>
             </div>
 
             <div class="tp-cmd-group">{{ t('commandsGroupTodo') }} <span class="tp-cmd-badge single-only">{{ t('commandsGroupTodoSingleOnly') }}</span></div>
