@@ -27,6 +27,26 @@ function getWsUrl() {
 window.getBaseUrl = getBaseUrl;
 window.getWsUrl = getWsUrl;
 
+// ── 聊天命令注册表：⌘ 面板与输入框 / 内联补全共用这一份 ──────────────────────
+// insert 尾随空格 = 需要参数；run: true = 无参数、可点击立即执行；kw = 中英搜索词
+const CHAT_COMMANDS = [
+  { insert: '/topic',          argKey: '',                   descKey: 'cmdTopicDesc',        groupKey: 'commandsGroupTopic',  run: true,  kw: 'topic new fresh 话题 新鲜 趋势' },
+  { insert: '/fact list',      argKey: '',                   descKey: 'cmdFactListDesc',     groupKey: 'commandsGroupMemory', run: true,  kw: 'fact list 事实 列出 置顶' },
+  { insert: '/fact add ',      argKey: 'cmdFactAddArg',      descKey: 'cmdFactAddDesc',      groupKey: 'commandsGroupMemory', run: false, kw: 'fact add 记住 添加 事实' },
+  { insert: '/fact delete ',   argKey: 'cmdFactDeleteArg',   descKey: 'cmdFactDeleteDesc',   groupKey: 'commandsGroupMemory', run: false, kw: 'fact delete 删除 忘记' },
+  { insert: '/recall ',        argKey: 'cmdRecallArg',       descKey: 'cmdRecallDesc',       groupKey: 'commandsGroupMemory', run: false, kw: 'recall 回忆 搜索 记忆' },
+  { insert: '/memory status',  argKey: '',                   descKey: 'cmdMemoryStatusDesc', groupKey: 'commandsGroupMemory', run: true,  kw: 'memory status 记忆 状态' },
+  { insert: '/todo list',      argKey: '',                   descKey: 'cmdTodoListDesc',     groupKey: 'commandsGroupTodo',   run: true,  kw: 'todo list 待办 列出' },
+  { insert: '/todo add ',      argKey: 'cmdTodoAddArg',      descKey: 'cmdTodoAddDesc',      groupKey: 'commandsGroupTodo',   run: false, kw: 'todo add 待办 添加' },
+  { insert: '/todo complete ', argKey: 'cmdTodoCompleteArg', descKey: 'cmdTodoCompleteDesc', groupKey: 'commandsGroupTodo',   run: false, kw: 'todo complete 待办 完成' },
+  { insert: '/todo delete ',   argKey: 'cmdTodoDeleteArg',   descKey: 'cmdTodoDeleteDesc',   groupKey: 'commandsGroupTodo',   run: false, kw: 'todo delete 待办 删除' },
+  { insert: '/timer ',         argKey: 'cmdTimerArg',        descKey: 'cmdTimerDesc',        groupKey: 'commandsGroupTimer',  run: false, kw: 'timer 计时 倒计时 提醒' },
+  { insert: '/timer list',     argKey: '',                   descKey: 'cmdTimerListDesc',    groupKey: 'commandsGroupTimer',  run: true,  kw: 'timer list 计时 列出' },
+  { insert: '/timer stop ',    argKey: 'cmdTimerStopArg',    descKey: 'cmdTimerStopDesc',    groupKey: 'commandsGroupTimer',  run: false, kw: 'timer stop 计时 停止' },
+  { insert: '/search ',        argKey: 'cmdSearchArg',       descKey: 'cmdSearchDesc',       groupKey: 'commandsGroupSearch', run: false, kw: 'search 搜索 查' },
+  { insert: '/help',           argKey: '',                   descKey: 'cmdHelpDesc',         groupKey: 'commandsGroupOther',  run: true,  kw: 'help 帮助 命令' },
+];
+
 // Detect Electron runtime (preload.js sets window.electronAPI)
 const IS_ELECTRON = !!(window.electronAPI && window.electronAPI.isElectron);
 
@@ -219,6 +239,12 @@ const App = {
       showTimerPanel: false,
       showCommandsPanel: false,
       showToolbarConfig: false,
+
+      // 命令 UX：/ 内联补全 + 面板搜索 + 最近使用
+      slashSelIdx: 0,
+      slashDismissed: false,   // Esc 暂时关闭下拉，再输入即恢复
+      cmdPanelQuery: '',
+      recentCommands: JSON.parse(localStorage.getItem('recentCommands') || '[]'),
 
       // Toolbar button visibility config (P5-C)
       toolbarConfig: {
@@ -1226,6 +1252,7 @@ const App = {
       const text = (this.inputText || '').trim();
       const hasImage = !!this.pendingScreenshot;
       if ((!text && !hasImage) || this.isStreaming) return;
+      if (text.startsWith('/')) this._recordRecentCommand(text);
 
       if (this.currentGroupId) {
         await this.sendGroupMessage(text || '请根据当前画面回复', hasImage);
@@ -2337,11 +2364,75 @@ const App = {
     },
 
     handleKeydown(e) {
+      // / 内联补全：下拉可见时接管 ↑↓/Tab/Esc；Enter 先补全、已补全则放行发送
+      const matches = this.slashMatches;
+      if (matches.length) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.slashSelIdx = (this.slashSelIdx + 1) % matches.length;
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.slashSelIdx = (this.slashSelIdx - 1 + matches.length) % matches.length;
+          return;
+        }
+        if (e.key === 'Escape') {
+          this.slashDismissed = true;
+          return;
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          this.completeSlash(matches[this.slashSelIdx]);
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          const sel = matches[this.slashSelIdx];
+          if (sel && this.inputText.trim() !== sel.insert.trim()) {
+            e.preventDefault();
+            this.completeSlash(sel);
+            return;
+          }
+        }
+      }
       // Enter sends; Shift+Enter inserts newline
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.sendMessage();
       }
+    },
+
+    /** / 补全：填入命令；带参数的留尾随空格继续输入 */
+    completeSlash(item) {
+      if (!item) return;
+      this.inputText = item.insert;
+      this.$nextTick(() => this.$refs.chatTextarea?.focus());
+    },
+
+    /** ⌘ 面板：无参数命令点击立即执行（群聊中降级为仅填入） */
+    runCommandNow(item) {
+      if (this.isGroupChat) { this.insertCommand(item.insert); return; }
+      this.inputText = item.insert.trim();
+      this.showCommandsPanel = false;
+      this.sendMessage();
+    },
+
+    /** 发送命令时记录到「最近使用」（localStorage，cap 4） */
+    _recordRecentCommand(text) {
+      if (!text.startsWith('/')) return;
+      // 取注册表中能作为该输入前缀的最长 insert（/fact add xxx → /fact add ）
+      let best = null;
+      for (const c of CHAT_COMMANDS) {
+        const base = c.insert.trim();
+        if ((text === base || text.startsWith(base + ' ') || text.startsWith(c.insert)) &&
+            (!best || c.insert.length > best.insert.length)) {
+          best = c;
+        }
+      }
+      if (!best) return;
+      const list = [best.insert, ...this.recentCommands.filter(x => x !== best.insert)].slice(0, 4);
+      this.recentCommands = list;
+      try { localStorage.setItem('recentCommands', JSON.stringify(list)); } catch (_) {}
     },
 
     /* ─────────────────── Status Panel (P4) ─────────────────── */
@@ -2612,6 +2703,7 @@ const App = {
         this.showTodosPanel = false;
         this.showTimerPanel = false;
         this.showToolbarConfig = false;
+        this.cmdPanelQuery = '';   // 重开面板时清空上次搜索，露出「最近使用」
       }
     },
 
@@ -2731,6 +2823,11 @@ const App = {
   },
 
   watch: {
+    inputText() {
+      // 任何输入变化都重置补全选中项；Esc 的暂时关闭在继续输入后恢复
+      this.slashSelIdx = 0;
+      this.slashDismissed = false;
+    },
     currentSessionId(newId) {
       // 单聊会话激活↔轮询的唯一生命周期 owner：激活时启动 status/ASE 轮询，
       // 切到群聊(null)时停掉，避免进群再退群后 _statusPollTimer 永久失效 / _asePollTimer 泄漏。
@@ -2768,6 +2865,35 @@ const App = {
     },
     isGroupChat() {
       return !!this.currentGroupId;
+    },
+    /** / 内联补全候选：仅单聊、输入以 / 开头时；多词过滤，上限 8 条 */
+    slashMatches() {
+      if (this.isGroupChat || this.isStreaming || this.slashDismissed) return [];
+      const txt = this.inputText || '';
+      if (!txt.startsWith('/') || txt.includes('\n') || txt.length > 40) return [];
+      const words = txt.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
+      return CHAT_COMMANDS.filter(c => {
+        const hay = (c.insert + ' ' + c.kw + ' ' + this.t(c.descKey)).toLowerCase();
+        return words.every(w => hay.includes(w));
+      }).slice(0, 8);
+    },
+    /** ⌘ 面板分组（含搜索过滤），保持注册表内的组序 */
+    cmdPanelGroups() {
+      const q = (this.cmdPanelQuery || '').trim().toLowerCase();
+      const groups = [];
+      for (const c of CHAT_COMMANDS) {
+        if (q && !(c.insert + ' ' + c.kw + ' ' + this.t(c.descKey)).toLowerCase().includes(q)) continue;
+        let g = groups.find(x => x.key === c.groupKey);
+        if (!g) { g = { key: c.groupKey, items: [] }; groups.push(g); }
+        g.items.push(c);
+      }
+      return groups;
+    },
+    /** 最近使用的命令条目（按使用时间倒序） */
+    recentCommandItems() {
+      return (this.recentCommands || [])
+        .map(ins => CHAT_COMMANDS.find(c => c.insert === ins))
+        .filter(Boolean);
     },
     mainTitle() {
       return this.isGroupChat ? (this.currentGroup && this.currentGroup.display_name) || this.currentGroupId : this.currentSessionName;

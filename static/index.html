@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260612a"></script>
+  <script src="js/i18n.js?v=20260612b"></script>
 </head>
 <body>
 
@@ -737,77 +737,37 @@
           <div class="tp-cmd-list">
             <p v-if="currentGroupId" class="tp-cmd-hint">{{ t('commandsGroupOnly') }}</p>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupMemory') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/fact list')">
-              <span class="tp-cmd-name">/fact list</span>
-              <span class="tp-cmd-desc">{{ t('cmdFactListDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/fact add ')">
-              <span class="tp-cmd-name">/fact add {{ t('cmdFactAddArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdFactAddDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/fact delete ')">
-              <span class="tp-cmd-name">/fact delete {{ t('cmdFactDeleteArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdFactDeleteDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/recall ')">
-              <span class="tp-cmd-name">/recall {{ t('cmdRecallArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdRecallDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/memory status')">
-              <span class="tp-cmd-name">/memory status</span>
-              <span class="tp-cmd-desc">{{ t('cmdMemoryStatusDesc') }}</span>
+            <div class="tp-cmd-search">
+              <input class="form-input" v-model="cmdPanelQuery" :placeholder="t('cmdPanelSearchPh')" />
             </div>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupTopic') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/topic')">
-              <span class="tp-cmd-name">/topic</span>
-              <span class="tp-cmd-desc">{{ t('cmdTopicDesc') }}</span>
-            </div>
+            <template v-if="!cmdPanelQuery && recentCommandItems.length">
+              <div class="tp-cmd-group">{{ t('cmdRecentGroup') }}</div>
+              <div v-for="c in recentCommandItems" :key="'recent-' + c.insert" class="tp-cmd-item"
+                   @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
+                <span class="tp-cmd-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+                <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
+                <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
+              </div>
+            </template>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupTodo') }} <span class="tp-cmd-badge single-only">{{ t('commandsGroupTodoSingleOnly') }}</span></div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo list')">
-              <span class="tp-cmd-name">/todo list</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoListDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo add ')">
-              <span class="tp-cmd-name">/todo add {{ t('cmdTodoAddArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoAddDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo complete ')">
-              <span class="tp-cmd-name">/todo complete {{ t('cmdTodoCompleteArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoCompleteDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo delete ')">
-              <span class="tp-cmd-name">/todo delete {{ t('cmdTodoDeleteArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoDeleteDesc') }}</span>
-            </div>
+            <template v-for="g in cmdPanelGroups" :key="g.key">
+              <div class="tp-cmd-group">{{ t(g.key) }}
+                <span v-if="g.key === 'commandsGroupTodo'" class="tp-cmd-badge single-only">{{ t('commandsGroupTodoSingleOnly') }}</span>
+                <span v-if="g.key === 'commandsGroupTimer'" class="tp-cmd-badge group-ok">{{ t('commandsGroupTimerGroupOk') }}</span>
+              </div>
+              <span v-if="g.key === 'commandsGroupTimer'" class="tp-cmd-desc tp-cmd-desc-block">{{ t('commandsGroupTimerNote') }}</span>
+              <div v-for="c in g.items" :key="c.insert" class="tp-cmd-item"
+                   @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
+                <span class="tp-cmd-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+                <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
+                <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
+              </div>
+            </template>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupTimer') }} <span class="tp-cmd-badge group-ok">{{ t('commandsGroupTimerGroupOk') }}</span></div>
-            <span class="tp-cmd-desc tp-cmd-desc-block">{{ t('commandsGroupTimerNote') }}</span>
-            <div class="tp-cmd-item" @click="insertCommand('/timer ')">
-              <span class="tp-cmd-name">/timer {{ t('cmdTimerArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTimerDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/timer list')">
-              <span class="tp-cmd-name">/timer list</span>
-              <span class="tp-cmd-desc">{{ t('cmdTimerListDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/timer stop')">
-              <span class="tp-cmd-name">/timer stop {{ t('cmdTimerStopArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTimerStopDesc') }}</span>
-            </div>
-
-            <div class="tp-cmd-group">{{ t('commandsGroupSearch') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/search ')">
-              <span class="tp-cmd-name">/search {{ t('cmdSearchArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdSearchDesc') }}</span>
-            </div>
-
-            <div class="tp-cmd-group">{{ t('commandsGroupOther') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/help')">
-              <span class="tp-cmd-name">/help</span>
-              <span class="tp-cmd-desc">{{ t('cmdHelpDesc') }}</span>
+            <div class="tp-cmd-nl-hint">
+              <div class="tp-cmd-group">{{ t('cmdNlHintTitle') }}</div>
+              <span class="tp-cmd-desc tp-cmd-desc-block">{{ t('cmdNlHintBody') }}</span>
             </div>
 
           </div>
@@ -838,6 +798,16 @@
 
     <!-- Input area -->
     <div class="input-area">
+      <div v-if="slashMatches.length" class="slash-suggest">
+        <div v-for="(c, i) in slashMatches" :key="c.insert"
+             :class="['slash-item', { active: i === slashSelIdx }]"
+             @mousedown.prevent="completeSlash(c)"
+             @mouseenter="slashSelIdx = i">
+          <span class="slash-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+          <span class="slash-desc">{{ t(c.descKey) }}</span>
+        </div>
+        <div class="slash-foot">{{ t('slashSuggestHint') }}</div>
+      </div>
       <div v-if="pendingScreenshot" class="pending-image-bar">
         <span class="pending-image-label">{{ t('pendingImageLabel') }}</span>
         <button type="button" class="pending-image-remove s-btn s-btn-secondary" @click="clearPendingImage()" :title="t('pendingImageRemove')">{{ t('pendingImageRemove') }}</button>
@@ -5264,6 +5234,6 @@
 <script src="js/api-paths.js?v=20260518i"></script>
 <script src="js/components.js?v=20260518i"></script>
 <script src="js/settings.js?v=20260611a"></script>
-<script src="js/app.js?v=20260518i"></script>
+<script src="js/app.js?v=20260612a"></script>
 </body>
 </html>

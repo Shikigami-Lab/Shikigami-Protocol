@@ -10,6 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- [UI] **Slash-command autocomplete** — typing `/` in the chat box now pops an inline suggestion dropdown (fuzzy filter, ↑↓ navigation, Tab/Enter to complete, Esc to dismiss). The ⌘ commands panel gained a search box, a "recently used" section, click-to-run for argument-less commands (`/topic`, `/fact list`, …), and a footer listing the natural-language phrases that trigger tools directly. Both views render from a single command registry.
 - [Commands] **`/topic` — ask for a fresh topic on demand.** Picks material from the topic-discovery sources (preferring external ones: web trends / random topics, falling back to the user's life / conversation recall / the AI itself) and injects it into the very same reply — zero extra LLM calls. `/topic trend|回忆|生活|自己|随机` forces a source. Also triggers on bare natural-language requests like "换个话题" / "聊点新鲜的" / "anything new?" (pointed requests like "换个话题，聊聊X" are left alone).
 
 ### Fixed

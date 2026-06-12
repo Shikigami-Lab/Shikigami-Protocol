@@ -2596,6 +2596,32 @@ textarea.form-input {
   margin: 2px 12px 6px;
   padding: 0;
 }
+.tp-cmd-search { padding: 6px 12px 2px; }
+.tp-cmd-search .form-input {
+  font-size: var(--fs-sm);
+  padding: 5px 9px;
+}
+.tp-cmd-item { position: relative; }
+.tp-cmd-run {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-muted);
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  opacity: 0.75;
+  transition: opacity var(--transition-fast);
+}
+.tp-cmd-item:hover .tp-cmd-run { opacity: 1; }
+.tp-cmd-nl-hint {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-bottom: 4px;
+}
 
 /* Toolbar config */
 .tp-config-list { padding: 8px 0; }
