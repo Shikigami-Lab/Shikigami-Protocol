@@ -2544,7 +2544,12 @@ textarea.form-input {
 .tp-timer-remain.expired { color: #f66; }
 
 /* Command list */
-.tp-cmd-list { padding: 4px 0; }
+.tp-cmd-list {
+  padding: 4px 0;
+  /* 命令变多后必须限高滚动，否则面板向上顶出屏幕（其余 tp 面板同理用 .tp-list 220px） */
+  max-height: min(58vh, 480px);
+  overflow-y: auto;
+}
 .tp-cmd-group {
   font-size: var(--fs-2xs);
   font-weight: 700;
@@ -2596,7 +2601,13 @@ textarea.form-input {
   margin: 2px 12px 6px;
   padding: 0;
 }
-.tp-cmd-search { padding: 6px 12px 2px; }
+.tp-cmd-search {
+  padding: 6px 12px;
+  position: sticky;   /* 滚动时搜索框钉在顶部 */
+  top: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+}
 .tp-cmd-search .form-input {
   font-size: var(--fs-sm);
   padding: 5px 9px;
