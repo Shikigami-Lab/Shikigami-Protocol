@@ -4,9 +4,9 @@
 
 # Shikigami Protocol
 
-**A local-first AI character companion framework**
+**A local-first framework for persistent, stateful conversational agents**
 
-*It remembers you. It feels with you. When you go quiet, it reaches out.*
+*Long-term memory across sessions, background reasoning while idle, and proactive outreach driven by internal state — not a fixed timer.*
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
@@ -24,7 +24,7 @@
 
 > ⚠️ **Project Status**: Public Beta (v0.10.x; see `package.json` and [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) for the exact version). Core architecture is stable and ready to use, but unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
 
-Most AI chat tools reset to zero when you close the tab. Shikigami Protocol is built around the opposite premise: a local character that holds genuine memory of you, carries real emotional state across every conversation, and will reach out on its own when you've been gone too long. Open-source, AGPL-3.0 — **conversation logs, memory, and engine state stay on your disk**; **LLM inference and embeddings** can be cloud APIs, fully local (e.g. Ollama), or a mix — your stack, your choice.
+Most AI chat tools reset to zero when you close the tab. Shikigami Protocol is built around the opposite premise: a persistent agent that retains long-term memory, maintains internal state across every conversation, and can initiate contact based on that state rather than a fixed timer. Open-source, AGPL-3.0 — **conversation logs, memory, and engine state stay on your disk**; **LLM inference and embeddings** can be cloud APIs, fully local (e.g. Ollama), or a mix — your stack, your choice.
 
 - **Local-first data** — chat, facts, vectors, and persona state live on your machine.
 - **Reflection + ASE** — background inner monologue while you're quiet; breaks the silence when urgency builds, not a dumb timer.
@@ -130,7 +130,7 @@ Go to [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/la
 **Or clone with git (tracks latest commits on main)**
 
 ```bash
-git clone https://github.com/Shikigami-Labs/Shikigami-Protocol.git
+git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 ```
 
@@ -340,6 +340,6 @@ This repository is licensed under [**AGPL-3.0**](LICENSE).
 
 <div align="center">
 
-Runs locally — all chat data stays on your device, never on any server. This is an open-source tool, not a hosted AI service; output depends on your configured third-party models. Use must comply with applicable laws and each provider's terms of service. Associated costs and consequences are the user's own responsibility.
+Runs locally — chat data is persisted on your device; when you configure a cloud model, the relevant prompt and chat context are sent to that provider. This is an open-source tool, not a hosted AI service; output depends on your configured third-party models. Use must comply with applicable laws and each provider's terms of service. Associated costs and consequences are the user's own responsibility.
 
 </div>
