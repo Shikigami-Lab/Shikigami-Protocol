@@ -4,9 +4,9 @@
 
 # Shikigami Protocol
 
-**本地运行的 AI 角色伴侣框架**
+**本地运行的持久化、有状态对话智能体框架**
 
-*记得你。感受你。在你沉默时，主动找你说话。*
+*跨会话的长期记忆，闲时后台推理，基于内部状态主动联系——而非固定计时器。*
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
@@ -24,7 +24,7 @@
 
 > ⚠️ **项目状态**：Public Beta（v0.10.x；具体版本见根目录 `package.json` 与 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)）。核心架构已稳定可用，仍可能存在未知 Bug。欢迎在 [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) 中交流反馈。
 
-绝大多数 AI 聊天工具在你关掉页面的瞬间就归零了。Shikigami Protocol 从相反的方向出发：一个本地运行的角色，对你积累真实的记忆，在每次对话之间保持连续的情绪状态，在你消失太久时会主动找你说话。完全开源，AGPL-3.0 — **聊天记录、记忆提取与状态机数据保存在你的设备上**；**大模型推理与向量嵌入**可选用云端 API、完全本地（如 Ollama）或混合部署，由你在 `config/app.yaml` 与引导页里决定。
+绝大多数 AI 聊天工具在你关掉页面的瞬间就归零了。Shikigami Protocol 从相反的方向出发：一个持久化的智能体，积累长期记忆，在每次对话之间保持连续的内部状态，并能基于该状态主动发起联系，而非依赖固定计时器。完全开源，AGPL-3.0 — **聊天记录、记忆提取与状态机数据保存在你的设备上**；**大模型推理与向量嵌入**可选用云端 API、完全本地（如 Ollama）或混合部署，由你在 `config/app.yaml` 与引导页里决定。
 
 - **数据本地优先** — 对话、事实库、向量与引擎状态落在本机磁盘。
 - **自省 + 主动发言 (ASE)** — 你沉默时后台生成内心独白并积累「想说的话」，达标后主动开口，而不是简单定时推送。
@@ -125,12 +125,12 @@
 
 **推荐：下载最新 Release 压缩包**
 
-前往 [Releases](https://github.com/Shikigami-Labs/Shikigami-Protocol/releases/latest)，下载 **Source code (zip)**，解压后在解压目录内执行下方命令。
+前往 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest)，下载 **Source code (zip)**，解压后在解压目录内执行下方命令。
 
 **或使用 git clone（跟踪 main 分支最新提交）**
 
 ```bash
-git clone https://github.com/Shikigami-Labs/Shikigami-Protocol.git
+git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 ```
 
@@ -347,6 +347,6 @@ shikigami-protocol/
 
 <div align="center">
 
-本地运行，所有对话数据仅存储于用户设备，不经过任何服务器。本项目为开源工具，不提供托管 AI 服务，生成内容取决于用户自行配置的第三方模型。使用须符合所在法域的适用法律及各服务商条款，相关费用与后果由用户自行承担。
+本地运行，对话数据持久化在用户设备；使用云端模型时，相关提示词与对话上下文会发送给所选服务商。本项目为开源工具，不提供托管 AI 服务，生成内容取决于用户自行配置的第三方模型。使用须符合所在法域的适用法律及各服务商条款，相关费用与后果由用户自行承担。
 
 </div>
