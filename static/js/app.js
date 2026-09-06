@@ -76,6 +76,25 @@ const CLIENT_ID = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true });
 
+// ── 外链点击接管 ──────────────────────────────────────────────────────────────
+// marked 渲染出的是裸 <a href="https://…">（没有 target），在 Electron 里点击会让主窗口
+// 就地导航过去，整个 Vue 应用被外部网页替换，而菜单栏已隐藏、没有后退入口，用户只能
+// 重启应用。这里统一接管：外链一律交给系统浏览器，应用窗口自身永不离开。
+// main.js 的 will-navigate 是同一问题的兜底防线，即使这里漏了也不会被导航走。
+// 用 document 级委托而不是覆盖 marked 的 renderer.link——不绑定 marked 版本（v15 的
+// link({href,title,tokens}) 签名与旧版不兼容），且对任何来源的动态链接都生效。
+document.addEventListener('click', (e) => {
+  const a = e.target && e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href') || '';
+  // 锚点 / 相对路径 / mailto 等保持原生行为（docs-viewer 等站内链接走 target=_blank）
+  if (!/^https?:\/\//i.test(href)) return;
+  if (a.origin === window.location.origin) return;   // 同源（本地服务）放行
+  e.preventDefault();
+  if (IS_ELECTRON && window.electronAPI) window.electronAPI.openExternal(href);
+  else window.open(href, '_blank', 'noopener,noreferrer');
+});
+
 // ── UI debug logger ───────────────────────────────────────────────────────────
 // Mirrors console output to data/logs/ui_debug.log via POST /debug/ui_log.
 // Fire-and-forget; never throws; never blocks the caller.

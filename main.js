@@ -741,8 +741,8 @@ function createWindow() {
   mainWindow.loadURL(SERVER_URL);
   mainWindow.setMenuBarVisibility(false);
 
-  // Handle target="_blank" links: open docs-viewer pages in a proper child window.
-  // Any other same-origin navigation is allowed in-place; deny everything else.
+  // 只管 window.open / target="_blank"；就地导航（裸 <a href>）不走这里，见下面的 will-navigate。
+  // docs-viewer 开独立子窗口，其余外链交给系统浏览器。
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.includes('/docs-viewer.html')) {
       return {
@@ -759,6 +759,22 @@ function createWindow() {
     // Open external URLs in the system browser, deny new windows for everything else.
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // 就地导航拦截：聊天气泡里的裸 <a href="https://…">（marked 渲染，无 target）点击时
+  // 走的是主窗口自身导航，setWindowOpenHandler 拦不到。不拦的话整个 Vue 应用会被外部
+  // 网页替换掉，而菜单栏已隐藏、没有后退入口，用户只能重启应用。
+  // 同源（本地服务）放行，其余一律阻止并交给系统浏览器。
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(url).origin === new URL(SERVER_URL).origin;
+    } catch (_) {
+      sameOrigin = false;   // about:blank、data: 等非法/异常 URL 一律当外部处理
+    }
+    if (sameOrigin) return;
+    e.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   });
 
   mainWindow.once('ready-to-show', () => {
