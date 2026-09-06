@@ -4562,16 +4562,20 @@
               </div>
             </div>
 
-            <!-- 记忆变更历史 -->
+            <!-- 记忆变更历史（默认折叠，展开后限高滚动，避免挤占下方事实列表） -->
             <div class="mem-changelog">
-              <div class="mem-diary-preview-title" style="display:flex;align-items:center;gap:8px;">
-                {{ t('memChangelogTitle') }}
+              <div class="mem-diary-preview-title mem-changelog-toggle"
+                   @click="memShowChangelog = !memShowChangelog">
+                <span>{{ t('memChangelogTitle') }}</span>
+                <span v-if="memoryChangelog.length" class="mem-changelog-count">{{ memoryChangelog.length }}</span>
                 <button class="s-btn s-btn-secondary" style="font-size:11px;margin-left:auto;"
                         :disabled="memoryChangelogLoading || !(memoryContentProfileId || selectedProfileId)"
-                        @click="loadMemoryChangelog(memoryContentProfileId || selectedProfileId)">
+                        @click.stop="loadMemoryChangelog(memoryContentProfileId || selectedProfileId)">
                   {{ memoryChangelogLoading ? '…' : t('btnRefresh') }}
                 </button>
+                <span class="mem-changelog-caret">{{ memShowChangelog ? '▲' : '▼' }}</span>
               </div>
+              <div v-show="memShowChangelog" class="mem-changelog-body">
               <p v-if="!memoryChangelog.length" class="mem-cfg-hint">{{ t('memChangelogEmpty') }}</p>
               <div v-for="run in memoryChangelog" :key="run.run_id"
                    class="mem-changelog-entry" :class="{ 'is-rolled-back': run.rolled_back }">
@@ -4604,6 +4608,7 @@
                     {{ t('btnRollback') }}
                   </button>
                 </div>
+              </div>
               </div>
             </div>
 
@@ -5233,7 +5238,7 @@
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260518i"></script>
 <script src="js/components.js?v=20260518i"></script>
-<script src="js/settings.js?v=20260611a"></script>
-<script src="js/app.js?v=20260612a"></script>
+<script src="js/settings.js?v=20260828b"></script>
+<script src="js/app.js?v=20260828a"></script>
 </body>
 </html>

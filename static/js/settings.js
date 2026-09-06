@@ -431,6 +431,7 @@ const SettingsMixin = {
       forgettingPreviewLoading: false,
       memoryChangelog: [],       // 记忆变更历史（最近 20 条）
       memoryChangelogLoading: false,
+      memShowChangelog: false,   // 变更历史整体折叠：默认收起，否则 20 条把下方事实列表挤出视口
       memChangelogExpanded: '',  // 当前展开的 run_id
       memoryRollbackLoading: false,
       factSortBy: 'time',    // 'time' | 'category' | 'weight'

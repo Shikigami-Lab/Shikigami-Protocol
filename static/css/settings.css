@@ -3697,6 +3697,25 @@ textarea.form-input {
 
 /* ── 记忆变更历史面板 ── */
 .mem-changelog { margin-top: var(--space-3); }
+/* 折叠标题行：整行可点，右侧刷新按钮用 @click.stop 不触发折叠 */
+.mem-changelog-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+.mem-changelog-count {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: normal;
+}
+/* 展开后限高滚动，避免 20 条把下方事实列表顶出视口 */
+.mem-changelog-body {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: var(--space-1);
+}
 .mem-changelog-entry {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
