@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Dict, List, Any
 from openai import AsyncOpenAI
 
 from src.llm.base import LLMProvider
+from src.llm.think_filter import ThinkTagFilter, strip_think_tags
 from src.utils.debug_logger import log_error, log_debug
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ class OpenAICompatProvider(LLMProvider):
                 stream=True,
                 **merged,
             )
+            flt = ThinkTagFilter()
             async for chunk in stream:
                 if not getattr(chunk, "choices", None) or not chunk.choices:
                     continue
@@ -95,7 +97,12 @@ class OpenAICompatProvider(LLMProvider):
                 if delta is not None:
                     content = getattr(delta, "content", None)
                     if content:
-                        yield content
+                        visible = flt.feed(content)
+                        if visible:
+                            yield visible
+            tail = flt.flush()
+            if tail:
+                yield tail
         except Exception as e:
             err_msg = str(e)
             logger.error(f"[LLM] stream_chat error: {e}")
@@ -127,7 +134,7 @@ class OpenAICompatProvider(LLMProvider):
                 log_debug("llm_chat_error", model=self.model, error=err)
                 return f"[LLM Error: {err}]"
             content = getattr(message, "content", None)
-            return (content or "") if content is not None else ""
+            return strip_think_tags(content) if content else ""
         except Exception as e:
             err_msg = str(e)
             logger.error(f"[LLM] chat error: {e}")
