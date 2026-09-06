@@ -11,7 +11,7 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20260612a" />
-  <link rel="stylesheet" href="css/settings.css?v=20260612a" />
+  <link rel="stylesheet" href="css/settings.css?v=20260828c" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
@@ -2654,6 +2654,29 @@
                   <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="userPortraitForm.enabled"></toggle-row>
 
                   <div v-show="userPortraitForm.enabled" style="margin-top:12px;">
+                    <!-- AI 识别到的称呼：与画像正文分开维护，只累加不遗忘 -->
+                    <div v-show="userPortraitForm.address_forms_enabled" style="margin-bottom:14px;">
+                      <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'How they address you' : '他这样称呼你' }}</div>
+                      <p class="form-hint" style="margin:0 0 8px 0;">
+                        {{ locale === 'en'
+                          ? 'Learned automatically from conversation. Only accumulates — never forgotten, even after long gaps. Remove any that were picked up by mistake.'
+                          : '从对话中自动识别，只累加、不会因为久未使用而遗忘。识别错的可以删掉。' }}
+                      </p>
+                      <div v-if="userPortraitAddressForms.length" style="display:flex;flex-wrap:wrap;gap:6px;">
+                        <span v-for="f in userPortraitAddressForms" :key="f.form" class="portrait-address-chip"
+                              :title="f.evidence || ''">
+                          {{ f.form }}<span class="portrait-address-count"
+                                :title="locale === 'en' ? 'times used' : '使用次数'">×{{ f.count }}</span>
+                          <button class="portrait-address-del"
+                                  :title="locale === 'en' ? 'Remove' : '删除'"
+                                  @click="deleteUserPortraitAddressForm(f.form)">✕</button>
+                        </span>
+                      </div>
+                      <p v-else class="form-hint" style="margin:0;">
+                        {{ locale === 'en' ? 'Nothing recognized yet.' : '尚未识别到称呼。' }}
+                      </p>
+                    </div>
+
                     <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Portrait content' : '画像内容' }}</div>
                     <textarea class="form-input" v-model="userPortraitForm.content" rows="12" style="resize:vertical;"
                       :placeholder="locale === 'en' ? 'Empty for now — will be generated on next refresh.' : '当前为空——下次刷新时会生成。'"></textarea>
@@ -2714,6 +2737,7 @@
                         <input type="number" class="seg-num-input" min="0" max="168" step="1" style="width:80px;"
                                v-model.number="userPortraitForm.min_hours_between_refresh" />
                       </div>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Recognize forms of address' : '识别称呼'" v-model="userPortraitForm.address_forms_enabled"></toggle-row>
                       <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Use day summaries' : '使用日记摘要'" v-model="userPortraitForm.use_day_summary_as_input"></toggle-row>
                       <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Use memory facts' : '使用记忆事实'" v-model="userPortraitForm.use_facts_as_input"></toggle-row>
                       <div class="param-row" style="margin-top:8px;">

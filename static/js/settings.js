@@ -182,6 +182,7 @@ const SettingsMixin = {
       userPortraitShowAdvanced: false,
       userPortraitShowChangelog: false,
       userPortraitChangelog: [],
+      userPortraitAddressForms: [],   // AI 识别到的「用户怎么称呼我」，只累加不衰减
       profileSaving: false,
       profileAllSaving: false,
       _profileFormLoaded: false,
@@ -3452,6 +3453,23 @@ const SettingsMixin = {
     },
 
     // ── User Portrait (AI-maintained) ────────────────────────────────────
+    /** 删除一个误识别的称呼。称呼表只累加不衰减，这是唯一的删除入口。 */
+    async deleteUserPortraitAddressForm(form) {
+      const pid = this.selectedProfileId;
+      if (!pid || !form) return;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/address_forms/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ form }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        this.userPortraitAddressForms = this.userPortraitAddressForms.filter(f => f.form !== form);
+      } catch (e) {
+        this.showToast((this.locale === 'en' ? 'Delete failed: ' : '删除失败: ') + (e.message || ''), 'error');
+      }
+    },
+
     async loadUserPortrait(profileId) {
       if (!profileId) return;
       this._userPortraitFormLoaded = false;
@@ -3473,7 +3491,9 @@ const SettingsMixin = {
           use_day_summary_as_input:    cfg.use_day_summary_as_input !== false,
           use_facts_as_input:          cfg.use_facts_as_input !== false,
           max_input_conv_turns:        cfg.max_input_conv_turns ?? 60,
+          address_forms_enabled:       cfg.address_forms_enabled !== false,
         };
+        this.userPortraitAddressForms = data.address_forms || [];
         this.$nextTick(() => { this._userPortraitFormLoaded = true; });
       } catch (e) {
         console.error('[settings] loadUserPortrait:', e);
@@ -3515,6 +3535,7 @@ const SettingsMixin = {
             use_day_summary_as_input:    !!f.use_day_summary_as_input,
             use_facts_as_input:          !!f.use_facts_as_input,
             max_input_conv_turns:        parseInt(f.max_input_conv_turns, 10) || 60,
+            address_forms_enabled:       !!f.address_forms_enabled,
           }),
         });
         const data = await res.json();

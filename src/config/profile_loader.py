@@ -46,6 +46,7 @@ DEFAULT_USER_PORTRAIT_CONFIG: Dict[str, Any] = {
     "use_day_summary_as_input": True,
     "use_facts_as_input": True,
     "max_input_conv_turns": 60,
+    "address_forms_enabled": True,   # 识别并累积「用户怎么称呼这个角色」
 }
 
 

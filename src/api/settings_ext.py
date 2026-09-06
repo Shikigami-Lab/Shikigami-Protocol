@@ -3342,13 +3342,30 @@ async def get_user_portrait(profile_id: str):
     cfg = card.get("user_portrait_config") or dict(DEFAULT_USER_PORTRAIT_CONFIG)
     from src.core.user_portrait import get_changelog
     changelog_count = len(get_changelog(storage_root))
+    address_block = portrait.get("address_forms") or {}
     return {
         "content": portrait.get("content", ""),
         "updated_at": int(portrait.get("updated_at") or 0),
         "refresh_count": int(portrait.get("refresh_count") or 0),
         "config": cfg,
         "changelog_count": changelog_count,
+        "address_forms": [f for f in (address_block.get("forms") or [])
+                          if isinstance(f, dict) and f.get("form")],
     }
+
+
+class UserPortraitAddressDeleteBody(BaseModel):
+    form: str = ""
+
+
+@router.post("/profiles/{profile_id}/user_portrait/address_forms/delete")
+async def delete_user_portrait_address_form(profile_id: str, body: UserPortraitAddressDeleteBody):
+    """删除一个识别到的称呼（纠正误识别；这是称呼表唯一的删除入口）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import delete_address_form
+    return {"ok": delete_address_form(profile_id, body.form)}
 
 
 class UserPortraitEditBody(BaseModel):
@@ -3427,6 +3444,7 @@ class UserPortraitConfigBody(BaseModel):
     use_day_summary_as_input: Optional[bool] = None
     use_facts_as_input: Optional[bool] = None
     max_input_conv_turns: Optional[int] = None
+    address_forms_enabled: Optional[bool] = None
 
 
 @router.post("/profiles/{profile_id}/user_portrait/config")

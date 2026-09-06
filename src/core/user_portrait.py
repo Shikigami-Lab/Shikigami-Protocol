@@ -417,6 +417,13 @@ async def trigger_portrait_refresh(
 
     logger.info("[UserPortrait] 画像刷新完成 profile=%s version=%d trigger=%s",
                 profile_id, new_refresh_count, triggered_by)
+
+    # 称呼识别：复用画像的触发时机，但独立成一次短调用；失败绝不影响画像结果
+    try:
+        await refresh_address_forms(profile_id, storage_root, app)
+    except Exception as e:
+        logger.warning("[UserPortrait] 称呼识别失败（不影响画像）profile=%s: %s", profile_id, e)
+
     return entry
 
 
@@ -462,3 +469,199 @@ def manual_edit(profile_id: str, new_content: str) -> bool:
 def reset_portrait(profile_id: str) -> bool:
     """清空 content（下次刷新从 introduction 重新长出）。refresh_count 保持不变。"""
     return manual_edit(profile_id, "")
+
+
+# ── 称呼识别（user_portrait.address_forms）──────────────────────────────────
+#
+# 与画像正文分开维护的原因：
+#   画像是 600~3000 字散文，每次刷新都过一遍 LLM 改写，是**有损信道**；
+#   而「用户怎么称呼你」需要 100% 保真。更要命的是画像 prompt 的反污染条款
+#   （规则 5）会主动拒绝写入"少见称谓"，像「a」这种单字母昵称几乎必然被误伤。
+#   所以这里独立成一个短输出任务：prompt 高度聚焦、输出几十字 JSON 不会被截断、
+#   失败也不影响画像本身。
+#
+# 累积语义（这是本功能的关键）：
+#   称呼**只累加、不衰减、不因近期未出现而删除**。用户几个月不叫某个称呼，
+#   再叫时 AI 依然认得——这正是 facts 体系做不到的（fact 有 recency 衰减会沉底）。
+#   唯一的删除入口是用户手动 delete_address_form()。
+
+MAX_ADDRESS_FORMS = 8          # 最多保留的称呼数（超出按 count 淘汰最低的）
+MAX_ADDRESS_FORM_LEN = 20      # 单个称呼的长度上限，超出视为 LLM 输出异常
+
+
+def _parse_address_forms(raw: str) -> List[Dict[str, Any]]:
+    """解析称呼识别 LLM 的 JSON 输出。任何异常都返回 []（宁可漏，不可错）。"""
+    text = _strip_fence(raw).strip()
+    if not text:
+        return []
+    # 容错：模型偶尔在 JSON 前后带一句话，截取最外层数组
+    if not text.startswith("["):
+        l, r = text.find("["), text.rfind("]")
+        if l == -1 or r <= l:
+            return []
+        text = text[l:r + 1]
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        form = str(item.get("form") or "").strip()
+        if not form or len(form) > MAX_ADDRESS_FORM_LEN:
+            continue
+        key = form.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            count = max(1, int(item.get("count") or 1))
+        except (TypeError, ValueError):
+            count = 1
+        out.append({
+            "form": form,
+            "count": count,
+            "evidence": str(item.get("evidence") or "").strip()[:40],
+        })
+    return out
+
+
+def _merge_address_forms(existing: List[Dict[str, Any]],
+                         found: List[Dict[str, Any]],
+                         now_ts: int) -> List[Dict[str, Any]]:
+    """把本轮识别结果并入已有称呼表：已有的累加计数，新的追加。绝不删除旧条目。"""
+    by_key = {}
+    merged: List[Dict[str, Any]] = []
+    for e in existing:
+        if not isinstance(e, dict):
+            continue
+        form = str(e.get("form") or "").strip()
+        if not form:
+            continue
+        rec = {
+            "form": form,
+            "count": int(e.get("count") or 1),
+            "evidence": str(e.get("evidence") or ""),
+            "first_seen": int(e.get("first_seen") or now_ts),
+            "last_seen": int(e.get("last_seen") or now_ts),
+        }
+        by_key[form.lower()] = rec
+        merged.append(rec)
+
+    for f in found:
+        key = f["form"].lower()
+        if key in by_key:
+            rec = by_key[key]
+            rec["count"] += f["count"]
+            rec["last_seen"] = now_ts
+            if f.get("evidence"):
+                rec["evidence"] = f["evidence"]
+        else:
+            rec = {
+                "form": f["form"],
+                "count": f["count"],
+                "evidence": f.get("evidence", ""),
+                "first_seen": now_ts,
+                "last_seen": now_ts,
+            }
+            by_key[key] = rec
+            merged.append(rec)
+
+    merged.sort(key=lambda r: (-r["count"], -r["last_seen"]))
+    return merged[:MAX_ADDRESS_FORMS]
+
+
+async def refresh_address_forms(profile_id: str, storage_root: str, app) -> Optional[List[Dict[str, Any]]]:
+    """识别并累积「用户怎么称呼这个角色」。返回更新后的称呼表，跳过/失败返回 None。"""
+    card = _load_profile_card(profile_id)
+    if not card:
+        return None
+
+    cfg = card.get("user_portrait_config") or {}
+    if not cfg.get("enabled", True) or not cfg.get("address_forms_enabled", True):
+        return None
+
+    max_turns = int(cfg.get("max_input_conv_turns", 60))
+    conversation = _get_recent_conversation_text(storage_root, max_turns)
+    if not conversation:
+        return None
+
+    locale = get_locale()
+    tmpl = get_prompt("user_portrait.address_forms", locale=locale)
+    if not tmpl:
+        logger.warning("[UserPortrait] address_forms prompt 未找到，跳过")
+        return None
+
+    config = getattr(getattr(app, "state", None), "config", None)
+    user_label = (getattr(config, "user_name", "") or "用户").strip() if config else "用户"
+    persona_name = card.get("display_name") or card.get("name") or profile_id
+
+    system_text = Template(tmpl).safe_substitute(
+        persona_name=persona_name,
+        user_label=user_label,
+        conversation=conversation,
+    )
+    messages = [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": "请输出 JSON 数组。" if locale == "zh" else "Output the JSON array."},
+    ]
+
+    try:
+        raw = await _llm_call(messages, app, role="user_portrait_address_forms", profile_id=profile_id)
+    except Exception as e:
+        logger.warning("[UserPortrait] 称呼识别 LLM 调用失败 profile=%s: %s", profile_id, e)
+        return None
+
+    found = _parse_address_forms(raw)
+    if not found:
+        logger.debug("[UserPortrait] 本轮未识别到称呼 profile=%s", profile_id)
+        return None
+
+    now_ts = int(time.time())
+    portrait = card.get("user_portrait") or {}
+    block = portrait.get("address_forms") or {}
+    existing = block.get("forms") or []
+    merged = _merge_address_forms(existing, found, now_ts)
+
+    card.setdefault("user_portrait", {})
+    card["user_portrait"]["address_forms"] = {"forms": merged, "updated_at": now_ts}
+    _save_profile_card(profile_id, card)
+
+    logger.info("[UserPortrait] 称呼表更新 profile=%s: %s",
+                profile_id, ", ".join(f'{r["form"]}×{r["count"]}' for r in merged))
+    return merged
+
+
+def get_address_forms(profile_id: str) -> List[Dict[str, Any]]:
+    """读取当前称呼表（按 count 降序）。"""
+    card = _load_profile_card(profile_id)
+    block = ((card.get("user_portrait") or {}).get("address_forms") or {})
+    forms = block.get("forms") or []
+    return [f for f in forms if isinstance(f, dict) and f.get("form")]
+
+
+def delete_address_form(profile_id: str, form: str) -> bool:
+    """删除一个称呼（唯一的删除入口，供用户纠正误识别）。"""
+    target = (form or "").strip().lower()
+    if not target:
+        return False
+    card = _load_profile_card(profile_id)
+    if not card:
+        return False
+    portrait = card.get("user_portrait") or {}
+    block = portrait.get("address_forms") or {}
+    forms = block.get("forms") or []
+    kept = [f for f in forms if str(f.get("form", "")).strip().lower() != target]
+    if len(kept) == len(forms):
+        return False
+    block["forms"] = kept
+    block["updated_at"] = int(time.time())
+    card.setdefault("user_portrait", {})["address_forms"] = block
+    _save_profile_card(profile_id, card)
+    logger.info("[UserPortrait] 已删除称呼 profile=%s form=%s", profile_id, form)
+    return True

@@ -3751,3 +3751,33 @@ textarea.form-input {
 .mem-changelog-fact.added { color: var(--green); }
 .mem-changelog-fact.removed { color: var(--text-tertiary); }
 .mem-changelog-stats { color: var(--text-tertiary); margin-top: var(--space-2); }
+
+/* ── 用户画像：AI 识别到的称呼 chip ────────────────────────────────────── */
+.portrait-address-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+.portrait-address-count {
+  color: var(--text-tertiary);
+  font-size: var(--fs-2xs);
+}
+.portrait-address-del {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  margin-left: 2px;          /* 与「×N」计数拉开距离，避免两个叉号看起来是一个 */
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  opacity: 0.6;
+}
+.portrait-address-del:hover { opacity: 1; }
+.portrait-address-del:hover { color: var(--red); }

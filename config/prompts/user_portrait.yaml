@@ -111,3 +111,67 @@ user_portrait:
   refresh_user:
     zh: "请根据以上信息更新对方的画像。只输出新版画像 markdown 正文本身，不要任何前缀或解释。"
     en: "Update their portrait based on the information above. Output only the new portrait markdown body, no prefix or explanation."
+
+# ── 称呼识别 ──────────────────────────────────────────────────────────────────
+# 独立于画像正文的轻量任务：只找「用户用什么称呼 AI」。
+# 变量：$persona_name（AI 角色名）、$user_label（对话里用户的发言人标签）、$conversation
+
+  address_forms:
+    zh: |
+      任务：从下面的对话里找出「用户用来称呼对方的称呼语」。
+
+      对方是 AI 角色「$persona_name」。你不是在总结对话，也不是在描述用户性格。
+      你只做一件事：找出用户**直接呼唤对方时用的那个词**。
+
+      ━━ 判定标准（必须全部满足）━━
+      1. 必须出现在**用户说的话**里（以「$user_label」开头的行）。对方说的话一概不看。
+      2. 必须是**直接呼唤对方**的用法。典型位置：句首后跟逗号或语气词（「小A，在吗」）、
+         句尾（「晚安，小A」）、或单独成句。
+      3. 必须是**专指对方**的名字、简称或昵称。
+
+      ━━ 必须排除（重要）━━
+      - 通用人称代词：你、您、你们、AI、助手、机器人
+      - 角色设定里的术语、职称或隐喻性称谓（如「契约者」「债权人」「主人」这类），
+        除非用户在日常语境里**反复自发**使用
+      - 从对方自己的话里学来的自称
+      - 只出现一次且无法确认是在呼唤对方的词
+      - 任何你不确定的词 —— **宁可漏掉，也不要写错**
+
+      ━━ 输出格式 ━━
+      只输出 JSON 数组，不要任何解释、前缀或代码块：
+      [{"form": "称呼词", "count": 出现次数, "evidence": "用户原话片段，30字以内"}]
+      找不到符合标准的称呼时，输出 []
+
+      ━━ 对话 ━━
+      $conversation
+    en: |
+      Task: find the **forms of address the user uses to call the other party** in the conversation below.
+
+      The other party is the AI character "$persona_name". You are not summarizing the
+      conversation or describing the user's personality. You do exactly one thing:
+      find the word the user uses to **directly address** the other party.
+
+      ━━ Criteria (all must hold) ━━
+      1. It must appear in what the **user** says (lines starting with "$user_label").
+         Ignore everything the other party says.
+      2. It must be used as a **direct address**. Typical positions: start of sentence
+         followed by a comma ("Hey A, you there?"), end of sentence ("Good night, A"),
+         or standing alone.
+      3. It must be a name, short form, or nickname that **specifically refers** to the other party.
+
+      ━━ Must exclude (important) ━━
+      - Generic pronouns: you, AI, assistant, bot
+      - Terms, titles, or metaphorical honorifics from the character setting
+        (e.g. "contractor", "creditor", "Master"), unless the user uses them
+        **repeatedly and spontaneously** in ordinary context
+      - Self-designations picked up from the other party's own speech
+      - Words appearing only once that cannot be confirmed as address
+      - Anything you are unsure about — **better to miss than to be wrong**
+
+      ━━ Output format ━━
+      Output only a JSON array, no explanation, prefix, or code fence:
+      [{"form": "the term", "count": occurrences, "evidence": "user's exact phrase, max 30 chars"}]
+      Output [] if nothing meets the criteria.
+
+      ━━ Conversation ━━
+      $conversation

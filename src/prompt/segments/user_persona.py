@@ -18,6 +18,24 @@ from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 
 
+def _format_address_forms(portrait_block: Dict[str, Any], max_forms: int = 3) -> str:
+    """把 user_portrait.address_forms 渲染成一行「他怎么称呼你」。无数据返回空串。
+
+    称呼表由 user_portrait.refresh_address_forms 累积维护，只加不减，
+    所以久未使用的称呼依然会留在这里——这正是它存在的意义。
+    """
+    block = portrait_block.get("address_forms") or {}
+    forms = [f for f in (block.get("forms") or [])
+             if isinstance(f, dict) and str(f.get("form") or "").strip()]
+    if not forms:
+        return ""
+    names = [str(f["form"]).strip() for f in forms[:max_forms]]
+    if len(names) == 1:
+        return f"他习惯叫你「{names[0]}」。"
+    others = "」「".join(names[1:])
+    return f"他习惯叫你「{names[0]}」，有时也叫「{others}」。"
+
+
 def _resolve_intro_and_name(global_persona: Dict[str, Any], profile_persona: Dict[str, Any]) -> tuple:
     """Return (name, introduction). profile 字段优先于全局，留空继承。"""
     name = (profile_persona.get("name") or global_persona.get("name") or "").strip()
@@ -45,7 +63,13 @@ class UserPersonaSegment(PromptSegment):
         portrait_enabled = portrait_cfg.get("enabled", True)
         portrait_text = (portrait_block.get("content") or "").strip() if portrait_enabled else ""
 
-        if not any([name, introduction, portrait_text]):
+        # 称呼：独立成行且紧跟基本信息，不混进下方画像散文里——
+        # 它需要 100% 保真，而画像正文每次刷新都会被 LLM 改写一遍。
+        address_line = ""
+        if portrait_enabled and portrait_cfg.get("address_forms_enabled", True):
+            address_line = _format_address_forms(portrait_block)
+
+        if not any([name, introduction, portrait_text, address_line]):
             return SegmentResult(messages=[])
 
         lines = ["【你所认识的人】"]
@@ -53,6 +77,8 @@ class UserPersonaSegment(PromptSegment):
             lines.append(f"他叫{name}。")
         if introduction:
             lines.append(introduction)
+        if address_line:
+            lines.append(address_line)
 
         if portrait_text:
             lines.append("")
