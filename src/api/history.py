@@ -42,9 +42,8 @@ async def get_session_history(
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
     store = session.conversation_store
-    all_msgs = store.get_all()
-    total = len(all_msgs)
-    subset = all_msgs[-limit:] if limit > 0 else all_msgs
+    total = store.count_all()
+    subset = store.get_last(limit) if limit > 0 else store.get_all()
     messages = [asdict(m) for m in subset]
     return {"session_id": session_id, "total": total, "messages": messages}
 

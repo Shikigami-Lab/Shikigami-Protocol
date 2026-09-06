@@ -178,6 +178,30 @@ class ConversationStore:
                 [(m.role, m.content, m.timestamp, getattr(m, "sender", "") or "") for m in messages]
             )
 
+    def delete_from_index(self, idx: int) -> bool:
+        """删除时间序第 idx 条（0-based，与 get_all 顺序一致）及其后的全部消息。"""
+        if idx < 0:
+            return False
+        with self._conn:
+            cur = self._conn.execute("""
+                DELETE FROM messages WHERE id IN (
+                    SELECT id FROM messages ORDER BY timestamp, id LIMIT -1 OFFSET ?
+                )
+            """, (idx,))
+        return cur.rowcount > 0
+
+    def delete_at_index(self, idx: int) -> bool:
+        """删除时间序第 idx 条（0-based，与 get_all 顺序一致）。"""
+        if idx < 0:
+            return False
+        with self._conn:
+            cur = self._conn.execute("""
+                DELETE FROM messages WHERE id IN (
+                    SELECT id FROM messages ORDER BY timestamp, id LIMIT 1 OFFSET ?
+                )
+            """, (idx,))
+        return cur.rowcount > 0
+
     # ── Read operations ──────────────────────────────────────────────────────
 
     def get_recent(self, n_turns: int = 20) -> List[Dict[str, str]]:
@@ -249,9 +273,13 @@ class ConversationStore:
         ]
 
     def get_all(self) -> List[Message]:
-        """Return all stored messages (for history API / client sync)."""
+        """Return all stored messages (for history API / client sync).
+
+        大表上很重（全量读入 + 逐行建对象），新代码优先用 get_last / get_page_with_id /
+        count_all 等 SQL 级查询，别再拿它切片。
+        """
         rows = self._conn.execute(
-            "SELECT role, content, timestamp, sender FROM messages ORDER BY timestamp"
+            "SELECT role, content, timestamp, sender FROM messages ORDER BY timestamp, id"
         ).fetchall()
         return [
             Message(role=r[0], content=r[1], timestamp=r[2], sender=(r[3] or "") if len(r) > 3 else "")
@@ -261,12 +289,74 @@ class ConversationStore:
     def get_all_with_id(self) -> List[Dict]:
         """Return all messages as dicts with id, role, content, timestamp, sender (for paginated history)."""
         rows = self._conn.execute(
-            "SELECT id, role, content, timestamp, sender FROM messages ORDER BY timestamp"
+            "SELECT id, role, content, timestamp, sender FROM messages ORDER BY timestamp, id"
         ).fetchall()
         return [
             {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
             for r in rows
         ]
+
+    def count_all(self) -> int:
+        """消息总数（history 接口用，代替 len(get_all())）。"""
+        row = self._conn.execute("SELECT COUNT(*) FROM messages").fetchone()
+        return row[0] if row else 0
+
+    def get_last(self, limit: int) -> List[Message]:
+        """最近 limit 条消息，时间正序。limit<=0 等价于 get_all()。"""
+        if limit <= 0:
+            return self.get_all()
+        rows = self._conn.execute("""
+            SELECT role, content, timestamp, sender FROM messages
+            ORDER BY timestamp DESC, id DESC LIMIT ?
+        """, (limit,)).fetchall()
+        rows.reverse()
+        return [
+            Message(role=r[0], content=r[1], timestamp=r[2], sender=(r[3] or "") if len(r) > 3 else "")
+            for r in rows
+        ]
+
+    def get_page_with_id(self, limit: int, offset: int = 0) -> List[Dict]:
+        """从最新往回翻页（offset=0 为最新一页），返回时间正序、含 id 的 dict 列表。"""
+        if limit <= 0:
+            return self.get_all_with_id()
+        rows = self._conn.execute("""
+            SELECT id, role, content, timestamp, sender FROM messages
+            ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?
+        """, (limit, max(0, offset))).fetchall()
+        rows.reverse()
+        return [
+            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
+            for r in rows
+        ]
+
+    def has_messages_between(self, start_ts: float, end_ts: float) -> bool:
+        """[start_ts, end_ts) 区间内是否存在 user/assistant 消息（昨日摘要检查用）。"""
+        row = self._conn.execute("""
+            SELECT 1 FROM messages
+            WHERE role IN ('user', 'assistant') AND timestamp >= ? AND timestamp < ?
+            LIMIT 1
+        """, (start_ts, end_ts)).fetchone()
+        return row is not None
+
+    def count_since(self, since_ts: float, cap: int = 0) -> int:
+        """timestamp > since_ts 的 user/assistant 消息数。
+
+        cap>0 时最多数到 cap 就停——调用方只关心「是否达到阈值」时避免扫全表。
+        """
+        if cap > 0:
+            row = self._conn.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT 1 FROM messages
+                    WHERE role IN ('user', 'assistant') AND timestamp > ?
+                    LIMIT ?
+                )
+            """, (since_ts, cap)).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE role IN ('user', 'assistant') AND timestamp > ?",
+                (since_ts,)
+            ).fetchone()
+        return row[0] if row else 0
 
     def search_messages(self, q: str = "", limit: int = 50,
                         offset: int = 0) -> List[Dict]:

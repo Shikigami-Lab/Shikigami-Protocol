@@ -119,9 +119,7 @@ async def delete_messages_from(session_id: str, msg_idx: int, request: Request):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx])
+    store.delete_from_index(msg_idx)
     return {"ok": True}
 
 
@@ -146,9 +144,7 @@ async def delete_message(session_id: str, msg_idx: int, request: Request):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx] + records[msg_idx + 1:])
+    store.delete_at_index(msg_idx)
     return {"ok": True}
 
 

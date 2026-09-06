@@ -121,16 +121,8 @@ async def get_group_history(
     store = mgr.get_conversation_store(group_id)
     if store is None:
         raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
-    all_msgs = store.get_all_with_id()
-    total = len(all_msgs)
-    if limit <= 0:
-        subset = all_msgs
-    elif offset <= 0:
-        subset = all_msgs[-limit:]
-    else:
-        end = total - offset
-        start = max(0, end - limit)
-        subset = all_msgs[start:end]
+    total = store.count_all()
+    subset = store.get_page_with_id(limit, offset)
     return {"group_id": group_id, "total": total, "messages": subset}
 
 
@@ -145,9 +137,7 @@ async def delete_group_messages_from(
     store = mgr.get_conversation_store(group_id)
     if store is None:
         raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx])
+    store.delete_from_index(msg_idx)
     return {"ok": True}
 
 
@@ -162,9 +152,7 @@ async def delete_group_message(
     store = mgr.get_conversation_store(group_id)
     if store is None:
         raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx] + records[msg_idx + 1:])
+    store.delete_at_index(msg_idx)
     return {"ok": True}
 
 

@@ -580,11 +580,10 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
                 yesterday_msgs = get_merged_messages_for_date(session, app, profile, yesterday)
                 has_yesterday = bool(yesterday_msgs)
             else:
-                all_msgs = store.get_all() if hasattr(store, "get_all") else []
-                has_yesterday = any(
-                    _msg_date(m) == yesterday
-                    for m in all_msgs
-                    if getattr(m, "role", None) in ("user", "assistant")
+                from datetime import datetime as _dt
+                _y0 = _dt.strptime(yesterday, "%Y-%m-%d")
+                has_yesterday = store.has_messages_between(
+                    _y0.timestamp(), (_y0 + timedelta(days=1)).timestamp()
                 )
             if has_yesterday:
                 _d, _s, _p, _a = yesterday, store, profile, app
@@ -629,14 +628,9 @@ def _fire_portrait_burst_check(session, app):
             return
 
     try:
-        all_msgs = session.conversation_store.get_all()
+        recent_count = session.conversation_store.count_since(last_ts, cap=min_turns)
     except Exception:
         return
-    recent_count = sum(
-        1 for m in all_msgs
-        if (getattr(m, "timestamp", 0) or 0) > last_ts
-        and getattr(m, "role", None) in ("user", "assistant")
-    )
     if recent_count < min_turns:
         return
 
@@ -703,14 +697,3 @@ def _fire_persona_evolution_check(session, app):
             _evolution_inflight.discard(profile_id)
 
     asyncio.create_task(_fire_task(_run, "persona_evolution", retries=1, retry_delay=5.0))
-
-
-def _msg_date(msg) -> str:
-    ts = msg.get("timestamp") if isinstance(msg, dict) else getattr(msg, "timestamp", None)
-    if ts:
-        try:
-            from datetime import datetime
-            return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d")
-        except Exception:
-            pass
-    return ""
