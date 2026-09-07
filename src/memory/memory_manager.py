@@ -406,6 +406,36 @@ class MemoryManager:
         # 角色名
         character_name = (profile or {}).get("display_name", "") or self._profile_id
 
+        # 角色人设：日记要求「以第一人称写内心感受」，只给名字的话模型没有角色锚点，
+        # 遇到与其安全对齐冲突的内容时会退回自身身份，写出「我是一个人工智能…」式的
+        # 免责声明。而这些文本又会被 mid_term_memory 段落注入回每轮对话，直接破坏扮演。
+        persona_brief = ""
+        try:
+            from src.utils.persona_context import get_persona_context_for_secondary_llm
+            _cfg = getattr(getattr(app, "state", None), "config", None) if app else None
+            persona_brief = get_persona_context_for_secondary_llm(
+                profile,
+                max_chars=1200,
+                user_name=(getattr(_cfg, "user_name", "") if _cfg else "") or "",
+            )
+        except Exception:
+            persona_brief = ""
+        if not persona_brief:
+            # 未填 reflection_config.custom_prompt 时退回人设正文（演化版优先）。
+            # 这条路径同样要展开 {{char}}/{{user}}，否则从角色卡导入的人设会把
+            # 字面宏喂给写日记的模型。
+            _ev = (profile or {}).get("persona_evolved") or {}
+            _bp = ((_ev.get("base_prompt") or "") if _ev.get("enabled", True) else "") \
+                  or (profile or {}).get("base_prompt") or ""
+            persona_brief = self._expand_card_macros(_bp.strip()[:1200], profile, app)
+        if not persona_brief:
+            persona_brief = f"（暂无角色设定，请仅以「{character_name}」这个身份书写）"
+
+        # 用户称呼：默认 prompt 里出现「用户」这种系统词会把日记推向报告口吻
+        _cfg2 = getattr(getattr(app, "state", None), "config", None) if app else None
+        user_name = (((profile or {}).get("user_persona") or {}).get("name")
+                     or (getattr(_cfg2, "user_name", "") if _cfg2 else "") or "对方")
+
         # 近期日记（最多 3 条，放在对话内容之前）
         recent = self.day_store.get_recent(4)  # 取 4 条，排除当天后留 3 条
         recent = [s for s in recent if s.get("date") != date_str][-3:]
@@ -448,6 +478,8 @@ class MemoryManager:
 
         return {
             "character_name": character_name,
+            "persona_brief": persona_brief,
+            "user_name": user_name,
             "recent_summaries": recent_summaries,
             "affinity_status": affinity_status,
             "activity_note": ("\n" + activity_note) if activity_note else "",
@@ -523,6 +555,8 @@ class MemoryManager:
             prompt_template = Template(get_prompt("memory.day_summary_quiet")).safe_substitute(
                 date_str=date_str,
                 character_name=ctx["character_name"],
+                persona_brief=ctx["persona_brief"],
+                user_name=ctx["user_name"],
                 recent_summaries=ctx["recent_summaries"],
                 affinity_status=ctx["affinity_status"],
             )
@@ -531,6 +565,8 @@ class MemoryManager:
                 date_str=date_str,
                 conv_text=conv_text,
                 character_name=ctx["character_name"],
+                persona_brief=ctx["persona_brief"],
+                user_name=ctx["user_name"],
                 recent_summaries=ctx["recent_summaries"],
                 affinity_status=ctx["affinity_status"],
                 activity_note=ctx["activity_note"],
