@@ -1329,6 +1329,33 @@ class ProfileWizardBody(BaseModel):
     disable_memory:     bool = False
 
 
+def _prepare_llm_json(response: str):
+    """把 LLM 原始输出整理成可解析的 JSON 文本。
+
+    返回 str 表示可以继续 json.loads；返回 dict 表示已构成错误响应，调用方直接返回。
+
+    空响应与 LLM 层错误此前会一路走到 json.loads，报出
+    「Expecting value: line 1 column 1」，把「模型什么都没输出」误导成「JSON 格式不对」。
+    """
+    raw = (response or "").strip()
+    if not raw:
+        return {
+            "ok": False,
+            "error": "模型返回了空响应（可能被安全策略拦截、超时，或触发了内容过滤）。"
+                     "可在设置里换一个用于生成的模型预设后重试。",
+            "raw": "",
+        }
+    if raw.startswith("[LLM Error:"):
+        return {"ok": False, "error": f"LLM 调用失败：{raw[:300]}", "raw": raw[:1200]}
+
+    # 只剥「整段被 fence 包裹」的外层。此前用非贪婪的 re.search，正文内部若也含
+    # ``` 就会截到第一对反引号之间，后面内容全部丢失。
+    m = re.match(r"^```(?:json)?[ \t]*\r?\n?([\s\S]*?)\r?\n?```$", raw)
+    if m:
+        raw = m.group(1).strip()
+    return raw
+
+
 @router.post("/profiles/wizard")
 async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
     """Use the active LLM to generate a persona profile from a text description."""
@@ -1493,11 +1520,9 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
         log_secondary_llm_response(role="wizard", response=response, model=model_name,
                                    duration_ms=duration_ms)
 
-        raw = response.strip()
-        # Strip optional ```json ... ``` fences
-        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
-        if m:
-            raw = m.group(1).strip()
+        raw = _prepare_llm_json(response)
+        if isinstance(raw, dict):
+            return raw
 
         profile_data = json.loads(raw)
         return {"ok": True, "profile": profile_data, "preset_used": preset_name}
@@ -1792,10 +1817,9 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
             role="prompt_autofill", response=response, model=model_name, duration_ms=duration_ms
         )
 
-        raw = response.strip()
-        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
-        if m:
-            raw = m.group(1).strip()
+        raw = _prepare_llm_json(response)
+        if isinstance(raw, dict):
+            return raw
 
         patch_raw = json.loads(raw)
         if not isinstance(patch_raw, dict):
