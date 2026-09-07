@@ -413,7 +413,10 @@ class ReflectionEngine:
                 with open(profile_path, encoding="utf-8") as f:
                     pdata = json.load(f)
                 # 与情感分类、好感度调整同源：reflection_config.custom_prompt（截断见 persona_context）
-                persona_brief = get_persona_context_for_secondary_llm(pdata)
+                persona_brief = get_persona_context_for_secondary_llm(
+                    pdata,
+                    user_name=getattr(getattr(self._app.state, "config", None), "user_name", "") or "",
+                )
         except Exception:
             pass
 

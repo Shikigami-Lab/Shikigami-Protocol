@@ -394,7 +394,10 @@ class EmotionEngine:
             json_example=json_example,
             msgs_text=msgs_text,
         ) + user_sentiment_block
-        persona_ctx = get_persona_context_for_secondary_llm(profile)
+        persona_ctx = get_persona_context_for_secondary_llm(
+            profile,
+            user_name=getattr(getattr(getattr(app, "state", None), "config", None), "user_name", "") or "",
+        )
         if persona_ctx:
             preamble = render(
                 "analysis_shared_context",

@@ -184,7 +184,10 @@ class AffinityEngine:
             delta_clamp=delta_clamp,
             turns_text=turns_text,
         )
-        persona_ctx = get_persona_context_for_secondary_llm(profile)
+        persona_ctx = get_persona_context_for_secondary_llm(
+            profile,
+            user_name=getattr(getattr(getattr(app, "state", None), "config", None), "user_name", "") or "",
+        )
         if persona_ctx:
             preamble = render(
                 "affinity.analysis_shared_context",

@@ -194,6 +194,25 @@ class MemoryManager:
 
     # ── 公共 API ──────────────────────────────────────────────────────────────
 
+    def _expand_card_macros(self, text: str, profile: Dict = None, app=None) -> str:
+        """展开自定义 prompt 里的 SillyTavern 宏。
+
+        从角色卡导入的人格，extraction_prompt / day_summary_prompt 里常含
+        {{char}}/{{user}}。不展开的话辅助模型会读到字面宏，并可能把它复制进
+        抽取出的事实或日摘要里，再随记忆注入放大。
+        """
+        if not text or "{{" not in text:
+            return text
+        from src.prompt.macros import build_macro_table, expand_macros
+        profile = profile or {}
+        up = profile.get("user_persona") or {}
+        cfg = getattr(getattr(app, "state", None), "config", None) if app else None
+        return expand_macros(text, build_macro_table(
+            char_name=profile.get("display_name") or profile.get("name") or "",
+            user_name=(getattr(cfg, "user_name", "") if cfg else "") or up.get("name") or "用户",
+            persona=up.get("introduction") or "",
+        ))
+
     def status(self) -> Dict[str, Any]:
         vec_ok = bool(self.vectors and self.vectors.is_available())
         vec_count = self.vectors.count() if vec_ok else 0
@@ -497,7 +516,7 @@ class MemoryManager:
 
         ctx = self._build_day_summary_context(date_str, len(day_msgs), profile, app)
 
-        custom_summary_prompt = self._cfg.get("day_summary_prompt", "")
+        custom_summary_prompt = self._expand_card_macros(self._cfg.get("day_summary_prompt", ""), profile, app)
         if custom_summary_prompt:
             prompt_template = custom_summary_prompt.replace("{conversation}", conv_text).replace("{date}", date_str)
         elif quiet:
@@ -593,6 +612,7 @@ class MemoryManager:
             for f in batch
         )
         base_prompt = (profile.get("memory_config") or {}).get("extraction_prompt") or self._cfg.get("extraction_prompt") or "从对话中提取事实，保持角色口吻。"
+        base_prompt = self._expand_card_macros(base_prompt, profile, app)
         system_content = base_prompt + _consolidation_appendix(fact_list) + _extraction_format_block()
         messages = [
             {"role": "system", "content": system_content},
@@ -960,7 +980,7 @@ class MemoryManager:
             )
             return []
 
-        custom_prompt = self._cfg.get("extraction_prompt", "")
+        custom_prompt = self._expand_card_macros(self._cfg.get("extraction_prompt", ""), profile, app)
         if custom_prompt:
             extraction_prompt = custom_prompt.replace("{conversation}", conv_text)
             # 若自定义模板里没有占位符 {conversation}，replace 不会插入对话，导致模型只收到人设而输出角色话而非 JSON

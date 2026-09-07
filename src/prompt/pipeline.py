@@ -25,6 +25,7 @@ from src.config.profile_loader import ProfileLoader
 from src.core.session import Session
 from src.memory.conversation_store import ConversationStore
 from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat, targets_ase
+from src.prompt.macros import build_macro_table, expand_messages
 from src.prompt.registry import get_registered
 from src.prompt.segment_config import CustomSegmentDef, SegmentMeta, effective_segment_enabled, load_segment_config
 
@@ -289,6 +290,23 @@ def build_messages(
         last = messages[-1] if messages else None
         if not (last and last.get("role") == "user" and (last.get("content") or "").strip() == (final_user or "").strip()):
             messages.append({"role": "user", "content": final_user})
+
+    # SillyTavern 宏展开：从角色卡导入的文本普遍用 {{char}}/{{user}} 代替名字。
+    # 放在出口统一处理，一次覆盖 persona、风格约束、世界书、自定义段落、
+    # 演化后的文本与历史消息等所有来源（历史里已被污染的字面量也顺带清掉）。
+    # 群聊时 {{char}} 指当前正在回复的那个角色，而非 session 自身。
+    _up_profile = (profile.get("user_persona") or {})
+    _up_global = extras.get("user_persona_global") or {}
+    messages = expand_messages(messages, build_macro_table(
+        char_name=(extras.get("group_reply_as_sender")
+                   or getattr(session, "display_name", "") or ""),
+        user_name=(extras.get("group_user_name")
+                   or _up_profile.get("name")
+                   or _up_global.get("name")
+                   or extras.get("user_name") or ""),
+        persona=(_up_profile.get("introduction")
+                 or _up_global.get("introduction") or ""),
+    ))
 
     _last_build_timings["assemble_ms"] = round((time.perf_counter() - assemble_start) * 1000, 2)
     _last_build_timings["total_build_ms"] = round((time.perf_counter() - build_start) * 1000, 2)

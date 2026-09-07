@@ -12,8 +12,13 @@ def get_persona_context_for_secondary_llm(
     profile: Dict[str, Any] | None,
     *,
     max_chars: int = 3500,
+    user_name: str = "",
 ) -> str:
-    """返回 custom_prompt 正文；过长则截断。无配置时返回空字符串。"""
+    """返回 custom_prompt 正文；过长则截断。无配置时返回空字符串。
+
+    从 SillyTavern 导入的人格，custom_prompt 里常含 {{char}}/{{user}}，
+    这里与主对话一样展开，否则辅助模型会读到字面宏（并可能复制进分类结果）。
+    """
     if not profile or not isinstance(profile, dict):
         return ""
 
@@ -24,6 +29,14 @@ def get_persona_context_for_secondary_llm(
     text = (ref.get("custom_prompt") or "").strip()
     if not text:
         return ""
+
+    from src.prompt.macros import build_macro_table, expand_macros
+    _up = profile.get("user_persona") or {}
+    text = expand_macros(text, build_macro_table(
+        char_name=(profile.get("display_name") or ""),
+        user_name=(user_name or _up.get("name") or "用户"),
+        persona=(_up.get("introduction") or ""),
+    ))
 
     if len(text) <= max_chars:
         return text
