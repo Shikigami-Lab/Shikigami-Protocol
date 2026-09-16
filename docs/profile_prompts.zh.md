@@ -52,7 +52,7 @@
 | `emotion_zh_descriptions` | 情绪 key → 中文描述（4–8 汉字，角色视角），用于 TTS instruct 构建 |
 | `emotion_prompts` | 情绪 key → **行为指令**数组（3–4 条），告诉 AI 在该情绪下**如何说话**：语气/语域、句子长短、用词倾向、节奏、多说/少说什么。禁止写场景描述或第三人称旁白，每条必须是可执行规则 |
 
-**标准情绪键集**（与公开发行版一致，共 17 个）：
+**标准情绪键集**（共 17 个）：
 `calm` `joyful` `excited` `confident` `gentle` `grateful` `nostalgic` `thoughtful` `dreamy` `concerned` `playful_teasing` `sad` `disappointed` `angry` `sarcastic` `vulnerable` `tired`
 
 ---

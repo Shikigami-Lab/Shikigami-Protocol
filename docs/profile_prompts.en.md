@@ -53,7 +53,7 @@ Controls how emotion classification, energy, and affinity affect reply style.
 | `emotion_zh_descriptions` | emotion key → 4–8 Chinese characters describing the emotion in the character's voice, used for TTS instruct |
 | `emotion_prompts` | emotion key → **behavioral directive** array (3–4 items). Tells the AI HOW to speak in this emotional state: tone/register, sentence length, vocabulary, pacing, what to say more/less of. No scene descriptions or third-person observations; each item must be an actionable rule |
 
-**Standard emotion key set** (17 keys, consistent with public release):
+**Standard emotion key set** (17 keys):
 `calm` `joyful` `excited` `confident` `gentle` `grateful` `nostalgic` `thoughtful` `dreamy` `concerned` `playful_teasing` `sad` `disappointed` `angry` `sarcastic` `vulnerable` `tired`
 
 ---

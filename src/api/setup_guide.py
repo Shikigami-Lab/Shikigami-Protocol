@@ -591,7 +591,7 @@ def build_setup_status_dict(config: Any) -> Dict[str, Any]:
             "modelscope_repo_id": b.get("modelscope_repo_id", ""),
             "direct_url": b.get("direct_url", ""),
         }
-        # 私库若在 YAML 中仍写 title_*/description_*，仅作无 i18n 键时的回退
+        # Legacy fallback: bundle YAML may still carry title_*/description_*; used only when no i18n key exists
         for _k in ("title_zh", "title_en", "description_zh", "description_en"):
             if b.get(_k):
                 entry[_k] = b[_k]
