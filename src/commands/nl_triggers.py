@@ -225,33 +225,37 @@ _TOPIC_PATTERNS = _re.compile(
     r"change the topic|talk about something (else|new)|anything new)",
     _re.IGNORECASE,
 )
-# 去掉触发词后允许残留的语气词/称呼填充（"那我们换个话题吧" → 残留 "那我们"）
+# Filler allowed to remain once the trigger phrase is removed ("那我们换个话题吧" leaves "那我们吧")
 _TOPIC_FILLER = _re.compile(
-    r"(?i)(let'?s|so|then|okay|ok|hey|well|now|那我们|那就|我们|咱们|那|就|来|你|"
+    r"(?i)(let'?s|so|then|okay|ok|hey|well|now|is there|那我们|那就|我们|咱们|最近|那|就|来|你|"
     r"好不好|行不行|好吗|可以吗|怎么样|呗)"
     r"|[吧呗呀啊吗呢哦喔嘛诶哈~～!！?？。，,.\s]+"
 )
 
 
 class TopicNLTrigger(NLTrigger):
-    """找话题自然语言触发器：复用 /topic 的零 LLM 调用选材逻辑。
+    """Topic-finding NL trigger; reuses the zero-LLM-call material picker behind /topic.
 
-    仅在「裸请求」时触发：去掉触发词与语气词后消息基本为空。
-    "换个话题，聊聊你昨天说的那个" 这类用户已点题的消息不被劫持。
+    Fires only on a bare request: after removing the trigger phrase and filler words,
+    nothing may remain. Any leftover means the user said something else, such as a
+    negation (别换个话题), a complaint (又换个话题), a statement (我没有什么新鲜事) or a
+    topic of their own (换个话题，聊聊电影), so the message is left to normal chat.
     """
 
     def detect(self, msg: str) -> bool:
         m = msg.strip()
         if len(m) > 36 or not _TOPIC_PATTERNS.search(m):
             return False
+        if _SEARCH_PATTERNS.search(m):
+            return False  # explicit search requests belong to WebSearchNLTrigger
         rest = _TOPIC_FILLER.sub("", _TOPIC_PATTERNS.sub("", m))
-        return len(rest) <= 2
+        return not rest
 
     async def execute(self, msg: str, session, app) -> Optional[CommandResult]:
         from src.commands.topic_cmds import pick_topic_material, _format_context
         picked = pick_topic_material(session, app)
         if picked is None:
-            # 无素材时不注入，让 AI 按本性自行转换话题
+            # No material: inject nothing and let the character change the topic on its own
             return None
         return CommandResult(context_for_llm=_format_context(picked, msg.strip()))
 

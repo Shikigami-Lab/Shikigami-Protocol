@@ -151,6 +151,15 @@ def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> l
             parts.append(c.content.strip())
 
     system_content = "\n\n".join(p for p in parts if p)
+    # Segment text comes from the character card (persona, lorebook, custom segments) and may still
+    # contain {{char}}/{{user}}; the chat pipeline expands macros at its exit, so do the same here.
+    from src.prompt.macros import build_macro_table, expand_macros
+    _up = ctx.user_persona or {}
+    system_content = expand_macros(system_content, build_macro_table(
+        char_name=ctx.persona_name or "",
+        user_name=(_up.get("name") or ctx.user_name or ""),
+        persona=(_up.get("introduction") or ""),
+    ))
     locale = ctx.locale or "zh"
     return [
         {"role": "system", "content": system_content},
@@ -413,9 +422,10 @@ class ReflectionEngine:
                 with open(profile_path, encoding="utf-8") as f:
                     pdata = json.load(f)
                 # 与情感分类、好感度调整同源：reflection_config.custom_prompt（截断见 persona_context）
+                from src.utils.persona_context import resolve_user_name
                 persona_brief = get_persona_context_for_secondary_llm(
                     pdata,
-                    user_name=getattr(getattr(self._app.state, "config", None), "user_name", "") or "",
+                    user_name=resolve_user_name(pdata, self._app),
                 )
         except Exception:
             pass
@@ -668,8 +678,8 @@ class ReflectionEngine:
             match = next((c for c in getattr(ctx, "topic_candidates", [])
                           if getattr(c, "ref", None) == topic_pick), None)
             if match is not None:
-                # 连选计数：同一来源被连续选中的轮数（选中但未开口时会反复出现），
-                # topic_candidates 段用它对 ai_self 做选中级冷却
+                # Consecutive-pick count: rounds in a row the same source was picked (it repeats while a
+                # topic is picked but never spoken); topic_candidates uses it for the ai_self pick cooldown
                 _prev_chosen = (getattr(session, "reflection_state", None) or {}).get("chosen_topic") or {}
                 consec_picks = (int(_prev_chosen.get("consec_picks", 1)) + 1
                                 if _prev_chosen.get("source") == match.source_id else 1)

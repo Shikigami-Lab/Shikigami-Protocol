@@ -193,7 +193,11 @@ def get_time_context_notes(
             session.set_segment_last_fired_date("holiday_remind", today_str)
             session.save_runtime_state()
     if cadence_signals and cadence_signals.has_data:
-        if cadence_signals.is_slow and cadence_signals.last_gap_min > 15:
+        # During the user's usual sleep hours a long gap means they are asleep, not replying
+        # slowly, so it must not raise the urge to speak proactively.
+        from src.context.sleep_window import get_user_sleep_window
+        asleep = get_user_sleep_window().contains(now.hour)
+        if cadence_signals.is_slow and cadence_signals.last_gap_min > 15 and not asleep:
             notes.append(render("time_context.cadence.slow", locale=locale,
                                 default="用户已 $minutes 分钟未回复，回复节奏偏慢，可适当提高主动发言意愿。",
                                 minutes=f"{cadence_signals.last_gap_min:.0f}"))

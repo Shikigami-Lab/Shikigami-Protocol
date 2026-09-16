@@ -1117,10 +1117,10 @@ html, body {
   flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
-  position: relative;   /* slash-suggest 下拉的锚点 */
+  position: relative;   /* anchor for the slash-suggest dropdown */
 }
 
-/* ── / 命令内联补全下拉 ─────────────────────────────────────────────────── */
+/* ── Inline "/" command suggestions ─────────────────────────────────────── */
 .slash-suggest {
   position: absolute;
   bottom: calc(100% + 4px);

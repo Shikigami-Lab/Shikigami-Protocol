@@ -11,6 +11,11 @@ from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 from src.config.prompt_loader import get_prompt, get_locale, render, get_raw
 
+# Below this silence duration the absence-uncertainty hint is not injected: game mode's
+# min_silent_seconds is only 90 s, the user is at the screen, and reminding the model on
+# every message that it doesn't know whether they are there is just noise.
+ABSENCE_HINT_MIN_SECONDS = 300
+
 
 def _get_time_ctx(hour: int, locale: str) -> str:
     periods = get_raw("ase.time_periods") or {}
@@ -112,6 +117,29 @@ class AseSceneContextSegment(PromptSegment):
                                              if locale == "en"
                                              else "你此刻想开口，是因为：$reason_label"),
                                     reason_label=reason_label))
+
+        # Absence uncertainty: state how long it has been and allow the model to skip speaking.
+        # Must come before thought / chosen_topic: reflection often produces plans with a
+        # precondition such as "say it once they're back", and only a nearby statement that
+        # they haven't appeared yet stops the model from treating that precondition as met.
+        silent_seconds = float(extras.get("ase_silent_seconds") or 0)
+        if silent_seconds >= ABSENCE_HINT_MIN_SECONDS:
+            from src.prompt.segments.time_context import _human_delta
+            parts.append(render(
+                "ase.absence_uncertainty", locale=locale,
+                default=(
+                    "They last spoke $delta and haven't appeared since. You don't know whether "
+                    "they're there right now, or what they're doing. If what you want to say "
+                    "depends on something being true — for example, that they're already back "
+                    "with you — and you can't confirm it, don't treat it as true. Either say "
+                    "something that holds right now, or just reply \"(silence)\"."
+                    if locale == "en"
+                    else "对方上次说话是 $delta，此后没有再出现。你不知道对方此刻在不在、在做什么。"
+                         "若你想说的话依赖某个前提（例如对方已经回到你身边），而你无法确认它成立，"
+                         "就不要当作它已经成立——换一个此刻就成立的说法，或直接回复「（静默）」。"
+                ),
+                delta=_human_delta(silent_seconds, locale),
+            ))
 
         # ── Scene context: additive, not mutually exclusive ──────────────
         has_scene_content = False

@@ -1,10 +1,12 @@
-"""topic_cmds.py — /topic 主动找话题命令 + 自然语言触发共用的选材逻辑。
+"""topic_cmds.py — material picking shared by the /topic command and its natural-language trigger.
 
-零额外 LLM 调用：候选收集 / 挑选 / 素材解析全是确定性代码，
-结果作为 context_for_llm 注入本次回复的 prompt，由 AI 在同一次生成里自然引出话题。
+No extra LLM calls: collecting candidates, picking one and resolving the material are all
+deterministic. The result is injected into this reply's prompt as context_for_llm, so the AI
+brings up the topic within the same generation.
 
-挑选偏好：外部来源（网络趋势 / 随机话题）优先——手动要新话题的人想听新鲜事；
-外部无货时回落到用户生活 / 对话回忆 / AI 自身。
+Preference: external sources (web trends / random topics) come first, since someone asking for
+a new topic wants something fresh; when they have nothing, fall back to the user's life /
+conversation recall / the AI itself.
 """
 import logging
 import random
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 _EXTERNAL_SOURCES = ["trend", "random_api"]
 _FALLBACK_SOURCES = ["user_life", "conversation_recall", "ai_self"]
 
-# /topic <sub> 指定来源
+# /topic <sub> selects a source
 _SUB_TO_SOURCE = {
     "trend": "trend", "趋势": "trend",
     "recall": "conversation_recall", "回忆": "conversation_recall",
@@ -29,7 +31,7 @@ _SUB_TO_SOURCE = {
 
 
 def _build_tctx(session, app, td_cfg):
-    """构造 TopicSourceContext（与 ase._resolve_chosen_topic 同构）。"""
+    """Build a TopicSourceContext (same shape as in ase._resolve_chosen_topic)."""
     import json
     import os
     from src.core.topics.base import TopicSourceContext
@@ -68,9 +70,9 @@ def _build_tctx(session, app, td_cfg):
 
 
 def pick_topic_material(session, app, want_source: str = "") -> Optional[dict]:
-    """收集候选 → 按偏好挑一条 → resolve 素材 → mark_used。纯确定性，无 LLM 调用。
+    """Collect candidates → pick one by preference → resolve material → mark_used. Deterministic, no LLM call.
 
-    返回 {source_id, source_label, material, framing_hint}；无可用素材返回 None。
+    Returns {source_id, source_label, material, framing_hint}, or None when no material is available.
     """
     from src.core.topics import get_enabled_sources
     try:
@@ -78,6 +80,8 @@ def pick_topic_material(session, app, want_source: str = "") -> Optional[dict]:
         td_cfg = get_effective_topic_discovery_config(app, session.profile_id)
     except Exception:
         td_cfg = {}
+    if not td_cfg.get("enabled", True):
+        return None  # topic discovery is switched off; reflection and ASE honour the same flag
 
     sources = {s.source_id: s for s in get_enabled_sources(td_cfg)}
     if not sources:
@@ -88,7 +92,7 @@ def pick_topic_material(session, app, want_source: str = "") -> Optional[dict]:
         order = [want_source]
     else:
         order = _EXTERNAL_SOURCES + _FALLBACK_SOURCES
-    # 外部来源内部随机化，避免每次都同一来源
+    # Candidates are shuffled within each source so repeated requests don't keep landing on the same item
     locale = get_locale()
 
     for sid in order:
@@ -124,7 +128,7 @@ def pick_topic_material(session, app, want_source: str = "") -> Optional[dict]:
 
 
 def _format_context(picked: Optional[dict], trigger_text: str) -> str:
-    """把选材结果格式化为注入本次回复的 system 上下文。"""
+    """Format the picked material as system context injected into this reply."""
     locale = get_locale()
     if picked is None:
         if locale == "en":
@@ -152,7 +156,7 @@ def _format_context(picked: Optional[dict], trigger_text: str) -> str:
 
 
 async def handle_topic(sub: str, args: str, session, app) -> CommandResult:
-    """/topic [trend|回忆|生活|自己|随机] — 让 AI 立刻主动起一个新话题。"""
+    """/topic [trend|回忆|生活|自己|随机] — have the AI bring up a new topic right away."""
     want_source = _SUB_TO_SOURCE.get((sub or "").strip().lower(), "")
     picked = pick_topic_material(session, app, want_source=want_source)
     cmd_text = f"/topic {sub}".strip()

@@ -12,28 +12,53 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict
 
+from src.config.prompt_loader import get_locale
+from src.core.user_portrait import (
+    extract_style_address_form,
+    format_mutual_address_facts,
+    recent_context_status,
+    recent_context_ttl_hours,
+)
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 
 
-def _format_address_forms(portrait_block: Dict[str, Any], max_forms: int = 3) -> str:
-    """把 user_portrait.address_forms 渲染成一行「他怎么称呼你」。无数据返回空串。
+def _get_fresh_recent_context(
+    portrait_block: Dict[str, Any],
+    ttl_hours: float,
+    now_ts: float,
+) -> str:
+    """Recent context to send, or "" once expired (the same rule the settings panel shows)."""
+    status = recent_context_status(portrait_block, ttl_hours, now_ts)
+    return "" if status["expired"] else status["content"]
 
-    称呼表由 user_portrait.refresh_address_forms 累积维护，只加不减，
-    所以久未使用的称呼依然会留在这里——这正是它存在的意义。
-    """
-    block = portrait_block.get("address_forms") or {}
-    forms = [f for f in (block.get("forms") or [])
-             if isinstance(f, dict) and str(f.get("form") or "").strip()]
-    if not forms:
-        return ""
-    names = [str(f["form"]).strip() for f in forms[:max_forms]]
-    if len(names) == 1:
-        return f"他习惯叫你「{names[0]}」。"
-    others = "」「".join(names[1:])
-    return f"他习惯叫你「{names[0]}」，有时也叫「{others}」。"
+
+def _matching_contextual_details(
+    portrait_block: Dict[str, Any],
+    scan_text: str,
+    max_items: int = 3,
+) -> list[str]:
+    haystack = (scan_text or "").casefold()
+    if not haystack:
+        return []
+    matched: list[str] = []
+    for item in portrait_block.get("contextual_details") or []:
+        if not isinstance(item, dict):
+            continue
+        summary = str(item.get("summary") or "").strip()
+        keywords = [
+            str(keyword or "").strip().casefold()
+            for keyword in item.get("keywords") or []
+            if str(keyword or "").strip()
+        ]
+        if summary and any(keyword in haystack for keyword in keywords):
+            matched.append(summary)
+            if len(matched) >= max_items:
+                break
+    return matched
 
 
 def _resolve_intro_and_name(global_persona: Dict[str, Any], profile_persona: Dict[str, Any]) -> tuple:
@@ -60,21 +85,62 @@ class UserPersonaSegment(PromptSegment):
         portrait_cfg: Dict[str, Any] = ctx.profile.get("user_portrait_config") or {}
 
         name, introduction = _resolve_intro_and_name(global_persona, profile_persona)
+        # Only an explicitly set name is used as the user's name. Without one, a form of
+        # address from the style rules may still be stated, but never as a name.
+        style_address_form = "" if name else extract_style_address_form(ctx.profile)
         portrait_enabled = portrait_cfg.get("enabled", True)
         portrait_text = (portrait_block.get("content") or "").strip() if portrait_enabled else ""
+        recent_context = ""
+        contextual_details: list[str] = []
+        if portrait_enabled:
+            recent_context = _get_fresh_recent_context(
+                portrait_block,
+                ttl_hours=recent_context_ttl_hours(portrait_cfg),
+                now_ts=time.time(),
+            )
+            scan_parts = [ctx.user_msg or ""]
+            try:
+                scan_parts.extend(
+                    str(turn.get("content") or "")
+                    for turn in ctx.store.get_recent(4)
+                )
+            except Exception:
+                pass
+            contextual_details = _matching_contextual_details(
+                portrait_block,
+                "\n".join(scan_parts),
+            )
 
-        # 称呼：独立成行且紧跟基本信息，不混进下方画像散文里——
-        # 它需要 100% 保真，而画像正文每次刷新都会被 LLM 改写一遍。
+        # Mutual address goes on its own lines, not inside the portrait prose: the address
+        # table is kept exact, while the portrait is rewritten on every refresh.
         address_line = ""
         if portrait_enabled and portrait_cfg.get("address_forms_enabled", True):
-            address_line = _format_address_forms(portrait_block)
+            address_line = format_mutual_address_facts(
+                name,
+                portrait_block,
+                locale=get_locale(),
+                style_address_form=style_address_form,
+            )
+        elif name or style_address_form:
+            # With the portrait off, still state how the character addresses the user.
+            address_line = format_mutual_address_facts(
+                name, {}, locale=get_locale(), style_address_form=style_address_form,
+            )
 
-        if not any([name, introduction, portrait_text, address_line]):
+        if not any([
+            name,
+            introduction,
+            portrait_text,
+            address_line,
+            recent_context,
+            contextual_details,
+        ]):
             return SegmentResult(messages=[])
 
-        lines = ["【你所认识的人】"]
+        locale = get_locale()
+        lines = ["[Person You Know]" if locale == "en" else "【你所认识的人】"]
         if name:
-            lines.append(f"他叫{name}。")
+            lines.append(f"他叫{name}。" if locale != "en" else f"Their name/preferred address is {name}.")
         if introduction:
             lines.append(introduction)
         if address_line:
@@ -82,8 +148,16 @@ class UserPersonaSegment(PromptSegment):
 
         if portrait_text:
             lines.append("")
-            lines.append("【你对他的整体印象】")
+            lines.append("[Stable Impression]" if locale == "en" else "【你对他的稳定印象】")
             lines.append(portrait_text)
+        if recent_context:
+            lines.append("")
+            lines.append("[Recent Context]" if locale == "en" else "【近期状态】")
+            lines.append(recent_context)
+        if contextual_details:
+            lines.append("")
+            lines.append("[Relevant Details]" if locale == "en" else "【与当前话题相关的细节】")
+            lines.extend(f"- {detail}" for detail in contextual_details)
 
         return SegmentResult(
             messages=[{"role": "system", "content": "\n".join(lines)}]

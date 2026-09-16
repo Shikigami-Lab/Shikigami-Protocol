@@ -195,22 +195,23 @@ class MemoryManager:
     # ── 公共 API ──────────────────────────────────────────────────────────────
 
     def _expand_card_macros(self, text: str, profile: Dict = None, app=None) -> str:
-        """展开自定义 prompt 里的 SillyTavern 宏。
+        """Expand SillyTavern macros in custom prompts.
 
-        从角色卡导入的人格，extraction_prompt / day_summary_prompt 里常含
-        {{char}}/{{user}}。不展开的话辅助模型会读到字面宏，并可能把它复制进
-        抽取出的事实或日摘要里，再随记忆注入放大。
+        Profiles imported from character cards often have {{char}}/{{user}} in extraction_prompt /
+        day_summary_prompt. Unexpanded, the helper model reads the literal macros and may copy them
+        into extracted facts or day summaries, which memory injection then amplifies.
         """
         if not text or "{{" not in text:
             return text
+        from src.core.user_portrait import _resolve_user_intro
         from src.prompt.macros import build_macro_table, expand_macros
+        from src.utils.persona_context import resolve_user_name
         profile = profile or {}
-        up = profile.get("user_persona") or {}
-        cfg = getattr(getattr(app, "state", None), "config", None) if app else None
+        _, introduction = _resolve_user_intro(profile, app)
         return expand_macros(text, build_macro_table(
             char_name=profile.get("display_name") or profile.get("name") or "",
-            user_name=(getattr(cfg, "user_name", "") if cfg else "") or up.get("name") or "用户",
-            persona=up.get("introduction") or "",
+            user_name=resolve_user_name(profile, app) or "用户",
+            persona=introduction,
         ))
 
     def status(self) -> Dict[str, Any]:
@@ -406,24 +407,24 @@ class MemoryManager:
         # 角色名
         character_name = (profile or {}).get("display_name", "") or self._profile_id
 
-        # 角色人设：日记要求「以第一人称写内心感受」，只给名字的话模型没有角色锚点，
-        # 遇到与其安全对齐冲突的内容时会退回自身身份，写出「我是一个人工智能…」式的
-        # 免责声明。而这些文本又会被 mid_term_memory 段落注入回每轮对话，直接破坏扮演。
+        # Persona: the diary asks for first-person inner feelings. With only a name the model has no
+        # character to hold on to, and on content that conflicts with its safety alignment it falls back
+        # to its own identity and writes "as an AI…" disclaimers. mid_term_memory injects these texts
+        # back into every chat turn, which breaks the roleplay directly.
         persona_brief = ""
         try:
-            from src.utils.persona_context import get_persona_context_for_secondary_llm
-            _cfg = getattr(getattr(app, "state", None), "config", None) if app else None
+            from src.utils.persona_context import get_persona_context_for_secondary_llm, resolve_user_name
             persona_brief = get_persona_context_for_secondary_llm(
                 profile,
                 max_chars=1200,
-                user_name=(getattr(_cfg, "user_name", "") if _cfg else "") or "",
+                user_name=resolve_user_name(profile, app),
             )
         except Exception:
             persona_brief = ""
         if not persona_brief:
-            # 未填 reflection_config.custom_prompt 时退回人设正文（演化版优先）。
-            # 这条路径同样要展开 {{char}}/{{user}}，否则从角色卡导入的人设会把
-            # 字面宏喂给写日记的模型。
+            # Without reflection_config.custom_prompt, fall back to the persona text (evolved version
+            # first). This path must expand {{char}}/{{user}} too, or a persona imported from a
+            # character card feeds literal macros to the diary model.
             _ev = (profile or {}).get("persona_evolved") or {}
             _bp = ((_ev.get("base_prompt") or "") if _ev.get("enabled", True) else "") \
                   or (profile or {}).get("base_prompt") or ""
@@ -431,10 +432,19 @@ class MemoryManager:
         if not persona_brief:
             persona_brief = f"（暂无角色设定，请仅以「{character_name}」这个身份书写）"
 
-        # 用户称呼：默认 prompt 里出现「用户」这种系统词会把日记推向报告口吻
+        # How to refer to the user: a system word like 「用户」 in the prompt pushes the diary toward a
+        # report tone, so the default config name counts as unset. Order: the user's own name, a custom
+        # config name, how the character usually addresses them, then a neutral word.
+        from src.config.prompt_loader import get_locale
+        from src.core.user_portrait import _resolve_user_intro, extract_style_address_form
         _cfg2 = getattr(getattr(app, "state", None), "config", None) if app else None
-        user_name = (((profile or {}).get("user_persona") or {}).get("name")
-                     or (getattr(_cfg2, "user_name", "") if _cfg2 else "") or "对方")
+        _configured = str(getattr(_cfg2, "user_name", "") or "").strip() if _cfg2 else ""
+        user_name = (
+            _resolve_user_intro(profile or {}, app)[0]
+            or ("" if _configured.casefold() in {"用户", "user", "the user"} else _configured)
+            or extract_style_address_form(profile or {})
+            or ("them" if get_locale() == "en" else "对方")
+        )
 
         # 近期日记（最多 3 条，放在对话内容之前）
         recent = self.day_store.get_recent(4)  # 取 4 条，排除当天后留 3 条
@@ -550,7 +560,28 @@ class MemoryManager:
 
         custom_summary_prompt = self._expand_card_macros(self._cfg.get("day_summary_prompt", ""), profile, app)
         if custom_summary_prompt:
-            prompt_template = custom_summary_prompt.replace("{conversation}", conv_text).replace("{date}", date_str)
+            # A custom prompt only names the character, so give it the same persona and address context
+            # as the built-in prompts; without it the model can fall back to writing as an assistant.
+            from src.config.prompt_loader import get_locale, render
+            _locale = get_locale()
+            preamble = render(
+                "memory.day_summary_custom_preamble", locale=_locale,
+                default=(
+                    "You are $character_name. Your persona:\n$persona_brief\n\n"
+                    "Refer to the other person as \"$user_name\". Write as yourself, in your own voice; "
+                    "never speak as an assistant or model."
+                    if _locale == "en" else
+                    "你是 $character_name。你的人设：\n$persona_brief\n\n"
+                    "称呼对方为「$user_name」。始终以你自己的身份和口吻书写，不要以助手或模型的身份说话。"
+                ),
+                character_name=ctx["character_name"],
+                persona_brief=ctx["persona_brief"],
+                user_name=ctx["user_name"],
+            )
+            prompt_template = (
+                preamble.strip() + "\n\n"
+                + custom_summary_prompt.replace("{conversation}", conv_text).replace("{date}", date_str)
+            )
         elif quiet:
             prompt_template = Template(get_prompt("memory.day_summary_quiet")).safe_substitute(
                 date_str=date_str,

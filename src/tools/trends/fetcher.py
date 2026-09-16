@@ -23,7 +23,7 @@ _CHECK_INTERVAL = 60
 
 
 _RSS_HEADERS = {
-    # 浏览器 UA：Reddit 等站点对 "compatible; bot" 形式的 UA 直接 403
+    # Browser UA: Reddit and some other sites answer "compatible; bot" style UAs with 403
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
     "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, */*",

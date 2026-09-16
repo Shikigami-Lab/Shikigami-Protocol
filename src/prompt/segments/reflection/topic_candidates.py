@@ -30,7 +30,7 @@ def _recently_used_refs(storage_root: str, window: int) -> set:
 
 
 def _recent_spoken_sources(storage_root: str, n: int) -> list:
-    """最近 n 次实际开口的话题来源（新→旧），跳过无话题的兜底发言。"""
+    """Topic sources of the last n proactive messages actually sent (newest first), skipping messages without a topic."""
     from src.core.ase import _load_ase_state
     out: list = []
     for entry in reversed(_load_ase_state(storage_root).get("proactive_log") or []):
@@ -42,7 +42,7 @@ def _recent_spoken_sources(storage_root: str, n: int) -> list:
     return out
 
 
-# 「向内」的来源：回忆与自身状态。连续开口都在其中时提示换换口味。
+# "Inward" sources: memories and the AI's own state. When recent messages all came from these, suggest a change.
 _INWARD_SOURCES = {"conversation_recall", "user_life", "ai_self"}
 
 
@@ -88,8 +88,9 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
             memory_manager=ctx.memory_manager,
         )
 
-        # ai_self 选中冷却：上一轮已连选 ≥2 次（选中但一直没真正开口）时，本轮不再供其候选，
-        # 否则自省会无限复读自己的 thought（实测 topic_pick 历史中 ai_self 占比畸高）
+        # ai_self pick cooldown: once it was picked ≥2 rounds in a row (picked but never actually spoken),
+        # leave it out this round; otherwise reflection keeps repeating its own thought and ai_self
+        # dominates the picks
         prev_chosen = prev.get("chosen_topic") or {}
         skip_source_ids: set = set()
         if prev_chosen.get("source") == "ai_self" and int(prev_chosen.get("consec_picks", 1)) >= 2:
@@ -146,7 +147,8 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
         lines.append("")
         lines.append(footer)
 
-        # 轮换提示：最近几次开口都是「向内」的话题且本轮有外部候选时，明确鼓励换口味
+        # Rotation hint: when the last few messages all used inward topics and this round has external
+        # candidates, explicitly encourage a change
         recent_sources = _recent_spoken_sources(storage_root, 2)
         has_external = any(not c.ref.startswith(tuple(f"{s}:" for s in _INWARD_SOURCES))
                            for c in candidates)

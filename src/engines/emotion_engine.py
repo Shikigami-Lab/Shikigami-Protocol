@@ -341,7 +341,6 @@ class EmotionEngine:
                 pass
 
         emotion_keys = list(self.get_emotion_prompts(profile).keys())
-        # [public] extended key filter omitted
         if not emotion_keys:
             logger.debug("[EmotionEngine] no emotion_prompts, skipping classify")
             return False
@@ -394,9 +393,10 @@ class EmotionEngine:
             json_example=json_example,
             msgs_text=msgs_text,
         ) + user_sentiment_block
+        from src.utils.persona_context import resolve_user_name
         persona_ctx = get_persona_context_for_secondary_llm(
             profile,
-            user_name=getattr(getattr(getattr(app, "state", None), "config", None), "user_name", "") or "",
+            user_name=resolve_user_name(profile, app),
         )
         if persona_ctx:
             preamble = render(

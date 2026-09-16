@@ -1,8 +1,8 @@
-"""主动话题发现 —— TopicSource 抽象层。
+"""Proactive topic discovery: the TopicSource abstraction.
 
-5 个来源（trend / conversation_recall / user_life / ai_self / random_api）通过
-registry 注册。自省遍历 get_enabled_sources() 收集候选，ASE 用 get_source()
-按 ID 解析素材。
+Five sources (trend / conversation_recall / user_life / ai_self / random_api) register through
+the registry. Reflection collects candidates from get_enabled_sources(); ASE resolves material
+by ID with get_source().
 """
 from src.core.topics.base import (TopicCandidate, TopicMaterial, TopicSource,
                                   TopicSourceContext, topic_id_hash)

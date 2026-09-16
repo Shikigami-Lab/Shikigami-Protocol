@@ -76,7 +76,7 @@ const SettingsMixin = {
         { id: 'tools',      labelZh: '工具',  labelEn: 'Tools',      shortEn: 'Tools',   icon: '⚙' },
         { id: 'system',     labelZh: '系统',  labelEn: 'System',     shortEn: 'System',  icon: '≡' },
       ],
-      // 标准情绪键（由 GET /settings/emotion_keys 填充；私库含扩展键）
+      // Standard emotion keys (filled from GET /settings/emotion_keys)
       emotionStandardKeys: [],
 
       // 记忆面板 — 现已整合进 canvas（memory tab），保留变量以兼容现有逻辑
@@ -173,6 +173,7 @@ const SettingsMixin = {
         use_day_summary_as_input: true,
         use_facts_as_input: true,
         max_input_conv_turns: 60,
+        address_forms_enabled: true,
       },
       _userPortraitFormLoaded: false,
       _userPortraitEditSaveTimer: null,
@@ -182,7 +183,10 @@ const SettingsMixin = {
       userPortraitShowAdvanced: false,
       userPortraitShowChangelog: false,
       userPortraitChangelog: [],
-      userPortraitAddressForms: [],   // AI 识别到的「用户怎么称呼我」，只累加不衰减
+      userPortraitAddressForms: [],   // forms the user uses to address this character; they only accumulate, never decay
+      // Read-only portrait layers shown in the panel (loaded together with the portrait)
+      userPortraitRecentContext: { content: '', updated_at: 0, expires_at: 0, expired: false },
+      userPortraitContextualDetails: [],
       profileSaving: false,
       profileAllSaving: false,
       _profileFormLoaded: false,
@@ -432,7 +436,7 @@ const SettingsMixin = {
       forgettingPreviewLoading: false,
       memoryChangelog: [],       // 记忆变更历史（最近 20 条）
       memoryChangelogLoading: false,
-      memShowChangelog: false,   // 变更历史整体折叠：默认收起，否则 20 条把下方事实列表挤出视口
+      memShowChangelog: false,   // change history starts collapsed; 20 expanded entries would push the fact list out of view
       memChangelogExpanded: '',  // 当前展开的 run_id
       memoryRollbackLoading: false,
       factSortBy: 'time',    // 'time' | 'category' | 'weight'
@@ -526,6 +530,9 @@ const SettingsMixin = {
         changelog: [],
         enabled: false,
         min_interval_turns: 200,
+        max_evolution_facts: 50,
+        max_evolution_conv_turns: 40,
+        baseline_review_interval: 3,
       },
       _personaEvolutionFormLoaded: false,
       personaEvolutionExtracting: false,
@@ -1214,6 +1221,9 @@ const SettingsMixin = {
     /* ─────────────── Persona state (for canvas header) ─────────────── */
 
     async _loadPersonaState() {
+      // The prompt autofill hint on the profile Prompts tab names the analysis model, whose settings
+      // come with the engines config; load it here too in case the Behavior tab was never opened.
+      if (!this._enginesFormLoaded) this.loadEnginesConfig();
       const id = this.selectedProfileId;
       if (!id) return;
       try {
@@ -1341,7 +1351,7 @@ const SettingsMixin = {
           await this.loadLLMPresets();
           this.loadSetupGuide();
         } else {
-          this.showToast(`保存失败: ${data.error || 'unknown'}`, 'error');
+          this.showToast(`保存失败: ${data.error || data.detail || 'unknown'}`, 'error');
         }
       } catch (e) {
         this.showToast(`保存失败: ${e.message}`, 'error');
@@ -3453,7 +3463,7 @@ const SettingsMixin = {
     },
 
     // ── User Portrait (AI-maintained) ────────────────────────────────────
-    /** 删除一个误识别的称呼。称呼表只累加不衰减，这是唯一的删除入口。 */
+    /** Delete a misdetected form of address. Forms only accumulate, so this is the only way to remove one. */
     async deleteUserPortraitAddressForm(form) {
       const pid = this.selectedProfileId;
       if (!pid || !form) return;
@@ -3464,40 +3474,97 @@ const SettingsMixin = {
           body: JSON.stringify({ form }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // HTTP 200 with ok:false means the form was not found
+        const data = await res.json();
+        if (!data || data.ok !== true) throw new Error(this.locale === 'en' ? 'not found' : '未找到');
         this.userPortraitAddressForms = this.userPortraitAddressForms.filter(f => f.form !== form);
       } catch (e) {
         this.showToast((this.locale === 'en' ? 'Delete failed: ' : '删除失败: ') + (e.message || ''), 'error');
+        // Show what the server actually stores instead of guessing
+        if (pid === this.selectedProfileId) this.loadUserPortrait(pid);
+      }
+    },
+
+    /** Clear the portrait's recent-context layer so it is no longer sent to the model. */
+    async clearUserPortraitRecentContext() {
+      const pid = this.selectedProfileId;
+      if (!pid) return;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/recent_context/clear`, {
+          method: 'POST',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data || data.ok !== true) throw new Error(this.locale === 'en' ? 'not found' : '未找到');
+        this.userPortraitRecentContext = { content: '', updated_at: 0, expires_at: 0, expired: false };
+      } catch (e) {
+        this.showToast((this.locale === 'en' ? 'Clear failed: ' : '清除失败: ') + (e.message || ''), 'error');
+        if (pid === this.selectedProfileId) this.loadUserPortrait(pid);
+      }
+    },
+
+    /** Delete one keyword-triggered portrait detail, identified by its summary. */
+    async deleteUserPortraitContextualDetail(summary) {
+      const pid = this.selectedProfileId;
+      if (!pid || !summary) return;
+      try {
+        const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/contextual_details/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ summary }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data || data.ok !== true) throw new Error(this.locale === 'en' ? 'not found' : '未找到');
+        this.userPortraitContextualDetails = this.userPortraitContextualDetails.filter(d => d.summary !== summary);
+      } catch (e) {
+        this.showToast((this.locale === 'en' ? 'Delete failed: ' : '删除失败: ') + (e.message || ''), 'error');
+        if (pid === this.selectedProfileId) this.loadUserPortrait(pid);
       }
     },
 
     async loadUserPortrait(profileId) {
       if (!profileId) return;
       this._userPortraitFormLoaded = false;
+      let data = null;
       try {
         const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(profileId)}/user_portrait`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const cfg = data.config || {};
-        // 整体替换 — 仿 personaEvolutionForm 的模式
-        this.userPortraitForm = {
-          content:                     data.content || '',
-          updated_at:                  data.updated_at || 0,
-          refresh_count:               data.refresh_count || 0,
-          changelog_count:             data.changelog_count || 0,
-          enabled:                     cfg.enabled !== false,
-          auto_refresh_in_daily_job:   cfg.auto_refresh_in_daily_job !== false,
-          min_turns_for_burst_refresh: cfg.min_turns_for_burst_refresh ?? 100,
-          min_hours_between_refresh:   cfg.min_hours_between_refresh ?? 6,
-          use_day_summary_as_input:    cfg.use_day_summary_as_input !== false,
-          use_facts_as_input:          cfg.use_facts_as_input !== false,
-          max_input_conv_turns:        cfg.max_input_conv_turns ?? 60,
-          address_forms_enabled:       cfg.address_forms_enabled !== false,
-        };
-        this.userPortraitAddressForms = data.address_forms || [];
-        this.$nextTick(() => { this._userPortraitFormLoaded = true; });
+        if (res.ok) data = await res.json();
       } catch (e) {
         console.error('[settings] loadUserPortrait:', e);
       }
+      const loaded = !!data && data.ok !== false;
+      // A failed load maps an empty payload, so every field below gets its default and nothing from
+      // the previously selected profile stays on screen. Auto-save stays off until a load succeeds.
+      if (!loaded) data = {};
+      const cfg = data.config || {};
+      // 整体替换 — 仿 personaEvolutionForm 的模式
+      this.userPortraitForm = {
+        content:                     data.content || '',
+        updated_at:                  data.updated_at || 0,
+        refresh_count:               data.refresh_count || 0,
+        changelog_count:             data.changelog_count || 0,
+        enabled:                     cfg.enabled !== false,
+        auto_refresh_in_daily_job:   cfg.auto_refresh_in_daily_job !== false,
+        min_turns_for_burst_refresh: cfg.min_turns_for_burst_refresh ?? 100,
+        min_hours_between_refresh:   cfg.min_hours_between_refresh ?? 6,
+        use_day_summary_as_input:    cfg.use_day_summary_as_input !== false,
+        use_facts_as_input:          cfg.use_facts_as_input !== false,
+        max_input_conv_turns:        cfg.max_input_conv_turns ?? 60,
+        address_forms_enabled:       cfg.address_forms_enabled !== false,
+      };
+      this.userPortraitAddressForms = data.address_forms || [];
+      const rc = data.recent_context || {};
+      this.userPortraitRecentContext = {
+        content:    rc.content || '',
+        updated_at: rc.updated_at || 0,
+        expires_at: rc.expires_at || 0,
+        expired:    !!rc.expired,
+      };
+      this.userPortraitContextualDetails = (Array.isArray(data.contextual_details) ? data.contextual_details : [])
+        .filter(d => d && d.summary)
+        .map(d => ({ summary: String(d.summary), keywords: Array.isArray(d.keywords) ? d.keywords.map(String) : [] }));
+      if (loaded) this.$nextTick(() => { this._userPortraitFormLoaded = true; });
     },
 
     async saveUserPortraitContent(silent = true) {
@@ -4617,6 +4684,7 @@ const SettingsMixin = {
           min_interval_turns: ev.min_interval_turns ?? 200,
           max_evolution_facts: ev.max_evolution_facts ?? 50,
           max_evolution_conv_turns: ev.max_evolution_conv_turns ?? 40,
+          baseline_review_interval: ev.baseline_review_interval ?? 3,
           turns_until_next: data.turns_until_next ?? null,
           turn_counter: data.turn_counter ?? 0,
         };
@@ -4624,6 +4692,17 @@ const SettingsMixin = {
       } catch (e) {
         console.error('[settings] loadPersonaEvolution:', e);
       }
+    },
+
+    /**
+     * Whether prompt autofill runs on the auxiliary (analysis) model. Mirrors the backend
+     * (get_analysis_preset() or get_active_llm_preset()): only when analysis is enabled and
+     * assigned to an existing preset; otherwise the active chat model is used.
+     */
+    autofillUsesAnalysisModel() {
+      const name = this.analysisModelPreset;
+      return !!(this.analysisModelEnabled && name && name !== '__none__'
+        && this.llmPresets && this.llmPresets[name]);
     },
 
     async savePersonaEvolutionData() {
@@ -4642,6 +4721,7 @@ const SettingsMixin = {
             min_interval_turns: this.personaEvolutionForm.min_interval_turns,
             max_evolution_facts: this.personaEvolutionForm.max_evolution_facts,
             max_evolution_conv_turns: this.personaEvolutionForm.max_evolution_conv_turns,
+            baseline_review_interval: this.personaEvolutionForm.baseline_review_interval,
           }),
         });
         if (res.ok) {

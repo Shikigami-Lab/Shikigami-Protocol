@@ -161,6 +161,20 @@ memory:
 
       Write entirely as $character_name, in their voice — how it feels on a quiet day. It could be waiting, missing someone, a small thought while alone, or simply the flatness of nothing happening. Refer to the other person as "$user_name". **Never break character**: do not speak as an assistant or model, and do not produce phrases like "as an AI". No need to force content — it can be very brief. Return plain text, no lists, no prefix.
 
+  # Put in front of a profile's custom day_summary_prompt, which otherwise only names the character.
+  # Variables: $character_name, $persona_brief, $user_name
+  day_summary_custom_preamble:
+    zh: |
+      你是 $character_name。你的人设：
+      $persona_brief
+
+      称呼对方为「$user_name」。始终以你自己的身份和口吻书写，不要以助手或模型的身份说话。
+    en: |
+      You are $character_name. Your persona:
+      $persona_brief
+
+      Refer to the other person as "$user_name". Write as yourself, in your own voice; never speak as an assistant or model.
+
   day_summary_user:
     zh: "直接输出请求的内容，不要以「好的」「以下是」「根据」等语气词或说明性前缀开头。只输出日记正文，日记作为给自己的独白，而非给用户的回应。"
     en: "Output the requested content directly. Do not begin with phrases like 'Sure', 'Here is', 'Based on', or any explanatory prefix. Output only the diary body — written as a personal monologue to yourself, not a response to the user."

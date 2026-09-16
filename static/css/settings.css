@@ -2546,7 +2546,7 @@ textarea.form-input {
 /* Command list */
 .tp-cmd-list {
   padding: 4px 0;
-  /* 命令变多后必须限高滚动，否则面板向上顶出屏幕（其余 tp 面板同理用 .tp-list 220px） */
+  /* Cap the height and scroll: with more commands the panel would grow off the top of the screen (other tp panels use .tp-list at 220px for the same reason) */
   max-height: min(58vh, 480px);
   overflow-y: auto;
 }
@@ -2603,7 +2603,7 @@ textarea.form-input {
 }
 .tp-cmd-search {
   padding: 6px 12px;
-  position: sticky;   /* 滚动时搜索框钉在顶部 */
+  position: sticky;   /* keep the search box pinned to the top while scrolling */
   top: 0;
   z-index: 1;
   background: var(--bg-panel);
@@ -3697,7 +3697,7 @@ textarea.form-input {
 
 /* ── 记忆变更历史面板 ── */
 .mem-changelog { margin-top: var(--space-3); }
-/* 折叠标题行：整行可点，右侧刷新按钮用 @click.stop 不触发折叠 */
+/* Collapsible header row: the whole row toggles; the refresh button on the right uses @click.stop so it does not toggle */
 .mem-changelog-toggle {
   display: flex;
   align-items: center;
@@ -3710,7 +3710,7 @@ textarea.form-input {
   font-size: var(--fs-xs);
   font-weight: normal;
 }
-/* 展开后限高滚动，避免 20 条把下方事实列表顶出视口 */
+/* When expanded, cap the height and scroll so 20 entries do not push the fact list below out of view */
 .mem-changelog-body {
   max-height: 300px;
   overflow-y: auto;
@@ -3752,7 +3752,7 @@ textarea.form-input {
 .mem-changelog-fact.removed { color: var(--text-tertiary); }
 .mem-changelog-stats { color: var(--text-tertiary); margin-top: var(--space-2); }
 
-/* ── 用户画像：AI 识别到的称呼 chip ────────────────────────────────────── */
+/* ── User portrait: detected forms of address (chips) ────────────────────────────────────── */
 .portrait-address-chip {
   display: inline-flex;
   align-items: center;
@@ -3768,16 +3768,67 @@ textarea.form-input {
   color: var(--text-tertiary);
   font-size: var(--fs-2xs);
 }
-.portrait-address-del {
+.portrait-address-del,
+.portrait-detail-del {
   border: none;
   background: none;
   padding: 0 2px;
-  margin-left: 2px;          /* 与「×N」计数拉开距离，避免两个叉号看起来是一个 */
+  margin-left: 2px;          /* keeps the delete mark apart from the "×N" count so the two do not read as one */
   cursor: pointer;
   color: var(--text-tertiary);
   font-size: var(--fs-2xs);
   line-height: 1;
   opacity: 0.6;
 }
-.portrait-address-del:hover { opacity: 1; }
-.portrait-address-del:hover { color: var(--red); }
+.portrait-address-del:hover,
+.portrait-detail-del:hover { opacity: 1; color: var(--red); }
+
+/* ── User portrait: read-only recent context and topic details ── */
+.portrait-layer-text {
+  padding: 6px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.portrait-layer-text.is-expired { color: var(--text-tertiary); }
+.portrait-layer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.portrait-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.portrait-detail-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+.portrait-detail-body { flex: 1; min-width: 0; }
+.portrait-detail-summary {
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.portrait-detail-keywords {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-2xs);
+}

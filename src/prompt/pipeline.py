@@ -44,7 +44,7 @@ import src.tools.timer.segment               # noqa: F401  (ActiveTimersSegment)
 import src.prompt.segments.reflection_state  # noqa: F401  (ReflectionStateSegment)
 import src.prompt.segments.current_context  # noqa: F401  (单聊时注明当前为一对一私聊)
 import src.prompt.segments.lorebook         # noqa: F401  (LoreBookSegment, keyword-triggered)
-import src.prompt.segments.trend_awareness  # noqa: F401  (TrendAwarenessSegment, cooldown 4h；段落设置可关)
+import src.prompt.segments.trend_awareness  # noqa: F401  (TrendAwarenessSegment, cooldown 4h; can be turned off in segment settings)
 import src.prompt.segments.weather          # noqa: F401  (WeatherSegment, cooldown 2h)
 import src.prompt.segments.reflection.persona        # noqa: F401
 import src.prompt.segments.reflection.ase_config     # noqa: F401
@@ -189,7 +189,6 @@ def build_messages(
 
         # Resolve effective settings — meta overrides class defaults
         enabled       = effective_segment_enabled(meta, seg_cls)
-        # [public] health_mode force-enable omitted
         trigger_mode  = (meta.trigger_mode  if meta and meta.trigger_mode  is not None
                          else seg_cls.default_trigger_mode)
         trigger_param = (meta.trigger_param if meta and meta.trigger_param is not None
@@ -291,10 +290,10 @@ def build_messages(
         if not (last and last.get("role") == "user" and (last.get("content") or "").strip() == (final_user or "").strip()):
             messages.append({"role": "user", "content": final_user})
 
-    # SillyTavern 宏展开：从角色卡导入的文本普遍用 {{char}}/{{user}} 代替名字。
-    # 放在出口统一处理，一次覆盖 persona、风格约束、世界书、自定义段落、
-    # 演化后的文本与历史消息等所有来源（历史里已被污染的字面量也顺带清掉）。
-    # 群聊时 {{char}} 指当前正在回复的那个角色，而非 session 自身。
+    # SillyTavern macro expansion: text imported from character cards usually says {{char}}/{{user}}
+    # instead of names. Expanding at the exit covers every source at once (persona, style constraints,
+    # lorebook, custom segments, evolved text and history, including literals already stored in history).
+    # In group chat {{char}} is the character currently replying, not the session itself.
     _up_profile = (profile.get("user_persona") or {})
     _up_global = extras.get("user_persona_global") or {}
     messages = expand_messages(messages, build_macro_table(

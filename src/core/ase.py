@@ -272,6 +272,60 @@ def _get_time_ctx(hour: int, locale: str) -> str:
 
 
 
+# ── Silence replies ───────────────────────────────────────────────────────────
+# The ASE prompts let the model answer with a bare silence marker such as "（静默）"
+# or "(silence)" when nothing is worth saying. Such a reply must not be stored, shown
+# or spoken, so it is detected before anything reaches the frontend.
+
+_SILENCE_MARKERS = frozenset({"静默", "(静默)", "[静默]", "silence", "(silence)", "[silence]"})
+_SILENCE_QUOTES = "\"'`“”‘’「」『』«»*"                            # ignored at either end
+_SILENCE_TRAILING = _SILENCE_QUOTES + ".,!?;:。，、！？；：…~～"   # ignored at the end
+_SILENCE_BRACKETS = str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]"})
+
+
+def _fold_for_silence_match(text: str) -> str:
+    """Case-fold, drop all whitespace and map full-width brackets to ASCII."""
+    return "".join((text or "").casefold().split()).translate(_SILENCE_BRACKETS)
+
+
+def is_silence_reply(text: str) -> bool:
+    """Return True if the whole reply is a silence marker and nothing else.
+
+    Whitespace, surrounding quotes and trailing punctuation are ignored and the match
+    is case-insensitive, so "（静默）", "「（静默）」" and "(Silence)." all qualify.
+    A reply that merely contains the word alongside other text does not.
+    """
+    core = _fold_for_silence_match(text).lstrip(_SILENCE_QUOTES).rstrip(_SILENCE_TRAILING)
+    return core in _SILENCE_MARKERS
+
+
+def could_become_silence_reply(prefix: str) -> bool:
+    """Return True while a partially streamed reply may still turn out to be silence.
+
+    True when some continuation of ``prefix`` would satisfy is_silence_reply(); in
+    particular every prefix of a silence reply returns True. Used to hold streamed
+    tokens back until the reply can no longer be silence. Ordinary replies are
+    released within their first few characters.
+    """
+    head = _fold_for_silence_match(prefix).lstrip(_SILENCE_QUOTES)
+    for marker in _SILENCE_MARKERS:
+        if marker.startswith(head):
+            return True
+        if head.startswith(marker) and not head[len(marker):].strip(_SILENCE_TRAILING):
+            return True
+    return False
+
+
+# Providers put this string into the stream instead of raising when a request fails.
+_LLM_ERROR_PREFIX = "[LLM Error:"
+
+
+def could_be_llm_error(prefix: str) -> bool:
+    """Return True while a streamed reply may be, or already is, a provider error string."""
+    head = (prefix or "").lstrip()
+    return _LLM_ERROR_PREFIX.startswith(head) or head.startswith(_LLM_ERROR_PREFIX)
+
+
 class AseEngine:
     """Background asyncio task that periodically checks if ASE should speak."""
 
@@ -657,7 +711,9 @@ class AseEngine:
         from src.core.broadcast import broadcast
         from src.prompt.pipeline import build_messages
         from src.llm.registry import get_provider
-        from src.utils.debug_logger import log_ase_speak, log_ase_error, log_llm_call, log_llm_response
+        from src.utils.debug_logger import (
+            log_ase_check, log_ase_speak, log_ase_error, log_llm_call, log_llm_response,
+        )
 
         app = self._app
         config = app.state.config
@@ -757,6 +813,7 @@ class AseEngine:
                 "ase_last_content": last_ase_content,
                 "ase_greeting_hint": greeting_hint,
                 "ase_chosen_topic": chosen_topic,
+                "ase_silent_seconds": silent_seconds,
             },
         )
 
@@ -784,11 +841,61 @@ class AseEngine:
         full_response = ""
         vlm_used = bool(vlm_description)
         try:
+            # Hold tokens back while the reply could still be a bare silence marker or a provider
+            # error string: the frontend renders tokens as they arrive and starts TTS on "done",
+            # so neither may ever be pushed. Ordinary replies are released after a few characters.
+            holding = True
             async for token in llm.stream_chat(messages):
                 full_response += token
+                if holding:
+                    if could_become_silence_reply(full_response) or could_be_llm_error(full_response):
+                        continue
+                    holding = False
+                    token = full_response
                 await broadcast.push(session.id, {"token": token, "done": False})
 
+            raw_response = full_response
             full_response = full_response.replace("**", "").strip()
+
+            is_llm_error = holding and full_response.startswith(_LLM_ERROR_PREFIX)
+            if holding and (not full_response or is_silence_reply(full_response) or is_llm_error):
+                # The model chose not to speak, returned nothing, or the request failed. Nothing
+                # is stored, broadcast or spoken, and no proactive counter, cooldown or segment
+                # trigger is updated. As with a low-urgency skip, the loop simply waits for its
+                # next check. Urgency is cleared, as after a real speak, so that check does not
+                # call the model again on the same reflection state (and a failing provider is not
+                # retried on every check); the next reflection sets it afresh.
+                if is_llm_error:
+                    skip_reason = "llm_error"
+                    log_ase_error(session_id=session.id, error=full_response[:500])
+                else:
+                    skip_reason = "silence_reply" if full_response else "empty_reply"
+                log_llm_response(
+                    session_id=session.id,
+                    response=raw_response,
+                    model=preset.get("model", ""),
+                )
+                log_ase_check(
+                    session_id=session.id,
+                    mode=mode_name,
+                    urgency=reflection_state.get("urgency", 0.0),
+                    threshold=float(mode_cfg.get("urgency_threshold", 0.35)),
+                    silent_seconds=silent_seconds,
+                    decision="skip",
+                    skip_reason=skip_reason,
+                )
+                logger.info(
+                    "[ASE] session=%s model chose not to speak (%s); nothing sent or stored",
+                    session.id, skip_reason,
+                )
+                if session.reflection_state:
+                    session.reflection_state["urgency"] = 0.0
+                    session.save_runtime_state()
+                return
+
+            if holding:
+                # The whole reply was held back and turned out not to be silence: send it now.
+                await broadcast.push(session.id, {"token": raw_response, "done": False})
 
             # Save only the assistant response (no user trigger message)
             store.append("assistant", full_response, sender=session.display_name or "")

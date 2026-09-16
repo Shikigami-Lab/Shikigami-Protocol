@@ -40,7 +40,8 @@ class TrendTopicSource(TopicSource):
             if f"trend:{it.id}" in ctx.recently_used:
                 continue
             summary = it.title.strip()
-            # 附 snippet 摘要：热搜词条常常只有几个字，没有上下文 LLM 无从判断值不值得聊
+            # Attach the snippet: trending entries are often just a few words, and without context the
+            # LLM can't judge whether they're worth raising
             snippet = (it.snippet or "").strip().replace("\n", " ")
             if snippet:
                 summary += "：" + snippet[:60] + ("…" if len(snippet) > 60 else "")

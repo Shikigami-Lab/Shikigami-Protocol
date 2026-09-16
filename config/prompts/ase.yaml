@@ -53,6 +53,13 @@ ase:
     zh: "现在是$time_ctx，四周很静。"
     en: "It's $time_ctx and everything is quiet."
 
+# ── Absence uncertainty (injected after the user has been silent for a while) ──
+# $delta = human-readable time since the user last spoke (reuses the time_context.human_delta zh/en strings)
+
+  absence_uncertainty:
+    zh: "对方上次说话是 $delta，此后没有再出现。你不知道对方此刻在不在、在做什么。若你想说的话依赖某个前提（例如对方已经回到你身边），而你无法确认它成立，就不要当作它已经成立——换一个此刻就成立的说法，或直接回复「（静默）」。"
+    en: "They last spoke $delta and haven't appeared since. You don't know whether they're there right now, or what they're doing. If what you want to say depends on something being true — for example, that they're already back with you — and you can't confirm it, don't treat it as true. Either say something that holds right now, or just reply \"(silence)\"."
+
   date_hint:
     zh: "当前日期与节日见上方时间上下文；若自然可带出节日或日期相关的一句。"
     en: "See the time context above for current date and holidays; if natural, bring in a holiday or date-related remark."

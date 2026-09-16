@@ -27,8 +27,8 @@ function getWsUrl() {
 window.getBaseUrl = getBaseUrl;
 window.getWsUrl = getWsUrl;
 
-// ── 聊天命令注册表：⌘ 面板与输入框 / 内联补全共用这一份 ──────────────────────
-// insert 尾随空格 = 需要参数；run: true = 无参数、可点击立即执行；kw = 中英搜索词
+// ── Chat command registry: the single source for the ⌘ panel and inline "/" suggestions ──
+// Trailing space in insert = takes an argument; run: true = no argument, runs on click; kw = zh/en search words
 const CHAT_COMMANDS = [
   { insert: '/topic',          argKey: '',                   descKey: 'cmdTopicDesc',        groupKey: 'commandsGroupTopic',  run: true,  kw: 'topic new fresh 话题 新鲜 趋势' },
   { insert: '/fact list',      argKey: '',                   descKey: 'cmdFactListDesc',     groupKey: 'commandsGroupMemory', run: true,  kw: 'fact list 事实 列出 置顶' },
@@ -46,6 +46,53 @@ const CHAT_COMMANDS = [
   { insert: '/search ',        argKey: 'cmdSearchArg',       descKey: 'cmdSearchDesc',       groupKey: 'commandsGroupSearch', run: false, kw: 'search 搜索 查' },
   { insert: '/help',           argKey: '',                   descKey: 'cmdHelpDesc',         groupKey: 'commandsGroupOther',  run: true,  kw: 'help 帮助 命令' },
 ];
+
+/**
+ * Inline "/" suggestions for the chat input, derived from CHAT_COMMANDS.
+ * Returns { mode, items }; mode decides what Enter does:
+ *   'token'    Still typing the command token ("/rec", or "/rec " with nothing after it).
+ *              Keyword filter over name, keywords and description; Enter completes.
+ *   'args'     The first token is a known command ("/recall", "/todo") and whitespace follows.
+ *              Only that command family is listed, matched by name prefix and never by
+ *              description words; Enter sends the text exactly as typed.
+ *   'keywords' Unknown first token followed by more words ("/ reminder"). Keyword search for
+ *              discovery; Tab or click picks a command, Enter sends the text as typed.
+ */
+function suggestSlashCommands(txt, t) {
+  if (!txt.startsWith('/') || txt.includes('\n') || txt.length > 40) return { mode: '', items: [] };
+  const [, token, gap, rest] = /^\/(\S*)(\s*)([\s\S]*)$/.exec(txt);
+  const head = '/' + token.toLowerCase();
+  const headOf = c => c.insert.split(' ')[0].toLowerCase();
+  if (gap && CHAT_COMMANDS.some(c => headOf(c) === head)) {
+    const typed = txt.toLowerCase().replace(/\s+/g, ' ');
+    const name = c => c.insert.trim().toLowerCase();
+    // leadsTo: the typed text is still a prefix of this command name (a subcommand being typed).
+    // Those rank before names that are already complete and followed by an argument.
+    const leadsTo = c => (name(c) + ' ').startsWith(typed);
+    const items = CHAT_COMMANDS
+      .filter(c => headOf(c) === head && (leadsTo(c) || typed.startsWith(name(c) + ' ')))
+      .sort((a, b) => leadsTo(b) - leadsTo(a));
+    return { mode: 'args', items: items.slice(0, 8) };
+  }
+  const words = txt.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
+  // Names starting with the typed token rank before description-only hits, so an exact
+  // "/search" is not completed to /recall (whose English description mentions "search").
+  const byName = c => c.insert.toLowerCase().startsWith(head);
+  const items = CHAT_COMMANDS
+    .filter(c => words.every(w => (c.insert + ' ' + c.kw + ' ' + t(c.descKey)).toLowerCase().includes(w)))
+    .sort((a, b) => byName(b) - byName(a));
+  return { mode: rest ? 'keywords' : 'token', items: items.slice(0, 8) };
+}
+
+/** Recently used commands from localStorage; anything but an array of strings yields []. */
+function loadRecentCommands() {
+  try {
+    const list = JSON.parse(localStorage.getItem('recentCommands') || '[]');
+    return Array.isArray(list) && list.every(x => typeof x === 'string') ? list : [];
+  } catch (_) {
+    return [];   // malformed JSON or blocked storage must never stop the app from mounting
+  }
+}
 
 // Detect Electron runtime (preload.js sets window.electronAPI)
 const IS_ELECTRON = !!(window.electronAPI && window.electronAPI.isElectron);
@@ -76,20 +123,22 @@ const CLIENT_ID = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true });
 
-// ── 外链点击接管 ──────────────────────────────────────────────────────────────
-// marked 渲染出的是裸 <a href="https://…">（没有 target），在 Electron 里点击会让主窗口
-// 就地导航过去，整个 Vue 应用被外部网页替换，而菜单栏已隐藏、没有后退入口，用户只能
-// 重启应用。这里统一接管：外链一律交给系统浏览器，应用窗口自身永不离开。
-// main.js 的 will-navigate 是同一问题的兜底防线，即使这里漏了也不会被导航走。
-// 用 document 级委托而不是覆盖 marked 的 renderer.link——不绑定 marked 版本（v15 的
-// link({href,title,tokens}) 签名与旧版不兼容），且对任何来源的动态链接都生效。
+// ── External link clicks ─────────────────────────────────────────────────────
+// marked renders bare <a href="https://…"> without a target. In Electron a click navigates the
+// main window in place: the whole Vue app is replaced by the external page, and with the menu
+// bar hidden there is no way back except restarting. So every external link is handed to the
+// system browser here and the app window itself never leaves.
+// main.js's will-navigate guard is the backstop for the same problem if anything slips past this.
+// A document-level delegate instead of overriding marked's renderer.link: it does not depend on
+// the marked version (v15's link({href,title,tokens}) signature differs from older releases) and
+// it covers dynamically inserted links from any source.
 document.addEventListener('click', (e) => {
   const a = e.target && e.target.closest && e.target.closest('a[href]');
   if (!a) return;
   const href = a.getAttribute('href') || '';
-  // 锚点 / 相对路径 / mailto 等保持原生行为（docs-viewer 等站内链接走 target=_blank）
+  // Anchors, relative paths, mailto etc. keep native behaviour (in-app links like docs-viewer use target=_blank)
   if (!/^https?:\/\//i.test(href)) return;
-  if (a.origin === window.location.origin) return;   // 同源（本地服务）放行
+  if (a.origin === window.location.origin) return;   // same origin (local server): allow
   e.preventDefault();
   if (IS_ELECTRON && window.electronAPI) window.electronAPI.openExternal(href);
   else window.open(href, '_blank', 'noopener,noreferrer');
@@ -259,11 +308,11 @@ const App = {
       showCommandsPanel: false,
       showToolbarConfig: false,
 
-      // 命令 UX：/ 内联补全 + 面板搜索 + 最近使用
+      // Command UX: inline "/" suggestions, panel search, recently used
       slashSelIdx: 0,
-      slashDismissed: false,   // Esc 暂时关闭下拉，再输入即恢复
+      slashDismissed: false,   // Esc hides the dropdown until the input changes again
       cmdPanelQuery: '',
-      recentCommands: JSON.parse(localStorage.getItem('recentCommands') || '[]'),
+      recentCommands: loadRecentCommands(),
 
       // Toolbar button visibility config (P5-C)
       toolbarConfig: {
@@ -2383,8 +2432,14 @@ const App = {
     },
 
     handleKeydown(e) {
-      // / 内联补全：下拉可见时接管 ↑↓/Tab/Esc；Enter 先补全、已补全则放行发送
-      const matches = this.slashMatches;
+      // Leave every key to the IME while a composition is active: Enter confirms the candidate
+      // and arrows move inside it. keyCode 229 also covers Safari, where the confirming keydown
+      // arrives with isComposing already false.
+      if (e.isComposing || e.keyCode === 229) return;
+      // Inline "/" suggestions: while the dropdown is open, Up/Down/Tab/Esc drive it. Enter
+      // completes only while the command token is still being typed; once an argument or search
+      // words follow, it sends the text exactly as typed (see suggestSlashCommands).
+      const { mode, items: matches } = this.slashSuggest;
       if (matches.length) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -2405,7 +2460,7 @@ const App = {
           this.completeSlash(matches[this.slashSelIdx]);
           return;
         }
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && mode === 'token') {
           const sel = matches[this.slashSelIdx];
           if (sel && this.inputText.trim() !== sel.insert.trim()) {
             e.preventDefault();
@@ -2421,14 +2476,18 @@ const App = {
       }
     },
 
-    /** / 补全：填入命令；带参数的留尾随空格继续输入 */
+    /** Fill in a suggested command; commands that take an argument keep a trailing space */
     completeSlash(item) {
       if (!item) return;
-      this.inputText = item.insert;
+      const typed = (this.inputText || '').toLowerCase().replace(/\s+/g, ' ');
+      const name = item.insert.trim().toLowerCase();
+      // Already typed in full with an argument after it: completing would discard the argument
+      const hasArgument = typed.startsWith(name + ' ') && typed.trim() !== name;
+      if (!hasArgument) this.inputText = item.insert;
       this.$nextTick(() => this.$refs.chatTextarea?.focus());
     },
 
-    /** ⌘ 面板：无参数命令点击立即执行（群聊中降级为仅填入） */
+    /** ⌘ panel: commands without an argument run on click (in group chat they are only inserted) */
     runCommandNow(item) {
       if (this.isGroupChat) { this.insertCommand(item.insert); return; }
       this.inputText = item.insert.trim();
@@ -2436,10 +2495,10 @@ const App = {
       this.sendMessage();
     },
 
-    /** 发送命令时记录到「最近使用」（localStorage，cap 4） */
+    /** Record a sent command under "recently used" (localStorage, capped at 4) */
     _recordRecentCommand(text) {
       if (!text.startsWith('/')) return;
-      // 取注册表中能作为该输入前缀的最长 insert（/fact add xxx → /fact add ）
+      // Longest registry insert that prefixes the input (/fact add xxx → /fact add )
       let best = null;
       for (const c of CHAT_COMMANDS) {
         const base = c.insert.trim();
@@ -2449,7 +2508,8 @@ const App = {
         }
       }
       if (!best) return;
-      const list = [best.insert, ...this.recentCommands.filter(x => x !== best.insert)].slice(0, 4);
+      const prev = Array.isArray(this.recentCommands) ? this.recentCommands : [];
+      const list = [best.insert, ...prev.filter(x => x !== best.insert)].slice(0, 4);
       this.recentCommands = list;
       try { localStorage.setItem('recentCommands', JSON.stringify(list)); } catch (_) {}
     },
@@ -2722,7 +2782,7 @@ const App = {
         this.showTodosPanel = false;
         this.showTimerPanel = false;
         this.showToolbarConfig = false;
-        this.cmdPanelQuery = '';   // 重开面板时清空上次搜索，露出「最近使用」
+        this.cmdPanelQuery = '';   // clear the previous search on reopen so "recently used" shows
       }
     },
 
@@ -2843,7 +2903,7 @@ const App = {
 
   watch: {
     inputText() {
-      // 任何输入变化都重置补全选中项；Esc 的暂时关闭在继续输入后恢复
+      // Any input change resets the selected suggestion and lifts a temporary Esc dismissal
       this.slashSelIdx = 0;
       this.slashDismissed = false;
     },
@@ -2885,18 +2945,16 @@ const App = {
     isGroupChat() {
       return !!this.currentGroupId;
     },
-    /** / 内联补全候选：仅单聊、输入以 / 开头时；多词过滤，上限 8 条 */
-    slashMatches() {
-      if (this.isGroupChat || this.isStreaming || this.slashDismissed) return [];
-      const txt = this.inputText || '';
-      if (!txt.startsWith('/') || txt.includes('\n') || txt.length > 40) return [];
-      const words = txt.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
-      return CHAT_COMMANDS.filter(c => {
-        const hay = (c.insert + ' ' + c.kw + ' ' + this.t(c.descKey)).toLowerCase();
-        return words.every(w => hay.includes(w));
-      }).slice(0, 8);
+    /** Inline "/" suggestion state { mode, items }, single chat only; see suggestSlashCommands() */
+    slashSuggest() {
+      if (this.isGroupChat || this.isStreaming || this.slashDismissed) return { mode: '', items: [] };
+      return suggestSlashCommands(this.inputText || '', k => this.t(k));
     },
-    /** ⌘ 面板分组（含搜索过滤），保持注册表内的组序 */
+    /** Inline "/" suggestions rendered above the chat input (at most 8) */
+    slashMatches() {
+      return this.slashSuggest.items;
+    },
+    /** ⌘ panel groups (with search filter), keeping the registry's group order */
     cmdPanelGroups() {
       const q = (this.cmdPanelQuery || '').trim().toLowerCase();
       const groups = [];
@@ -2908,7 +2966,7 @@ const App = {
       }
       return groups;
     },
-    /** 最近使用的命令条目（按使用时间倒序） */
+    /** Recently used command entries (most recent first) */
     recentCommandItems() {
       return (this.recentCommands || [])
         .map(ins => CHAT_COMMANDS.find(c => c.insert === ins))

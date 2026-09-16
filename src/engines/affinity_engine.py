@@ -184,9 +184,10 @@ class AffinityEngine:
             delta_clamp=delta_clamp,
             turns_text=turns_text,
         )
+        from src.utils.persona_context import resolve_user_name
         persona_ctx = get_persona_context_for_secondary_llm(
             profile,
-            user_name=getattr(getattr(getattr(app, "state", None), "config", None), "user_name", "") or "",
+            user_name=resolve_user_name(profile, app),
         )
         if persona_ctx:
             preamble = render(

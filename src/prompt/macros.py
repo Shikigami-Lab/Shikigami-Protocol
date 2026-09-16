@@ -1,31 +1,37 @@
-"""SillyTavern 风格的 prompt 宏展开。
+"""SillyTavern-style prompt macro expansion.
 
-从 SillyTavern 导入的角色卡，description / personality / scenario 里普遍用
-{{char}} 和 {{user}} 代替具体名字。这些文本会被原样搬进 base_prompt，如果不展开：
-  - 模型看到字面的「{{char}}」，轻则困惑，重则照着念出来
-  - 念出来的内容进对话历史 → 被记忆抽取 → 写进 facts / 日摘要 / 用户画像
-    → 又被注入 prompt，形成放大循环
+Character cards imported from SillyTavern usually write {{char}} and {{user}} instead of
+real names in their description / personality / scenario text, and that text is copied
+into base_prompt as-is. Without expansion:
+  - the model sees a literal "{{char}}" and may repeat it in replies;
+  - repeated macros enter chat history, get picked up by memory extraction, and end up in
+    facts / day summaries / the user portrait, which are injected back into the prompt,
+    so the problem feeds itself.
 
-因此在 prompt 组装的最后统一展开一次，覆盖 base_prompt、风格约束、世界书、
-自定义段落、演化后的文本以及历史消息等所有来源。
+Expansion therefore runs once at the end of prompt assembly and covers every source:
+base_prompt, style constraints, lorebook, custom segments, evolved text and history.
 
-规则对齐 SillyTavern：宏名大小写不敏感，花括号内的空白忽略，
-未登记的宏原样保留（避免吞掉用户有意写下的花括号内容）。
+Rules follow SillyTavern: macro names are case-insensitive, whitespace inside the braces
+is ignored, and unknown macros are left untouched so braces typed on purpose survive.
+A macro whose value is unknown (for example no character name) is also left as-is instead
+of silently becoming an empty string.
 """
 from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Callable, Dict, Optional
+from typing import Dict, Optional
 
-# {{name}}：宏名只允许字母数字与下划线，避免误吞 JSON/模板片段
+# {{name}}: names are limited to letters, digits and underscores so JSON/template snippets don't match
 _MACRO_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-# {{trim}} 语义是「连同周围换行一起去掉」，需在普通替换之前单独处理
+# {{trim}} removes itself together with the surrounding newlines, so it runs before normal substitution
 _TRIM_RE = re.compile(r"[ \t]*\r?\n?[ \t]*\{\{\s*trim\s*\}\}[ \t]*\r?\n?[ \t]*", re.IGNORECASE)
-# 旧语法，SillyTavern 仍兼容
-_LEGACY = ((re.compile(r"<USER>", re.I), "user"),
-           (re.compile(r"<BOT>", re.I), "char"),
-           (re.compile(r"<CHAR>", re.I), "char"))
+# Legacy syntax still accepted by SillyTavern. Uppercase only, and only in card text: lowercase
+# forms are ordinary markup or code (std::vector<char>), and the system message also carries
+# injected material such as search results.
+_LEGACY = ((re.compile(r"<USER>"), "user"),
+           (re.compile(r"<BOT>"), "char"),
+           (re.compile(r"<CHAR>"), "char"))
 
 
 def build_macro_table(
@@ -34,15 +40,15 @@ def build_macro_table(
     persona: str = "",
     now: Optional[datetime] = None,
 ) -> Dict[str, str]:
-    """构建宏名 → 展开值的映射（键一律小写）。
+    """Build the macro name → value map (keys are lowercase).
 
-    description / personality / scenario 在本项目里没有独立字段（导入时已合并进
-    base_prompt），展开为空串，总好过把字面量留给模型。
+    char and user are only included when a name is known, so an unresolved {{char}} stays
+    literal. description / personality / scenario have no separate fields in this project
+    (imports merge them into base_prompt), so they expand to empty strings, which is still
+    better than leaving the literal for the model.
     """
     now = now or datetime.now()
-    return {
-        "char": char_name or "",
-        "user": user_name or "",
+    table = {
         "persona": persona or "",
         "time": now.strftime("%H:%M"),
         "date": now.strftime("%Y-%m-%d"),
@@ -51,17 +57,26 @@ def build_macro_table(
         "personality": "",
         "scenario": "",
     }
+    if char_name:
+        table["char"] = char_name
+    if user_name:
+        table["user"] = user_name
+    return table
 
 
-def expand_macros(text: str, table: Dict[str, str]) -> str:
-    """按 table 展开一段文本里的宏；未登记的宏原样保留。"""
-    if not text or ("{{" not in text and "<" not in text):
+def expand_macros(text: str, table: Dict[str, str], card_text: bool = True) -> str:
+    """Expand the macros in one piece of text; unknown macros are left untouched.
+
+    card_text=False skips {{trim}} and the legacy <USER>/<BOT>/<CHAR> syntax (used for chat messages).
+    """
+    if not text or ("{{" not in text and (not card_text or "<" not in text)):
         return text
 
-    out = _TRIM_RE.sub("", text)
-    for pattern, key in _LEGACY:
-        if key in table:
-            out = pattern.sub(table[key], out)
+    out = _TRIM_RE.sub("", text) if card_text else text
+    if card_text:
+        for pattern, key in _LEGACY:
+            if key in table:
+                out = pattern.sub(lambda _m, value=table[key]: value, out)
 
     def _sub(m: "re.Match") -> str:
         name = m.group(1).lower()
@@ -71,18 +86,27 @@ def expand_macros(text: str, table: Dict[str, str]) -> str:
 
 
 def expand_messages(messages, table: Dict[str, str]):
-    """就地展开一个 messages 列表里所有 content 的宏，返回同一个列表。"""
+    """Expand macros in every message content in place and return the same list.
+
+    System messages (card content) get the full table. User and assistant messages only get
+    {{char}} and {{user}}: models copy those from imported cards into their replies, while other
+    macros or tags in chat text are usually templates or code typed on purpose.
+    """
+    names_only = {key: table[key] for key in ("char", "user") if key in table}
     for msg in messages:
         content = msg.get("content")
         if isinstance(content, str) and content:
-            expanded = expand_macros(content, table)
+            if msg.get("role") == "system":
+                expanded = expand_macros(content, table)
+            else:
+                expanded = expand_macros(content, names_only, card_text=False)
             if expanded != content:
                 msg["content"] = expanded
     return messages
 
 
 def contains_macros(text: str) -> bool:
-    """是否含可展开的宏（供诊断/统计用，不改动文本）。"""
+    """Whether the text contains expandable macros (for diagnostics; the text is not modified)."""
     if not text:
         return False
     if any(p.search(text) for p, _ in _LEGACY):

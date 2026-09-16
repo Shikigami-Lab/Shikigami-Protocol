@@ -45,8 +45,7 @@ async def get_emotion_keys(request: Request):
     """Ordered emotion keys for settings UI ."""
     from src.config.emotion_keys import emotion_keys_for_api
 
-    public_mode = True  # [emotion_keys]
-    return {"keys": emotion_keys_for_api(public_mode=public_mode)}
+    return {"keys": emotion_keys_for_api()}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,6 +199,16 @@ async def update_llm_preset(name: str, request: Request, body: LLMPresetBody):
     if name in config.llm_presets:
         existing_key = config.llm_presets[name].get("api_key", "")
     final_key = existing_key if body.api_key is None else body.api_key
+
+    # Keeping the stored key while base_url changes would send that key to the new endpoint on the
+    # next call, so anyone able to reach this API could point a preset at a server they control.
+    # Changing base_url requires entering the key again (or clearing it explicitly).
+    existing_base_url = (config.llm_presets.get(name) or {}).get("base_url", "")
+    if body.api_key is None and existing_key and (body.base_url or "") != (existing_base_url or ""):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter the API key again to change base_url — the stored key is not reused for a new endpoint.",
+        )
 
     old_name = name  # remember original name for env var migration
 
@@ -1330,12 +1339,14 @@ class ProfileWizardBody(BaseModel):
 
 
 def _prepare_llm_json(response: str):
-    """把 LLM 原始输出整理成可解析的 JSON 文本。
+    """Turn a raw LLM reply into text that json.loads can parse.
 
-    返回 str 表示可以继续 json.loads；返回 dict 表示已构成错误响应，调用方直接返回。
+    Returns a str to continue with json.loads, or a dict that is already an error
+    response for the caller to return as-is.
 
-    空响应与 LLM 层错误此前会一路走到 json.loads，报出
-    「Expecting value: line 1 column 1」，把「模型什么都没输出」误导成「JSON 格式不对」。
+    Empty replies and LLM-layer errors are reported explicitly; otherwise they surface
+    as "Expecting value: line 1 column 1", which reads like a JSON format problem when
+    the model actually produced nothing.
     """
     raw = (response or "").strip()
     if not raw:
@@ -1348,12 +1359,43 @@ def _prepare_llm_json(response: str):
     if raw.startswith("[LLM Error:"):
         return {"ok": False, "error": f"LLM 调用失败：{raw[:300]}", "raw": raw[:1200]}
 
-    # 只剥「整段被 fence 包裹」的外层。此前用非贪婪的 re.search，正文内部若也含
-    # ``` 就会截到第一对反引号之间，后面内容全部丢失。
-    m = re.match(r"^```(?:json)?[ \t]*\r?\n?([\s\S]*?)\r?\n?```$", raw)
-    if m:
-        raw = m.group(1).strip()
-    return raw
+    return _extract_json_text(raw)
+
+
+def _extract_json_text(raw: str) -> str:
+    """Pick the JSON object out of a reply that may wrap it in a code fence or prose.
+
+    Candidates, in order: the whole reply as one fenced block; a fenced block with prose
+    around it (matched up to the last closing fence, so fences inside JSON strings survive);
+    the reply itself. Each candidate is tried whole, then from its first "{" with whatever
+    follows the object ignored (trailing prose, a second fenced block). Raw newlines inside
+    strings are accepted, so callers parse the result with strict=False. If nothing parses,
+    the first candidate is returned so the caller reports the JSON error.
+    """
+    decoder = json.JSONDecoder(strict=False)
+    candidates = []
+    whole = re.match(r"^```(?:json)?[ \t]*\r?\n?([\s\S]*?)\r?\n?```$", raw)
+    if whole:
+        candidates.append(whole.group(1).strip())
+    embedded = re.search(r"```(?:json)?[ \t]*\r?\n([\s\S]*)\r?\n[ \t]*```", raw)
+    if embedded:
+        candidates.append(embedded.group(1).strip())
+    candidates.append(raw)
+    for candidate in candidates:
+        try:
+            decoder.decode(candidate)
+            return candidate
+        except ValueError:
+            pass
+        start = candidate.find("{")
+        if start < 0:
+            continue
+        try:
+            _, end = decoder.raw_decode(candidate, start)
+            return candidate[start:end]
+        except ValueError:
+            continue
+    return candidates[0]
 
 
 @router.post("/profiles/wizard")
@@ -1373,9 +1415,8 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
         raise HTTPException(status_code=503, detail="No LLM preset configured")
 
     provider = get_provider(preset)
-    public_mode = True  # [wizard]
     locale = get_locale()
-    emotion_keys = emotion_keys_csv_for_wizard(public_mode=public_mode)
+    emotion_keys = emotion_keys_csv_for_wizard()
 
     _extra_zh = ""
     _extra_en = ""
@@ -1524,7 +1565,7 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
         if isinstance(raw, dict):
             return raw
 
-        profile_data = json.loads(raw)
+        profile_data = json.loads(raw, strict=False)
         return {"ok": True, "profile": profile_data, "preset_used": preset_name}
     except json.JSONDecodeError as e:
         return {"ok": False, "error": f"LLM output was not valid JSON: {e}", "raw": response[:500]}
@@ -1731,10 +1772,9 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
         raise HTTPException(status_code=503, detail="No LLM preset configured")
 
     provider = get_provider(preset)
-    public_mode = True  # [autofill]
     from src.config.prompt_loader import get_locale
     locale = get_locale()
-    emotion_keys = emotion_keys_csv_for_wizard(public_mode=public_mode)
+    emotion_keys = emotion_keys_csv_for_wizard()
 
     allowed = _autofill_allowed_top_keys(body.scopes or None)
     if not allowed:
@@ -1821,7 +1861,7 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
         if isinstance(raw, dict):
             return raw
 
-        patch_raw = json.loads(raw)
+        patch_raw = json.loads(raw, strict=False)
         if not isinstance(patch_raw, dict):
             return {"ok": False, "error": "LLM output was not a JSON object", "raw": response[:1200]}
 
@@ -3260,14 +3300,19 @@ async def extract_persona_anchor(profile_id: str, _body: PersonaEvolutionAnchorB
 
     persona_name = card.get("display_name") or card.get("name") or profile_id
     app = request.app
-    from src.core.persona_evolution import extract_anchor
+    from src.core.persona_evolution import _load_profile_card, _save_profile_card, extract_anchor
     anchor = await extract_anchor(persona_name, base, style, app, profile_id=profile_id)
     if not anchor:
         raise HTTPException(status_code=500, detail="anchor extraction failed")
 
-    card.setdefault("persona_evolved", {})["core_anchor"] = anchor
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(card, f, ensure_ascii=False, indent=2)
+    # Reload before writing: a portrait refresh or an evolution may have saved the card during the call
+    latest = _load_profile_card(profile_id)
+    if not latest:
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    evolved = latest.get("persona_evolved") or {}
+    evolved["core_anchor"] = anchor
+    latest["persona_evolved"] = evolved
+    _save_profile_card(profile_id, latest)
 
     return {"ok": True, "core_anchor": anchor}
 
@@ -3281,6 +3326,7 @@ class PersonaEvolutionSaveBody(BaseModel):
     min_interval_turns: Optional[int] = None
     max_evolution_facts: Optional[int] = None
     max_evolution_conv_turns: Optional[int] = None
+    baseline_review_interval: Optional[int] = None
 
 
 @router.put("/profiles/{profile_id}/persona_evolution")
@@ -3307,6 +3353,8 @@ async def save_persona_evolution(profile_id: str, body: PersonaEvolutionSaveBody
         card["persona_evolved"]["max_evolution_facts"] = max(5, body.max_evolution_facts)
     if body.max_evolution_conv_turns is not None:
         card["persona_evolved"]["max_evolution_conv_turns"] = max(0, body.max_evolution_conv_turns)
+    if body.baseline_review_interval is not None:
+        card["persona_evolved"]["baseline_review_interval"] = max(0, min(50, body.baseline_review_interval))
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(card, f, ensure_ascii=False, indent=2)
@@ -3363,8 +3411,13 @@ async def get_user_portrait(profile_id: str):
         card = json.load(f)
     portrait = card.get("user_portrait") or {}
     from src.config.profile_loader import DEFAULT_USER_PORTRAIT_CONFIG
-    cfg = card.get("user_portrait_config") or dict(DEFAULT_USER_PORTRAIT_CONFIG)
-    from src.core.user_portrait import get_changelog
+    cfg = {**DEFAULT_USER_PORTRAIT_CONFIG, **(card.get("user_portrait_config") or {})}
+    from src.core.user_portrait import (
+        get_changelog,
+        list_contextual_details,
+        recent_context_status,
+        recent_context_ttl_hours,
+    )
     changelog_count = len(get_changelog(storage_root))
     address_block = portrait.get("address_forms") or {}
     return {
@@ -3375,6 +3428,10 @@ async def get_user_portrait(profile_id: str):
         "changelog_count": changelog_count,
         "address_forms": [f for f in (address_block.get("forms") or [])
                           if isinstance(f, dict) and f.get("form")],
+        # The layers sent to the chat model besides the stable portrait: recent context
+        # (with its expiry, as the prompt applies it) and keyword-triggered details.
+        "recent_context": recent_context_status(portrait, recent_context_ttl_hours(cfg), time.time()),
+        "contextual_details": list_contextual_details(portrait),
     }
 
 
@@ -3384,12 +3441,36 @@ class UserPortraitAddressDeleteBody(BaseModel):
 
 @router.post("/profiles/{profile_id}/user_portrait/address_forms/delete")
 async def delete_user_portrait_address_form(profile_id: str, body: UserPortraitAddressDeleteBody):
-    """删除一个识别到的称呼（纠正误识别；这是称呼表唯一的删除入口）。"""
+    """Delete one detected form of address (corrects a misdetection; the only way to remove one)."""
     path, _ = _portrait_paths(profile_id)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
     from src.core.user_portrait import delete_address_form
     return {"ok": delete_address_form(profile_id, body.form)}
+
+
+@router.post("/profiles/{profile_id}/user_portrait/recent_context/clear")
+async def clear_user_portrait_recent_context(profile_id: str):
+    """Clear the portrait's recent-context layer so it is no longer sent to the model."""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import clear_recent_context
+    return {"ok": clear_recent_context(profile_id)}
+
+
+class UserPortraitDetailDeleteBody(BaseModel):
+    summary: str = ""
+
+
+@router.post("/profiles/{profile_id}/user_portrait/contextual_details/delete")
+async def delete_user_portrait_contextual_detail(profile_id: str, body: UserPortraitDetailDeleteBody):
+    """Delete one contextual detail, identified by its summary."""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import delete_contextual_detail
+    return {"ok": delete_contextual_detail(profile_id, body.summary)}
 
 
 class UserPortraitEditBody(BaseModel):

@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20260612a" />
-  <link rel="stylesheet" href="css/settings.css?v=20260828c" />
+  <link rel="stylesheet" href="css/styles.css?v=20260916a" />
+  <link rel="stylesheet" href="css/settings.css?v=20260916a" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260612b"></script>
+  <script src="js/i18n.js?v=20260916a"></script>
 </head>
 <body>
 
@@ -806,7 +806,7 @@
           <span class="slash-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
           <span class="slash-desc">{{ t(c.descKey) }}</span>
         </div>
-        <div class="slash-foot">{{ t('slashSuggestHint') }}</div>
+        <div class="slash-foot">{{ slashSuggest.mode === 'token' ? t('slashSuggestHint') : t('slashSuggestHintSend') }}</div>
       </div>
       <div v-if="pendingScreenshot" class="pending-image-bar">
         <span class="pending-image-label">{{ t('pendingImageLabel') }}</span>
@@ -2303,6 +2303,17 @@
                   </label>
                   <span style="font-size:11px;color:var(--text-secondary);line-height:1.45;flex:1;min-width:200px;">{{ t('hintPromptAutofillToolbar') }}</span>
                   <button v-if="promptAutofillErrorRaw" type="button" class="s-btn s-btn-secondary" style="font-size:11px;padding:3px 8px;" @click="promptAutofillShowDebug = !promptAutofillShowDebug">{{ promptAutofillShowDebug ? t('lblSegCollapse') : t('lblSegExpand') }} {{ t('lblPromptAutofillDebug') }}</button>
+                  <!-- Names the model autofill runs on, using the backend's rule: the analysis model when it is
+                       enabled and assigned, otherwise the active chat model. Without this, users switch the
+                       chat model after a content-filter refusal and nothing changes. -->
+                  <p class="form-hint" style="flex-basis:100%;margin:0;">
+                    <template v-if="autofillUsesAnalysisModel()">
+                      {{ locale === 'en' ? 'Runs on the auxiliary (analysis) model: ' : '使用辅助模型（analysis）：' }}<b>{{ analysisModelPreset }}</b>{{ locale === 'en' ? '. ' : '。' }}{{ t('hintAutofillAnalysisModel') }}
+                    </template>
+                    <template v-else>
+                      {{ locale === 'en' ? 'Runs on the active chat model' : '使用激活的聊天模型' }}<template v-if="llmActivePreset">{{ locale === 'en' ? ': ' : '：' }}<b>{{ llmActivePreset }}</b></template>{{ locale === 'en' ? '. ' : '。' }}{{ t('hintAutofillActiveModel') }}
+                    </template>
+                  </p>
                 </div>
                 <div v-if="promptAutofillShowDebug && promptAutofillErrorRaw" class="form-field" style="margin-top:-6px;margin-bottom:14px;">
                   <textarea class="form-input" readonly rows="6" style="font-size:11px;font-family:monospace;line-height:1.4;resize:vertical;">{{ promptAutofillErrorRaw }}</textarea>
@@ -2343,6 +2354,12 @@
                              v-model.number="personaEvolutionForm.max_evolution_conv_turns" />
                     </div>
                     <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintEvolutionContext') }}</p>
+                    <div class="param-row" style="margin-top:4px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblBaselineReviewInterval') }}</span>
+                      <input type="number" class="seg-num-input" min="0" max="50" step="1" style="width:72px;"
+                             v-model.number="personaEvolutionForm.baseline_review_interval" />
+                    </div>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintBaselineReviewInterval') }}</p>
 
                     <!-- 核心锚点 -->
                     <div class="section-divider">{{ t('lblCoreAnchor') }}</div>
@@ -2654,7 +2671,7 @@
                   <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="userPortraitForm.enabled"></toggle-row>
 
                   <div v-show="userPortraitForm.enabled" style="margin-top:12px;">
-                    <!-- AI 识别到的称呼：与画像正文分开维护，只累加不遗忘 -->
+                    <!-- Detected forms of address: kept apart from the portrait text; they only accumulate and are never forgotten -->
                     <div v-show="userPortraitForm.address_forms_enabled" style="margin-bottom:14px;">
                       <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'How they address you' : '他这样称呼你' }}</div>
                       <p class="form-hint" style="margin:0 0 8px 0;">
@@ -2686,6 +2703,42 @@
                       &nbsp;·&nbsp; {{ locale === 'en' ? 'Refreshes' : '累计' }}: {{ userPortraitForm.refresh_count }}
                       &nbsp;·&nbsp; {{ locale === 'en' ? 'History' : '历史' }}: {{ userPortraitForm.changelog_count }}
                     </p>
+
+                    <!-- Recent context: short-lived layer sent with every chat until it expires. Read-only here, but can be cleared. -->
+                    <div style="margin-bottom:14px;">
+                      <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Recent context' : '近期状态' }}</div>
+                      <p class="form-hint" style="margin:0 0 8px 0;">{{ t('hintPortraitRecentContext') }}</p>
+                      <template v-if="userPortraitRecentContext.content">
+                        <div class="portrait-layer-text" :class="{ 'is-expired': userPortraitRecentContext.expired }">{{ userPortraitRecentContext.content }}</div>
+                        <div class="portrait-layer-meta">
+                          <span>
+                            <template v-if="userPortraitRecentContext.updated_at">{{ locale === 'en' ? 'Updated' : '更新于' }}: {{ formatPortraitTime(userPortraitRecentContext.updated_at) }} &nbsp;·&nbsp; </template>
+                            <template v-if="userPortraitRecentContext.expired">{{ locale === 'en' ? 'Expired, no longer sent to the model' : '已过期，不再发送给模型' }}</template>
+                            <template v-else-if="userPortraitRecentContext.expires_at">{{ locale === 'en' ? 'Expires' : '过期时间' }}: {{ formatPortraitTime(userPortraitRecentContext.expires_at) }}</template>
+                            <template v-else>{{ locale === 'en' ? 'Does not expire' : '不会过期' }}</template>
+                          </span>
+                          <button class="s-btn s-btn-secondary" @click="clearUserPortraitRecentContext()">{{ locale === 'en' ? 'Clear' : '清除' }}</button>
+                        </div>
+                      </template>
+                      <p v-else class="form-hint" style="margin:0;">{{ locale === 'en' ? 'No recent context.' : '暂无近期状态。' }}</p>
+                    </div>
+
+                    <!-- Topic details: each one is sent only when the conversation mentions one of its keywords. -->
+                    <div style="margin-bottom:14px;">
+                      <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Topic details' : '按需细节' }}</div>
+                      <p class="form-hint" style="margin:0 0 8px 0;">{{ t('hintPortraitContextualDetails') }}</p>
+                      <div v-if="userPortraitContextualDetails.length" class="portrait-detail-list">
+                        <div v-for="(d, i) in userPortraitContextualDetails" :key="i + ':' + d.summary" class="portrait-detail-item">
+                          <div class="portrait-detail-body">
+                            <div class="portrait-detail-summary">{{ d.summary }}</div>
+                            <div v-if="d.keywords.length" class="portrait-detail-keywords">{{ d.keywords.join(' · ') }}</div>
+                          </div>
+                          <button class="portrait-detail-del" :title="locale === 'en' ? 'Remove' : '删除'"
+                                  @click="deleteUserPortraitContextualDetail(d.summary)">✕</button>
+                        </div>
+                      </div>
+                      <p v-else class="form-hint" style="margin:0;">{{ locale === 'en' ? 'No topic details yet.' : '暂无按需细节。' }}</p>
+                    </div>
 
                     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
                       <button class="s-btn" :disabled="userPortraitRefreshing" @click="refreshUserPortrait()">
@@ -4586,7 +4639,7 @@
               </div>
             </div>
 
-            <!-- 记忆变更历史（默认折叠，展开后限高滚动，避免挤占下方事实列表） -->
+            <!-- Memory change history: collapsed by default; when expanded it scrolls at a fixed height so the fact list below stays visible -->
             <div class="mem-changelog">
               <div class="mem-diary-preview-title mem-changelog-toggle"
                    @click="memShowChangelog = !memShowChangelog">
@@ -5262,7 +5315,7 @@
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20260518i"></script>
 <script src="js/components.js?v=20260518i"></script>
-<script src="js/settings.js?v=20260828b"></script>
-<script src="js/app.js?v=20260828a"></script>
+<script src="js/settings.js?v=20260916a"></script>
+<script src="js/app.js?v=20260916a"></script>
 </body>
 </html>
