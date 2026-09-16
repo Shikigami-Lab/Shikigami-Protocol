@@ -106,7 +106,7 @@ Full persona files: `profiles/example_luna.json` / `profiles/example_luna_en.jso
 ## ❌ What this is not
 
 - **Not your personal assistant bot.** No desktop control, browser automation, or multi-step agentic workflows. For what *is* included (companion tools vs. not), see the **Companion tools** row above and [Features](#features).
-- **Not a stable productivity machine.** The emotion engine means your companion can turn anxious, drained, or withdrawn. If you want a stateless Q&A box to review code, just use ChatGPT.
+- **Not a stable productivity machine.** The emotion engine means the character can turn anxious, drained, or withdrawn. If you want a stateless Q&A box to review code, just use ChatGPT.
 - **Not a plug-and-play cloud app.** You supply the API keys or local model. Python environment or Docker required.
 
 <a id="quick-start"></a>
@@ -256,7 +256,8 @@ Characters that speak in their own voice — and actually hear you.
 
 The character that comes back a month later is not the same one you met on day one — and that is by design.
 
-- **Memory-driven reconstruction**: every N conversation turns, the AI rewrites `base_prompt` + `style_constraint` based on accumulated facts and affinity state. No manual editing required.
+- **Memory-driven reconstruction**: every N conversation turns, the AI reviews `base_prompt` + `style_constraint` against accumulated facts and affinity state. No manual editing required.
+- **Conservative by design**: at most 0–2 changes per round, each backed by evidence that holds across conversations; a round with too little evidence is skipped instead of forcing a change. Every 3rd evolution (configurable, 0 = off) rebuilds on the original persona and keeps only changes with lasting evidence. Original section headings are preserved, and a persona that grows past its length cap gets compressed.
 - **Core anchor**: a set of immutable trait statements (e.g. *"hides warmth behind distance; never admits she cares first"*) passed as a hard constraint on every rewrite — preventing the RLHF drift that turns characters into polite customer-service bots over time.
 - **Original preserved**: the user-authored original is kept read-only, always visible. Evolution writes to a parallel `persona_evolved` field; the original is untouched.
 - **Full audit trail**: per-run changelog with change summary, rationale, and one-click rollback to any prior version.
@@ -268,7 +269,7 @@ The character that comes back a month later is not the same one you met on day o
 - **Lorebook** — keyword-triggered world entries inject lore, setting facts, or scenario rules into the prompt at the right moment. Per-entry modes: `keyword`, `constant`, or `inherit`.
 - **AI persona autofill** — generates emotion descriptions, reflection config, memory config, and core anchor from `base_prompt` in one click.
 - **Group chat** — multiple personas in one session, streamed with per-character attribution.
-- **Commands** — `/fact`, `/recall`, `/memory`, `/search`, `/todo`, `/timer`, `/help`, plus natural language triggers that activate prompt segments by keyword matching.
+- **Commands** — `/fact`, `/recall`, `/memory`, `/search`, `/todo`, `/timer`, `/topic`, `/help`, plus natural language triggers that activate prompt segments by keyword matching. `/topic [trend|recall|life|self|random]` asks the character to bring up a fresh topic right away, optionally from a given source; bare requests like "change the topic" or "anything new?" trigger it too.
 
 ### Core config (`config/app.yaml`)
 
