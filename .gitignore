@@ -1,10 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# 公开仓库专用 .gitignore（由 scripts/public_overlay 覆盖到同步目标）
-# 目的：防止 .env、运行数据、本地人格与模型等误入 git，避免私库信息泄漏。
-# 私库根目录 .gitignore 会先于 overlay 复制；本文件在 sync_public 最后一步覆盖同名项。
+# Keep secrets, runtime data, local profiles and model weights out of git.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── 密钥与环境变量（勿提交；仅 .env.example 可公开）──────────────────────────
+# ── Secrets and environment (only .env.example is tracked) ───────────────────
 .env
 .env.*
 !.env.example
@@ -23,14 +21,15 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# ── 运行时数据（与 verify_public_tree 禁止项一致；勿提交）────────────────────
+# ── Runtime data ─────────────────────────────────────────────────────────────
 data/
 sessions/
 groups/
 backups/
 Voices/
 
-# ── 人格目录：仅保留仓库内几个示例 JSON；本地运行产生的子目录 / DB 一律忽略 ──
+# ── Profiles: only the bundled example JSON files are tracked; per-profile ───
+# ── runtime folders and databases are always ignored ─────────────────────────
 profiles/*/
 profiles/*.json
 !profiles/example_luna.json
@@ -38,33 +37,33 @@ profiles/*.json
 !profiles/example_mochi.json
 !profiles/example_mochi_en.json
 
-# ── SQLite / Chroma / 向量库（可能在 profiles 下）────────────────────────────
+# ── SQLite / Chroma / vector stores (may live under profiles/) ───────────────
 *.db
 *.db-shm
 *.db-wal
 **/chroma_db/
 
-# ── 大模型与权重（按需本地下载）──────────────────────────────────────────────
+# ── Models and weights (downloaded locally on demand) ────────────────────────
 models/
 *.bin
 *.safetensors
 
-# ── Node / Electron 构建 ───────────────────────────────────────────────────────
+# ── Node / Electron builds ───────────────────────────────────────────────────
 node_modules/
 dist/
 release/
 out/
 
-# ── 可能含本机路径或会话 id 的运行时配置 ─────────────────────────────────────
+# ── Runtime config that may contain local paths or session ids ───────────────
 config/app.yaml
 !config/app.yaml.example
 config/sessions_meta.json
 config/ui_prefs.json
 
-# ── Electron：启动时由 Python 写入 ───────────────────────────────────────────
+# ── Electron: written by Python during startup ───────────────────────────────
 startup_progress.json
 
-# ── scripts：默认忽略（私库同步工具等不上传），以下例外可进公开仓库 ─────────────
+# ── scripts: ignored by default; only the entries below are tracked ──────────
 scripts/*
 !scripts/start_gptsovits.bat
 !scripts/start_gptsovits.sh
@@ -72,21 +71,17 @@ scripts/*
 !scripts/build_binary.py
 !scripts/setup_wizard_helper.py
 
-# ── 日志 ───────────────────────────────────────────────────────────────────────
+# ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 **/logs/
 
-# ── IDE / 系统 ───────────────────────────────────────────────────────────────
+# ── IDE / OS / build leftovers ───────────────────────────────────────────────
 .vscode/
 .idea/
 .cursor/
 *.swp
 .DS_Store
 Thumbs.db
-/.tmp.driveupload
-/.tmp.drivedownload
-CLAUDE.md
-/docs/private
 /build
 server.spec
 server.exe
@@ -96,8 +91,6 @@ python_embed.zip
 get-pip.py
 user_packages/
 /assets/readme/raw
-/.claude
-.claude/settings.json
 test_models.py
 test_models_results.md
 test_models_lmstudio.py

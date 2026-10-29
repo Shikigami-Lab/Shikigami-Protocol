@@ -13,8 +13,8 @@ Response:
         "session_id": "abc123",
         "total": 11582,
         "messages": [
-            {"role": "user",      "content": "...", "timestamp": 1234567890.0, "sender": "用户"},
-            {"role": "assistant", "content": "...", "timestamp": 1234567891.5, "sender": "电"},
+            {"id": 1, "role": "user",      "content": "...", "timestamp": 1234567890.0, "sender": "用户"},
+            {"id": 2, "role": "assistant", "content": "...", "timestamp": 1234567891.5, "sender": "电"},
             ...
         ]
     }
@@ -22,7 +22,6 @@ Response:
 """
 
 import logging
-from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -42,10 +41,8 @@ async def get_session_history(
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
     store = session.conversation_store
-    all_msgs = store.get_all()
-    total = len(all_msgs)
-    subset = all_msgs[-limit:] if limit > 0 else all_msgs
-    messages = [asdict(m) for m in subset]
+    total = store.count_all()
+    messages = store.get_page_with_id(limit, 0) if limit > 0 else store.get_all_with_id()
     return {"session_id": session_id, "total": total, "messages": messages}
 
 

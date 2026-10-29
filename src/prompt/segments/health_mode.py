@@ -1,4 +1,4 @@
-"""健康模式 segment — 公开版 overlay：默认视为开启（与私库源文件不同，仅写入公开同步目标目录）。"""
+"""Health mode segment: keeps replies family-friendly and refuses harmful requests."""
 from __future__ import annotations
 
 from src.config.prompt_loader import get_prompt, get_locale
@@ -9,12 +9,12 @@ from src.prompt.registry import register
 @register
 class HealthModeSegment(PromptSegment):
     segment_id = "health_mode"
-    priority = 2  # 紧接 persona(0) 之后，优先于时间与记忆等上下文
+    priority = 2  # right after persona (0), ahead of time and memory context
     label = "健康模式"
     description = "启用后约束回复为全年龄友好、拒绝有害与违规内容，适用于对话与主动发言"
     is_core = False
-    default_enabled = True  # 公开发行：默认开启；pipeline 在 public_mode 下亦强制启用
-    inject_into = "chat"  # 普通聊天；ASE 走主路 prompt 已包含
+    default_enabled = True
+    inject_into = "chat"  # regular chat; the ASE prompt is built through the chat path as well
 
     default_trigger_mode = "always"
 
@@ -22,7 +22,7 @@ class HealthModeSegment(PromptSegment):
         locale = get_locale()
         text = get_prompt("health_mode", locale=locale, default="")
         if not (text or "").strip():
-            # 兜底（YAML 缺失时）
+            # Fallback when the YAML prompt is missing
             text = (
                 "[Healthy & safe reply mode] Keep replies family-friendly; refuse harmful or illegal requests; stay in character."
                 if locale == "en"

@@ -27,6 +27,73 @@ function getWsUrl() {
 window.getBaseUrl = getBaseUrl;
 window.getWsUrl = getWsUrl;
 
+// ── Chat command registry: the single source for the ⌘ panel and inline "/" suggestions ──
+// Trailing space in insert = takes an argument; run: true = no argument, runs on click; kw = zh/en search words
+const CHAT_COMMANDS = [
+  { insert: '/topic',          argKey: '',                   descKey: 'cmdTopicDesc',        groupKey: 'commandsGroupTopic',  run: true,  kw: 'topic new fresh 话题 新鲜 趋势' },
+  { insert: '/fact list',      argKey: '',                   descKey: 'cmdFactListDesc',     groupKey: 'commandsGroupMemory', run: true,  kw: 'fact list 事实 列出 置顶' },
+  { insert: '/fact add ',      argKey: 'cmdFactAddArg',      descKey: 'cmdFactAddDesc',      groupKey: 'commandsGroupMemory', run: false, kw: 'fact add 记住 添加 事实' },
+  { insert: '/fact delete ',   argKey: 'cmdFactDeleteArg',   descKey: 'cmdFactDeleteDesc',   groupKey: 'commandsGroupMemory', run: false, kw: 'fact delete 删除 忘记' },
+  { insert: '/recall ',        argKey: 'cmdRecallArg',       descKey: 'cmdRecallDesc',       groupKey: 'commandsGroupMemory', run: false, kw: 'recall 回忆 搜索 记忆' },
+  { insert: '/memory status',  argKey: '',                   descKey: 'cmdMemoryStatusDesc', groupKey: 'commandsGroupMemory', run: true,  kw: 'memory status 记忆 状态' },
+  { insert: '/todo list',      argKey: '',                   descKey: 'cmdTodoListDesc',     groupKey: 'commandsGroupTodo',   run: true,  kw: 'todo list 待办 列出' },
+  { insert: '/todo add ',      argKey: 'cmdTodoAddArg',      descKey: 'cmdTodoAddDesc',      groupKey: 'commandsGroupTodo',   run: false, kw: 'todo add 待办 添加' },
+  { insert: '/todo complete ', argKey: 'cmdTodoCompleteArg', descKey: 'cmdTodoCompleteDesc', groupKey: 'commandsGroupTodo',   run: false, kw: 'todo complete 待办 完成' },
+  { insert: '/todo delete ',   argKey: 'cmdTodoDeleteArg',   descKey: 'cmdTodoDeleteDesc',   groupKey: 'commandsGroupTodo',   run: false, kw: 'todo delete 待办 删除' },
+  { insert: '/timer ',         argKey: 'cmdTimerArg',        descKey: 'cmdTimerDesc',        groupKey: 'commandsGroupTimer',  run: false, kw: 'timer 计时 倒计时 提醒' },
+  { insert: '/timer list',     argKey: '',                   descKey: 'cmdTimerListDesc',    groupKey: 'commandsGroupTimer',  run: true,  kw: 'timer list 计时 列出' },
+  { insert: '/timer stop ',    argKey: 'cmdTimerStopArg',    descKey: 'cmdTimerStopDesc',    groupKey: 'commandsGroupTimer',  run: false, kw: 'timer stop 计时 停止' },
+  { insert: '/search ',        argKey: 'cmdSearchArg',       descKey: 'cmdSearchDesc',       groupKey: 'commandsGroupSearch', run: false, kw: 'search 搜索 查' },
+  { insert: '/help',           argKey: '',                   descKey: 'cmdHelpDesc',         groupKey: 'commandsGroupOther',  run: true,  kw: 'help 帮助 命令' },
+];
+
+/**
+ * Inline "/" suggestions for the chat input, derived from CHAT_COMMANDS.
+ * Returns { mode, items }; mode decides what Enter does:
+ *   'token'    Still typing the command token ("/rec", or "/rec " with nothing after it).
+ *              Keyword filter over name, keywords and description; Enter completes.
+ *   'args'     The first token is a known command ("/recall", "/todo") and whitespace follows.
+ *              Only that command family is listed, matched by name prefix and never by
+ *              description words; Enter sends the text exactly as typed.
+ *   'keywords' Unknown first token followed by more words ("/ reminder"). Keyword search for
+ *              discovery; Tab or click picks a command, Enter sends the text as typed.
+ */
+function suggestSlashCommands(txt, t) {
+  if (!txt.startsWith('/') || txt.includes('\n') || txt.length > 40) return { mode: '', items: [] };
+  const [, token, gap, rest] = /^\/(\S*)(\s*)([\s\S]*)$/.exec(txt);
+  const head = '/' + token.toLowerCase();
+  const headOf = c => c.insert.split(' ')[0].toLowerCase();
+  if (gap && CHAT_COMMANDS.some(c => headOf(c) === head)) {
+    const typed = txt.toLowerCase().replace(/\s+/g, ' ');
+    const name = c => c.insert.trim().toLowerCase();
+    // leadsTo: the typed text is still a prefix of this command name (a subcommand being typed).
+    // Those rank before names that are already complete and followed by an argument.
+    const leadsTo = c => (name(c) + ' ').startsWith(typed);
+    const items = CHAT_COMMANDS
+      .filter(c => headOf(c) === head && (leadsTo(c) || typed.startsWith(name(c) + ' ')))
+      .sort((a, b) => leadsTo(b) - leadsTo(a));
+    return { mode: 'args', items: items.slice(0, 8) };
+  }
+  const words = txt.slice(1).toLowerCase().split(/\s+/).filter(Boolean);
+  // Names starting with the typed token rank before description-only hits, so an exact
+  // "/search" is not completed to /recall (whose English description mentions "search").
+  const byName = c => c.insert.toLowerCase().startsWith(head);
+  const items = CHAT_COMMANDS
+    .filter(c => words.every(w => (c.insert + ' ' + c.kw + ' ' + t(c.descKey)).toLowerCase().includes(w)))
+    .sort((a, b) => byName(b) - byName(a));
+  return { mode: rest ? 'keywords' : 'token', items: items.slice(0, 8) };
+}
+
+/** Recently used commands from localStorage; anything but an array of strings yields []. */
+function loadRecentCommands() {
+  try {
+    const list = JSON.parse(localStorage.getItem('recentCommands') || '[]');
+    return Array.isArray(list) && list.every(x => typeof x === 'string') ? list : [];
+  } catch (_) {
+    return [];   // malformed JSON or blocked storage must never stop the app from mounting
+  }
+}
+
 // Detect Electron runtime (preload.js sets window.electronAPI)
 const IS_ELECTRON = !!(window.electronAPI && window.electronAPI.isElectron);
 
@@ -55,6 +122,27 @@ const CLIENT_ID = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
 
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true });
+
+// ── External link clicks ─────────────────────────────────────────────────────
+// marked renders bare <a href="https://…"> without a target. In Electron a click navigates the
+// main window in place: the whole Vue app is replaced by the external page, and with the menu
+// bar hidden there is no way back except restarting. So every external link is handed to the
+// system browser here and the app window itself never leaves.
+// main.js's will-navigate guard is the backstop for the same problem if anything slips past this.
+// A document-level delegate instead of overriding marked's renderer.link: it does not depend on
+// the marked version (v15's link({href,title,tokens}) signature differs from older releases) and
+// it covers dynamically inserted links from any source.
+document.addEventListener('click', (e) => {
+  const a = e.target && e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href') || '';
+  // Anchors, relative paths, mailto etc. keep native behaviour (in-app links like docs-viewer use target=_blank)
+  if (!/^https?:\/\//i.test(href)) return;
+  if (a.origin === window.location.origin) return;   // same origin (local server): allow
+  e.preventDefault();
+  if (IS_ELECTRON && window.electronAPI) window.electronAPI.openExternal(href);
+  else window.open(href, '_blank', 'noopener,noreferrer');
+});
 
 // ── UI debug logger ───────────────────────────────────────────────────────────
 // Mirrors console output to data/logs/ui_debug.log via POST /debug/ui_log.
@@ -88,6 +176,11 @@ function uiWarn(prefix, msg, data) {
 
 const App = {
   mixins: [SettingsMixin],
+  // 把 t() 注入给全局组件（components.js）。子组件 inject('gt') 即可调用；
+  // 因 t() 内部读 this.locale（响应式），子组件渲染时建立依赖，切语言会重渲染。
+  provide() {
+    return { gt: this.t.bind(this) };
+  },
   data() {
     return {
       // Chat state
@@ -214,6 +307,12 @@ const App = {
       showTimerPanel: false,
       showCommandsPanel: false,
       showToolbarConfig: false,
+
+      // Command UX: inline "/" suggestions, panel search, recently used
+      slashSelIdx: 0,
+      slashDismissed: false,   // Esc hides the dropdown until the input changes again
+      cmdPanelQuery: '',
+      recentCommands: loadRecentCommands(),
 
       // Toolbar button visibility config (P5-C)
       toolbarConfig: {
@@ -392,7 +491,9 @@ const App = {
       await this.loadHistory(this.currentSessionId);
       this.subscribeEvents(this.currentSessionId);
       this.fetchStatus();
-      this._statusPollTimer = setInterval(() => this.fetchStatus(), 30000);
+      if (!this._statusPollTimer) {
+        this._statusPollTimer = setInterval(() => this.fetchStatus(), 30000);
+      }
     }
     this.statusText = this.t('statusReady');
     this.loadSystemConfig();
@@ -816,7 +917,7 @@ const App = {
         const data = await res.json();
         const msgs = (data.messages || [])
           .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '' }));
+          .map(m => ({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '' }));
         this._historyOffset = Math.max(0, (data.total || msgs.length) - msgs.length);
         this.msgDisplayCount = 60;
         this.messages = msgs;
@@ -1111,7 +1212,7 @@ const App = {
         const data = await res.json();
         const msgs = (data.messages || [])
           .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '' }));
+          .map(m => ({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '' }));
         // If history is truncated, prepend a system notice
         const total = data.total || msgs.length;
         // Store the offset so bubble-delete ops can compute the correct store index
@@ -1190,13 +1291,19 @@ const App = {
           if (data.type === 'new_message') {
             if (data.client_id === CLIENT_ID) return; /* 本端已从请求流添加，避免群聊重复 */
             // Skip ASE new_message if we already rendered it token-by-token
-            if (this._aseStreaming && data.client_id === '') return;
-            this.messages.push({ role: data.role, content: data.content, timestamp: this._now(), sender: data.sender || '' });
+            if (this._aseStreaming && data.client_id === '') {
+              const last = this.messages[this.messages.length - 1];
+              if (last && last._streaming && data.message_id != null) last.id = data.message_id;
+              return;
+            }
+            this.messages.push({ id: data.message_id, role: data.role, content: data.content, timestamp: this._now(), sender: data.sender || '' });
             // TTS for server-originated messages (system_trigger, etc.) not streamed as tokens
             if (data.role === 'assistant' && data.client_id === '' && this.ttsEnabled && data.content?.trim()) {
               this.sendToTTS(data.content);
             }
             this.$nextTick(() => this.scrollToBottom());
+          } else if (data.type === 'message_deleted') {
+            this._applyMessageDeleted(data.message_id, sessionId);
           } else if (data.type === 'timer_expired') {
             this.showToast(`⏱ 计时器「${data.label}」到时了！`);
             if (this.showTimerPanel) this.refreshTimers();
@@ -1219,6 +1326,7 @@ const App = {
       const text = (this.inputText || '').trim();
       const hasImage = !!this.pendingScreenshot;
       if ((!text && !hasImage) || this.isStreaming) return;
+      if (text.startsWith('/')) this._recordRecentCommand(text);
 
       if (this.currentGroupId) {
         await this.sendGroupMessage(text || '请根据当前画面回复', hasImage);
@@ -1233,7 +1341,8 @@ const App = {
       this._chatAbortController = new AbortController();
 
       // Show user bubble immediately (sender 与后端一致，单聊为「用户」)
-      this.messages.push({ role: 'user', content: displayText, timestamp: this._now(), is_command: displayText.startsWith('/'), sender: '用户' });
+      const localUserMessage = { role: 'user', content: displayText, timestamp: this._now(), is_command: displayText.startsWith('/'), sender: '用户' };
+      this.messages.push(localUserMessage);
       await this.$nextTick();
       this.scrollToBottom();
 
@@ -1298,6 +1407,10 @@ const App = {
             try {
               const data = JSON.parse(line.slice(6));
 
+              if (data.message_role === 'user' && data.message_id != null) {
+                localUserMessage.id = data.message_id;
+              }
+
               if (data.error) {
                 this.statusText = `${this.t('statusError')}: ${data.error}`;
                 this.isStreaming = false;
@@ -1314,7 +1427,7 @@ const App = {
               if (data.done) {
                 const finalText = this.streamingText;
                 const displayName = this.sessions.find(s => s.id === this.currentSessionId)?.display_name || '';
-                this.messages.push({ role: 'assistant', content: finalText, timestamp: this._now(), sender: displayName });
+                this.messages.push({ id: data.message_id, role: 'assistant', content: finalText, timestamp: this._now(), sender: displayName });
                 this.streamingText = '';
                 this.isStreaming = false;
                 this.statusText = this.t('statusReady');
@@ -1367,7 +1480,8 @@ const App = {
       this.groupChatStreamingSender = '';
       this._groupChatAbortController = new AbortController();
       this.statusText = this.t('statusGroupReplying');
-      this.messages.push({ role: 'user', content: displayText, timestamp: this._now(), sender: userSender });
+      const localUserMessage = { role: 'user', content: displayText, timestamp: this._now(), sender: userSender };
+      this.messages.push(localUserMessage);
       await this.$nextTick();
       this.scrollToBottom();
 
@@ -1414,6 +1528,9 @@ const App = {
             if (!line.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(line.slice(6));
+              if (data.message_role === 'user' && data.message_id != null) {
+                localUserMessage.id = data.message_id;
+              }
               if (data.error) {
                 this.statusText = `${this.t('statusError')}: ${data.error}`;
                 this.isStreaming = false;
@@ -1436,6 +1553,7 @@ const App = {
               if (data.done) {
                 if (this.streamingText.trim() || data.sender) {
                   this.messages.push({
+                    id: data.message_id,
                     role: 'assistant',
                     content: this.streamingText.trim(),
                     timestamp: this._now(),
@@ -1521,7 +1639,10 @@ const App = {
                 // Finalize streaming bubble
                 const last = this.messages[this.messages.length - 1];
                 if (last && last._streaming) delete last._streaming;
-                if (last) last.sender = this.sessions.find(s => s.id === this.currentSessionId)?.display_name || '';
+                if (last) {
+                  last.id = data.message_id;
+                  last.sender = this.sessions.find(s => s.id === this.currentSessionId)?.display_name || '';
+                }
                 if (this.ttsEnabled && streamText.trim()) this.sendToTTS(streamText);
                 setTimeout(() => { this.fetchStatus(); if (this.showCadencePanel) this.fetchUserActivity(); }, 1500);
               }
@@ -2251,21 +2372,38 @@ const App = {
       this.pendingImageType = 'screenshot';
     },
 
-    onUploadImage(event) {
-      const file = event.target.files && event.target.files[0];
+    _attachImageFile(file, imageType = 'upload') {
       if (!file || !file.type.startsWith('image/')) return;
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target && e.target.result;
         if (dataUrl) {
           this.pendingScreenshot = dataUrl;
-          this.pendingImageType = 'upload';
+          this.pendingImageType = imageType;
           this.statusText = this.locale === 'en' ? 'Image attached, will analyze on send' : '已附加图片，发送消息时将一并分析';
-          uiLog('VLM', 'image uploaded', { type: file.type });
+          uiLog('VLM', 'image attached', { type: file.type, imageType });
         }
       };
+      reader.onerror = () => {
+        this.statusText = this.locale === 'en' ? 'Failed to attach image' : '图片附加失败';
+      };
       reader.readAsDataURL(file);
+    },
+
+    onUploadImage(event) {
+      const file = event.target.files && event.target.files[0];
+      this._attachImageFile(file, 'upload');
       event.target.value = '';
+    },
+
+    onChatPaste(event) {
+      const items = Array.from((event.clipboardData && event.clipboardData.items) || []);
+      const imageItem = items.find(item => item.kind === 'file' && item.type.startsWith('image/'));
+      if (!imageItem) return;
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      this._attachImageFile(file, 'screenshot');
     },
 
     /* ─────────────────── Helpers ─────────────────── */
@@ -2330,11 +2468,86 @@ const App = {
     },
 
     handleKeydown(e) {
+      // Leave every key to the IME while a composition is active: Enter confirms the candidate
+      // and arrows move inside it. keyCode 229 also covers Safari, where the confirming keydown
+      // arrives with isComposing already false.
+      if (e.isComposing || e.keyCode === 229) return;
+      // Inline "/" suggestions: while the dropdown is open, Up/Down/Tab/Esc drive it. Enter
+      // completes only while the command token is still being typed; once an argument or search
+      // words follow, it sends the text exactly as typed (see suggestSlashCommands).
+      const { mode, items: matches } = this.slashSuggest;
+      if (matches.length) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.slashSelIdx = (this.slashSelIdx + 1) % matches.length;
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.slashSelIdx = (this.slashSelIdx - 1 + matches.length) % matches.length;
+          return;
+        }
+        if (e.key === 'Escape') {
+          this.slashDismissed = true;
+          return;
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          this.completeSlash(matches[this.slashSelIdx]);
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey && mode === 'token') {
+          const sel = matches[this.slashSelIdx];
+          if (sel && this.inputText.trim() !== sel.insert.trim()) {
+            e.preventDefault();
+            this.completeSlash(sel);
+            return;
+          }
+        }
+      }
       // Enter sends; Shift+Enter inserts newline
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.sendMessage();
       }
+    },
+
+    /** Fill in a suggested command; commands that take an argument keep a trailing space */
+    completeSlash(item) {
+      if (!item) return;
+      const typed = (this.inputText || '').toLowerCase().replace(/\s+/g, ' ');
+      const name = item.insert.trim().toLowerCase();
+      // Already typed in full with an argument after it: completing would discard the argument
+      const hasArgument = typed.startsWith(name + ' ') && typed.trim() !== name;
+      if (!hasArgument) this.inputText = item.insert;
+      this.$nextTick(() => this.$refs.chatTextarea?.focus());
+    },
+
+    /** ⌘ panel: commands without an argument run on click (in group chat they are only inserted) */
+    runCommandNow(item) {
+      if (this.isGroupChat) { this.insertCommand(item.insert); return; }
+      this.inputText = item.insert.trim();
+      this.showCommandsPanel = false;
+      this.sendMessage();
+    },
+
+    /** Record a sent command under "recently used" (localStorage, capped at 4) */
+    _recordRecentCommand(text) {
+      if (!text.startsWith('/')) return;
+      // Longest registry insert that prefixes the input (/fact add xxx → /fact add )
+      let best = null;
+      for (const c of CHAT_COMMANDS) {
+        const base = c.insert.trim();
+        if ((text === base || text.startsWith(base + ' ') || text.startsWith(c.insert)) &&
+            (!best || c.insert.length > best.insert.length)) {
+          best = c;
+        }
+      }
+      if (!best) return;
+      const prev = Array.isArray(this.recentCommands) ? this.recentCommands : [];
+      const list = [best.insert, ...prev.filter(x => x !== best.insert)].slice(0, 4);
+      this.recentCommands = list;
+      try { localStorage.setItem('recentCommands', JSON.stringify(list)); } catch (_) {}
     },
 
     /* ─────────────────── Status Panel (P4) ─────────────────── */
@@ -2605,6 +2818,7 @@ const App = {
         this.showTodosPanel = false;
         this.showTimerPanel = false;
         this.showToolbarConfig = false;
+        this.cmdPanelQuery = '';   // clear the previous search on reopen so "recently used" shows
       }
     },
 
@@ -2629,21 +2843,53 @@ const App = {
       return (this._historyOffset || 0) + absIdx - (hasNotice ? 1 : 0);
     },
 
+    _applyMessageDeleted(messageId, channelId = '') {
+      if (messageId == null) return false;
+      const before = this.messages.length;
+      const activeChannelId = this.currentGroupId ? `group:${this.currentGroupId}` : this.currentSessionId;
+      if (!channelId || channelId === activeChannelId) {
+        this.messages = this.messages.filter(m => m.id !== messageId);
+      }
+
+      if (Array.isArray(this.chatHistory)
+          && channelId
+          && channelId === this.memoryContentProfileId) {
+        const historyBefore = this.chatHistory.length;
+        this.chatHistory = this.chatHistory.filter(m => m.id !== messageId);
+        if (this.chatHistory.length < historyBefore) {
+          this.chatHistoryTotal = Math.max(0, this.chatHistoryTotal - 1);
+        }
+      }
+      return this.messages.length < before;
+    },
+
     async deleteMessage(displayIdx) {
       const absIdx = this._absoluteIdx(displayIdx);
       const msg = this.messages[absIdx];
       if (!msg) return;
-      const storeIdx = this._storeIdx(absIdx);
-      if (this.currentGroupId) {
-        try {
-          await fetch(getBaseUrl() + API_PATHS.groupMessageByStoreIdx(this.currentGroupId, storeIdx), { method: 'DELETE' });
-        } catch (_) {}
-      } else if (this.currentSessionId) {
-        try {
-          await fetch(getBaseUrl() + API_PATHS.sessionMessagesDelete(this.currentSessionId, storeIdx), { method: 'DELETE' });
-        } catch (_) {}
+      if (msg.id == null) {
+        if (this.currentGroupId) await this.loadGroupHistory(this.currentGroupId);
+        else if (this.currentSessionId) await this.loadHistory(this.currentSessionId);
+        this.showToast(this.locale === 'en'
+          ? 'Chat history was refreshed. Please delete the message again.'
+          : '聊天记录已刷新，请重新点击删除。', 'error');
+        return;
       }
-      this.messages.splice(absIdx, 1);
+
+      const channelId = this.currentGroupId ? `group:${this.currentGroupId}` : this.currentSessionId;
+      const path = this.currentGroupId
+        ? API_PATHS.groupMessageById(this.currentGroupId, msg.id)
+        : API_PATHS.sessionMessageById(this.currentSessionId, msg.id);
+      try {
+        const res = await fetch(getBaseUrl() + path, { method: 'DELETE' });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || `HTTP ${res.status}`);
+        }
+        this._applyMessageDeleted(msg.id, channelId);
+      } catch (e) {
+        this.showToast(`${this.locale === 'en' ? 'Delete failed' : '删除失败'}: ${e.message}`, 'error');
+      }
     },
 
     editMessage(displayIdx) {
@@ -2724,10 +2970,24 @@ const App = {
   },
 
   watch: {
+    inputText() {
+      // Any input change resets the selected suggestion and lifts a temporary Esc dismissal
+      this.slashSelIdx = 0;
+      this.slashDismissed = false;
+    },
     currentSessionId(newId) {
-      // Start background ASE poll (30s) as soon as a session becomes active.
-      if (newId && !this._asePollTimer) {
-        this._asePollTimer = setInterval(() => this.fetchAseStatus(), 30000);
+      // 单聊会话激活↔轮询的唯一生命周期 owner：激活时启动 status/ASE 轮询，
+      // 切到群聊(null)时停掉，避免进群再退群后 _statusPollTimer 永久失效 / _asePollTimer 泄漏。
+      if (newId) {
+        if (!this._statusPollTimer) {
+          this._statusPollTimer = setInterval(() => this.fetchStatus(), 30000);
+        }
+        if (!this._asePollTimer) {
+          this._asePollTimer = setInterval(() => this.fetchAseStatus(), 30000);
+        }
+      } else {
+        if (this._statusPollTimer) { clearInterval(this._statusPollTimer); this._statusPollTimer = null; }
+        if (this._asePollTimer) { clearInterval(this._asePollTimer); this._asePollTimer = null; }
       }
     },
     ttsEnabled(val) {
@@ -2752,6 +3012,33 @@ const App = {
     },
     isGroupChat() {
       return !!this.currentGroupId;
+    },
+    /** Inline "/" suggestion state { mode, items }, single chat only; see suggestSlashCommands() */
+    slashSuggest() {
+      if (this.isGroupChat || this.isStreaming || this.slashDismissed) return { mode: '', items: [] };
+      return suggestSlashCommands(this.inputText || '', k => this.t(k));
+    },
+    /** Inline "/" suggestions rendered above the chat input (at most 8) */
+    slashMatches() {
+      return this.slashSuggest.items;
+    },
+    /** ⌘ panel groups (with search filter), keeping the registry's group order */
+    cmdPanelGroups() {
+      const q = (this.cmdPanelQuery || '').trim().toLowerCase();
+      const groups = [];
+      for (const c of CHAT_COMMANDS) {
+        if (q && !(c.insert + ' ' + c.kw + ' ' + this.t(c.descKey)).toLowerCase().includes(q)) continue;
+        let g = groups.find(x => x.key === c.groupKey);
+        if (!g) { g = { key: c.groupKey, items: [] }; groups.push(g); }
+        g.items.push(c);
+      }
+      return groups;
+    },
+    /** Recently used command entries (most recent first) */
+    recentCommandItems() {
+      return (this.recentCommands || [])
+        .map(ins => CHAT_COMMANDS.find(c => c.insert === ins))
+        .filter(Boolean);
     },
     mainTitle() {
       return this.isGroupChat ? (this.currentGroup && this.currentGroup.display_name) || this.currentGroupId : this.currentSessionName;
@@ -2865,17 +3152,17 @@ const App = {
 
     aseOverallLabel() {
       const map = {
-        disabled:          '已禁用',
-        daily_limit:       '今日已满',
-        consecutive_limit: '等待回应',
-        waiting_silence:   '等待沉默',
-        waiting_urgency:   '紧迫度不足',
-        waiting_cooldown:  '冷却中',
-        waiting_check:     '待检测',
-        ready:             '发言中',
-        unknown:           '—',
+        disabled:          'aseOverallDisabled',
+        daily_limit:       'aseOverallDailyLimit',
+        consecutive_limit: 'aseOverallConsecutiveLimit',
+        waiting_silence:   'aseOverallWaitingSilence',
+        waiting_urgency:   'aseOverallWaitingUrgency',
+        waiting_cooldown:  'aseOverallWaitingCooldown',
+        waiting_check:     'aseOverallWaitingCheck',
+        ready:             'aseOverallReady',
       };
-      return map[this.aseStatus.overall_status] || '—';
+      const key = map[this.aseStatus.overall_status];
+      return key ? this.t(key) : '—';
     },
     aseOverallStyle() {
       const s = this.aseStatus.overall_status;
@@ -2889,4 +3176,6 @@ const App = {
 };
 
 const vueApp = Vue.createApp(App);
+// 注册全局组件（定义见 components.js）
+Object.entries(window.SK_COMPONENTS || {}).forEach(([name, def]) => vueApp.component(name, def));
 vueApp.mount('#app');

@@ -4,7 +4,7 @@ Runs a background asyncio loop that periodically calls a lightweight LLM
 to produce a per-session "inner state":
     - thought: what the AI is currently thinking about
     - urgency: 0.0–1.0 indicating desire to speak proactively
-    - topic_hint: brief label for the current context
+    - topic_anchor: specific content fragment from inputs, or empty string
 
 Key design principles:
     - Completely independent of ASE: reflection continues even if ASE is disabled
@@ -41,7 +41,7 @@ import src.prompt.segments.reflection.emotion        # noqa: F401
 import src.prompt.segments.reflection.affinity       # noqa: F401
 import src.prompt.segments.reflection.silence        # noqa: F401
 import src.prompt.segments.reflection.ase_context     # noqa: F401
-import src.prompt.segments.reflection.trend_context   # noqa: F401
+import src.prompt.segments.reflection.topic_candidates # noqa: F401
 import src.prompt.segments.reflection.proactive_log   # noqa: F401
 import src.prompt.segments.reflection.memory_facts    # noqa: F401
 import src.prompt.segments.reflection.user_engagement # noqa: F401
@@ -56,10 +56,10 @@ def _reflection_user_instruction(locale: str = None) -> str:
     return get_prompt("reflection.user_instruction", locale=locale,
                       default=(
                           "What are you thinking right now? Feel first, then fill in the JSON. "
-                          "Output only one JSON object with exactly these five English keys: "
-                          "thought, style_hint, urgency, topic_hint, next_reflection_in. Nothing else, no non-English key names."
+                          "Output only one JSON object with exactly these six English keys: "
+                          "thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle. Nothing else, no non-English key names."
                           if locale == "en"
-                          else "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这五个英文键：thought, style_hint, urgency, topic_hint, next_reflection_in。不要其他内容、不要中文键名。"
+                          else "此刻你在想什么？先感受，再填入 JSON。仅输出一个 JSON 对象，必须只包含这六个英文键：thought, style_hint, urgency, next_reflection_in, topic_pick, topic_angle。不要其他内容、不要中文键名。"
                       ))
 
 
@@ -101,26 +101,6 @@ def _build_system_prompt(
                   persona_section=persona_section,
                   notes_section=notes_section,
                   ase_section=ase_section)
-
-
-def _format_silence_tier(silent_seconds: float, locale: str = None) -> str:
-    """用户沉默时长：5分钟内=才说过话，之后按分钟、小时、天递进。"""
-    if locale is None:
-        locale = get_locale()
-    if silent_seconds < 300:
-        return get_prompt("reflection.silence_tier.just_spoke", locale=locale,
-                          default=("user just spoke within 5 minutes" if locale == "en" else "5分钟之内，用户才说过话"))
-    if silent_seconds < 3600:
-        return render("reflection.silence_tier.minutes", locale=locale,
-                      default=("user has been silent for $minutes minutes" if locale == "en" else "用户已沉默 $minutes 分钟"),
-                      minutes=int(silent_seconds / 60))
-    if silent_seconds < 86400:
-        return render("reflection.silence_tier.hours", locale=locale,
-                      default=("user has been silent for $hours hours" if locale == "en" else "用户已沉默 $hours 小时"),
-                      hours=int(silent_seconds / 3600))
-    return render("reflection.silence_tier.days", locale=locale,
-                  default=("user has been silent for $days days" if locale == "en" else "用户已沉默 $days 天"),
-                  days=int(silent_seconds / 86400))
 
 
 def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> list:
@@ -171,6 +151,15 @@ def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> l
             parts.append(c.content.strip())
 
     system_content = "\n\n".join(p for p in parts if p)
+    # Segment text comes from the character card (persona, lorebook, custom segments) and may still
+    # contain {{char}}/{{user}}; the chat pipeline expands macros at its exit, so do the same here.
+    from src.prompt.macros import build_macro_table, expand_macros
+    _up = ctx.user_persona or {}
+    system_content = expand_macros(system_content, build_macro_table(
+        char_name=ctx.persona_name or "",
+        user_name=(_up.get("name") or ctx.user_name or ""),
+        persona=(_up.get("introduction") or ""),
+    ))
     locale = ctx.locale or "zh"
     return [
         {"role": "system", "content": system_content},
@@ -178,157 +167,10 @@ def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> l
     ]
 
 
-def _build_reflection_prompt(
-    recent_turns: list,
-    emotion: Optional[Dict] = None,
-    affinity: Optional[Dict] = None,
-    silent_seconds: float = 0,
-    persona_name: str = "AI",
-    persona_brief: str = "",
-    ase_context: Optional[Dict[str, Any]] = None,
-    prev_reflection: Optional[Dict[str, Any]] = None,
-    context_notes: Optional[list] = None,
-    ase_decision_context: Optional[Dict[str, Any]] = None,
-    last_user_message_time: Optional[float] = None,
-    user_name: str = "用户",
-) -> list:
-    """Build messages for reflection: 单块 system = 内置规则(persona_brief/urgency 等) + 最近对话 + 当前上下文。
-    persona_brief 与情感分类、好感度 LLM 同源：reflection_config.custom_prompt（截断见 get_persona_context_for_secondary_llm），不含 base_prompt。
-    """
-    locale = get_locale()
-    user_label = "User" if locale == "en" else "用户"
-    ctx_parts = []
-
-    # 【你上一轮自省】便于连贯与校准 urgency，减少无依据的跳变
-    if prev_reflection:
-        urgency = prev_reflection.get("urgency")
-        topic = (prev_reflection.get("topic_hint") or "").strip()
-        updated_at = prev_reflection.get("updated_at") or 0
-        if topic or urgency is not None:
-            line = get_prompt("reflection.prev_reflection_header", locale=locale,
-                              default=("[Your Last Reflection]" if locale == "en" else "【你上一轮自省】"))
-            if topic:
-                line += render("reflection.prev_topic", locale=locale,
-                               default=("Your last noted topic was: $topic" if locale == "en" else "你上次在意的话题是：$topic"), topic=topic)
-            if urgency is not None:
-                line += render("reflection.prev_urgency", locale=locale,
-                               default=("; urgency was $urgency" if locale == "en" else "；urgency 为 $urgency"), urgency=round(urgency, 1))
-            if updated_at > 0:
-                elapsed = time.time() - updated_at
-                if elapsed < 60:
-                    time_ago = render("reflection.silence_tier.just_spoke", locale=locale,
-                                      default=("less than 1 minute" if locale == "en" else "不到1分钟"))
-                elif elapsed < 3600:
-                    time_ago = render("time_context.human_delta.minutes", locale=locale,
-                                      default=("$minutes minutes" if locale == "en" else "$minutes 分钟"), minutes=int(elapsed / 60))
-                elif elapsed < 86400:
-                    time_ago = render("time_context.human_delta.hours", locale=locale,
-                                      default=("$hours hours" if locale == "en" else "$hours 小时"), hours=int(elapsed / 3600))
-                else:
-                    time_ago = render("time_context.human_delta.days", locale=locale,
-                                      default=("$days days" if locale == "en" else "$days 天"), days=int(elapsed / 86400))
-                line += render("reflection.prev_elapsed", locale=locale,
-                               default=("; $time_ago has passed since your last reflection" if locale == "en" else "；距离上次自省已经过去 $time_ago"), time_ago=time_ago)
-            ctx_parts.append(line)
-
-    # Emotion state
-    if emotion:
-        layers = emotion.get("emotion_layers") or []
-        emotion_header = get_prompt("reflection.emotion_label", locale=locale,
-                                    default=("[Current Emotion]" if locale == "en" else "【当前情感】"))
-        if layers:
-            parts = []
-            for lay in layers[:3]:
-                e = lay.get("emotion", "")
-                i = lay.get("intensity", 0.5)
-                if e:
-                    parts.append(f"{e}({int(i * 100)}%)")
-            if parts:
-                ctx_parts.append(emotion_header + ", ".join(parts))
-        else:
-            primary = emotion.get("primary_emotion", "")
-            weight = emotion.get("primary_weight", 0.5)
-            if primary:
-                if locale == "en":
-                    ctx_parts.append(f"{emotion_header} {primary} ({int(weight * 100)}%)")
-                else:
-                    ctx_parts.append(f"{emotion_header}{primary}（{int(weight * 100)}%）")
-
-    # Affinity
-    if affinity:
-        status = affinity.get("status", "")
-        ctx_parts.append(render("reflection.affinity_label", locale=locale,
-                                default=("[Affinity] ($status)" if locale == "en" else "【好感度】（$status）"), status=status))
-
-    # 用户沉默分级
-    ctx_parts.append(render("reflection.user_time_label", locale=locale,
-                            default=("[User Last Spoke] $silence" if locale == "en" else "【用户说话时间】$silence"),
-                            silence=_format_silence_tier(silent_seconds, locale)))
-
-    # 【你（AI）的主动发言】仅当「上次 ASE 后用户未回复」时注入
-    if ase_context is not None:
-        last_speak_time = ase_context.get("last_speak_time")
-        user_replied_since_last_ase = (
-            last_user_message_time is not None
-            and last_speak_time is not None
-            and last_user_message_time > last_speak_time
-        )
-        content = (ase_context.get("last_speak_content") or "").strip()
-        if content and not user_replied_since_last_ase:
-            excerpt = content[:150] + ("…" if len(content) > 150 else "")
-            ctx_parts.append(render("reflection.last_spoke_label", locale=locale,
-                                    default=("You last initiated with: \"$excerpt\"" if locale == "en" else "你上次主动说的是：「$excerpt」"), excerpt=excerpt))
-            secs = ase_context.get("seconds_since_last_speak")
-            if secs is not None:
-                ctx_parts.append(render("reflection.ase_speak_ago", locale=locale,
-                                        default=("[Your Proactive Speech] $minutes minutes since you last initiated" if locale == "en" else "【你的主动发言】距离你上次主动开口已经 $minutes 分钟"),
-                                        minutes=int(secs / 60)))
-            else:
-                ctx_parts.append(get_prompt("reflection.ase_never_spoke", locale=locale,
-                                            default=("[Your Proactive Speech] You have not yet initiated" if locale == "en" else "【你的主动发言】你尚未主动说过话")))
-            ctx_parts.append(get_prompt("reflection.ase_user_no_reply", locale=locale,
-                                        default=("Your last message was a proactive one; the user has not yet replied." if locale == "en" else "上一条消息是你主动说的，用户尚未回复。")))
-        consec = ase_context.get("consecutive_speaks", 0)
-        if consec and int(consec) > 0:
-            ctx_parts.append(render("reflection.ase_consec_speaks", locale=locale,
-                                    default=("You have initiated $consec consecutive times without a reply;" if locale == "en" else "你已连续主动发言 $consec 次，用户均未回复；"),
-                                    consec=int(consec)))
-
-    context_block = "\n\n".join(ctx_parts)
-
-    # 最近对话
-    if recent_turns:
-        turns = recent_turns[-10:]
-        lines = []
-        for m in turns:
-            sender = (m.get("sender") or "").strip()
-            content = (m.get("content") or "")[:300].strip()
-            is_human = sender == user_name or (not sender and m.get("role", "user") == "user")
-            if is_human:
-                lines.append(f"{user_label}：{content}")
-            else:
-                lines.append(f"{persona_name}：{content}")
-        dialogue_text = "\n".join(lines)
-    else:
-        dialogue_text = get_prompt("reflection.no_recent_dialogue", locale=locale,
-                                   default=("No recent conversation." if locale == "en" else "暂无最近对话。"))
-
-    prompt_base = _build_system_prompt(persona_name, persona_brief,
-                                       context_notes or [], ase_decision_context, locale)
-    dialogue_header = get_prompt("reflection.recent_dialogue_header", locale=locale,
-                                 default=("\n\n[Recent Conversation]\n" if locale == "en" else "\n\n【最近对话】\n"))
-    context_header  = get_prompt("reflection.context_header", locale=locale,
-                                 default=("\n\n[Current Context]\n" if locale == "en" else "\n\n【当前上下文】\n"))
-    system_content = prompt_base + dialogue_header + dialogue_text + context_header + context_block
-
-    return [
-        {"role": "system", "content": system_content},
-        {"role": "user", "content": _reflection_user_instruction(locale)},
-    ]
-
-
-# 合法 reflection JSON 的键（仅此六种，否则视为错误格式）
-_REFLECTION_KEYS = frozenset({"thought", "style_hint", "urgency", "topic_hint", "next_reflection_in", "speak_reason"})
+# 合法 reflection JSON 的键（多余的键视为错误格式）
+# topic_pick / topic_angle 为主动话题发现新增；topic_anchor / speak_reason 现由 topic_pick 派生（保留于集合内以兼容旧响应）
+_REFLECTION_KEYS = frozenset({"thought", "style_hint", "urgency", "topic_anchor", "next_reflection_in",
+                              "speak_reason", "topic_pick", "topic_angle"})
 _VALID_SPEAK_REASONS = frozenset({"memory_recall", "trend_share", "emotional_overflow", "silence_concern", "none"})
 
 
@@ -342,31 +184,39 @@ async def _parse_reflection_response(text: str) -> Dict[str, Any]:
     try:
         data = json.loads(text)
         if not isinstance(data, dict):
-            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": ""}
+            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": ""}
         # 若模型输出了错误 schema（如 情感/认知/意图/担忧/期待），拒绝使用并回退默认
         extra = set(data.keys()) - _REFLECTION_KEYS
         if extra and not data.get("thought"):
             logger.warning(
-                "[reflection] 忽略错误 JSON 格式（含非预期键 %s），请模型只输出 thought/style_hint/urgency/topic_hint",
+                "[reflection] 忽略错误 JSON 格式（含非预期键 %s），请模型只输出 thought/style_hint/urgency/topic_anchor",
                 list(extra)[:5],
             )
-            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": ""}
+            return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": ""}
         raw_nri = data.get("next_reflection_in")
         next_reflection_in = None
         if isinstance(raw_nri, (int, float)) and raw_nri > 0:
             next_reflection_in = int(raw_nri)
         raw_sr = str(data.get("speak_reason", "none")).strip().lower()
         speak_reason = raw_sr if raw_sr in _VALID_SPEAK_REASONS else "none"
+        # topic_pick：主动话题发现的复合 ID（source:item_id）；"null"/空/无冒号视为未选
+        raw_pick = str(data.get("topic_pick", "") or "").strip()
+        if raw_pick.lower() in ("null", "none", "") or ":" not in raw_pick:
+            topic_pick = ""
+        else:
+            topic_pick = raw_pick
         return {
             "thought": str(data.get("thought", "")).strip(),
             "style_hint": str(data.get("style_hint", "")).strip(),
             "urgency": float(max(0.0, min(1.0, data.get("urgency", 0.0)))),
-            "topic_hint": str(data.get("topic_hint", "")).strip(),
+            "topic_anchor": str(data.get("topic_anchor", "")).strip(),
             "next_reflection_in": next_reflection_in,
             "speak_reason": speak_reason,
+            "topic_pick": topic_pick,
+            "topic_angle": str(data.get("topic_angle", "")).strip(),
         }
     except Exception:
-        return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_hint": "", "next_reflection_in": None}
+        return {"thought": "", "style_hint": "", "urgency": 0.0, "topic_anchor": "", "next_reflection_in": None}
 
 
 # ── ReflectionEngine ─────────────────────────────────────────────────────────
@@ -539,7 +389,7 @@ class ReflectionEngine:
             merged = get_merged_recent_messages(
                 session, self._app, profile_data, recent_turns_n, cap=None
             )
-            # Convert to {role, content, sender} for _build_reflection_prompt; group messages get prefix in content
+            # Convert to {role, content, sender}; group messages get prefix in content
             recent = []
             for m in merged:
                 role = m.get("role") or "user"
@@ -572,7 +422,11 @@ class ReflectionEngine:
                 with open(profile_path, encoding="utf-8") as f:
                     pdata = json.load(f)
                 # 与情感分类、好感度调整同源：reflection_config.custom_prompt（截断见 persona_context）
-                persona_brief = get_persona_context_for_secondary_llm(pdata)
+                from src.utils.persona_context import resolve_user_name
+                persona_brief = get_persona_context_for_secondary_llm(
+                    pdata,
+                    user_name=resolve_user_name(pdata, self._app),
+                )
         except Exception:
             pass
 
@@ -646,6 +500,14 @@ class ReflectionEngine:
         except Exception:
             pass
 
+        # 主动话题发现配置（全局 + 人格级 enabled 覆盖）
+        _td_cfg = {}
+        try:
+            from src.config.effective_config import get_effective_topic_discovery_config
+            _td_cfg = get_effective_topic_discovery_config(self._app, session.profile_id)
+        except Exception as _td_err:
+            logger.debug("[reflection] topic_discovery 配置读取失败: %s", _td_err)
+
         ctx = ReflectionBuildContext(
             profile_id=session.id,
             profile=pdata,
@@ -666,6 +528,7 @@ class ReflectionEngine:
             store=store,
             memory_manager=_mm,
             reflection_cfg=_ref_cfg,
+            topic_discovery_cfg=_td_cfg,
         )
         messages = build_reflection_messages(session.id, ctx)
 
@@ -804,14 +667,44 @@ class ReflectionEngine:
         from src.utils.engine_warnings import clear_warning
         clear_warning(self._app, "reflection")
 
+        # ── 主动话题发现：把 topic_pick 解析成 chosen_topic ──────────────────
+        # 自省只记录方向（source + item_id + angle），完整素材由 ASE 开口前现拉。
+        chosen_topic = None
+        derived_topic_anchor = result.get("topic_anchor", "")
+        derived_speak_reason = result.get("speak_reason", "none")
+        topic_pick = result.get("topic_pick", "")
+        if topic_pick:
+            from src.core.topics import SOURCE_TO_SPEAK_REASON
+            match = next((c for c in getattr(ctx, "topic_candidates", [])
+                          if getattr(c, "ref", None) == topic_pick), None)
+            if match is not None:
+                # Consecutive-pick count: rounds in a row the same source was picked (it repeats while a
+                # topic is picked but never spoken); topic_candidates uses it for the ai_self pick cooldown
+                _prev_chosen = (getattr(session, "reflection_state", None) or {}).get("chosen_topic") or {}
+                consec_picks = (int(_prev_chosen.get("consec_picks", 1)) + 1
+                                if _prev_chosen.get("source") == match.source_id else 1)
+                chosen_topic = {
+                    "source": match.source_id,
+                    "item_id": match.item_id,
+                    "angle": result.get("topic_angle", ""),
+                    "summary": match.summary,
+                    "picked_at": time.time(),
+                    "consec_picks": consec_picks,
+                }
+                derived_topic_anchor = match.summary
+                derived_speak_reason = SOURCE_TO_SPEAK_REASON.get(match.source_id, "none")
+            else:
+                logger.debug("[reflection] topic_pick=%r 不在候选列表，忽略", topic_pick)
+
         # Store in session and persist to disk
         session.reflection_state = {
             "thought": result["thought"],
             "style_hint": result["style_hint"],
             "urgency": result["urgency"],
-            "topic_hint": result["topic_hint"],
+            "topic_anchor": derived_topic_anchor,
             "next_reflection_in": result.get("next_reflection_in"),
-            "speak_reason": result.get("speak_reason", "none"),
+            "speak_reason": derived_speak_reason,
+            "chosen_topic": chosen_topic,
             "updated_at": time.time(),
         }
         session.save_runtime_state()
@@ -822,7 +715,7 @@ class ReflectionEngine:
             thought=result["thought"],
             style_hint=result["style_hint"],
             urgency=result["urgency"],
-            topic_hint=result["topic_hint"],
+            topic_anchor=derived_topic_anchor,
             model=model_name,
             used_fallback=used_fallback,
             recent_turns_used=len(recent),

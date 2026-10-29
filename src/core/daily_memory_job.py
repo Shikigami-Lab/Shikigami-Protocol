@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -114,8 +115,8 @@ async def run_day_summary_for_profile(profile_id: str, date_str: str, app) -> bo
         return False
 
 
-def _run_weight_decay(mgr, cfg: Dict[str, Any], yesterday: str) -> int:
-    """对非 pinned 且昨日未被使用的 fact 做 weight 衰减。返回被衰减的条数。"""
+def _run_weight_decay(mgr, cfg: Dict[str, Any], yesterday: str) -> List[Dict[str, Any]]:
+    """对非 pinned 且昨日未被使用的 fact 做 weight 衰减。返回明细 [{id, old, new}]。"""
     decay = float(cfg.get("daily_decay_factor", 0.998))
     min_w = float(cfg.get("daily_decay_min_weight", 0.1))
     reinforced = set()
@@ -129,45 +130,47 @@ def _run_weight_decay(mgr, cfg: Dict[str, Any], yesterday: str) -> int:
                 reinforced = set(by_date.get(yesterday) or [])
             except Exception:
                 pass
-    count = 0
+    changes: List[Dict[str, Any]] = []
     for f in mgr.facts.get_all():
         if f.pinned or f.id in reinforced:
             continue
-        new_w = round(max(min_w, f.weight * decay), 2)
+        new_w = round(max(min_w, f.weight * decay), 4)
         if new_w != f.weight:
+            old_w = f.weight
             mgr.facts.update(f.id, weight=new_w)
-            count += 1
-    if count:
-        logger.info("[daily_memory_job] 权重衰减 profile=%s 条数=%d", mgr._profile_id, count)
-    return count
+            changes.append({"id": f.id, "old": old_w, "new": new_w})
+    if changes:
+        logger.info("[daily_memory_job] 权重衰减 profile=%s 条数=%d", mgr._profile_id, len(changes))
+    return changes
 
 
-def _run_reinforcement(mgr, cfg: Dict[str, Any], yesterday: str) -> int:
-    """对昨日被注入的 fact 略升 weight。返回被强化的条数。"""
+def _run_reinforcement(mgr, cfg: Dict[str, Any], yesterday: str) -> List[Dict[str, Any]]:
+    """对昨日被注入的 fact 略升 weight。返回明细 [{id, old, new}]。"""
     if not cfg.get("daily_reinforcement_enabled"):
-        return 0
+        return []
     meta_path = os.path.join(mgr._storage_root, "memory_meta.json")
     if not os.path.exists(meta_path):
-        return 0
+        return []
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         by_date = meta.get("used_fact_ids_by_date") or {}
         ids = by_date.get(yesterday) or []
     except Exception:
-        return 0
-    count = 0
+        return []
+    changes: List[Dict[str, Any]] = []
     for fid in ids:
         fact = mgr.facts.get_by_id(fid)
         if not fact:
             continue
-        new_w = round(min(2.0, fact.weight * 1.01), 2)
+        new_w = round(min(2.0, fact.weight * 1.01), 4)
         if new_w > fact.weight:
+            old_w = fact.weight
             mgr.facts.update(fid, weight=new_w)
-            count += 1
-    if count:
-        logger.info("[daily_memory_job] 强化 profile=%s 条数=%d", mgr._profile_id, count)
-    return count
+            changes.append({"id": fid, "old": old_w, "new": new_w})
+    if changes:
+        logger.info("[daily_memory_job] 强化 profile=%s 条数=%d", mgr._profile_id, len(changes))
+    return changes
 
 
 def _run_orphan_cleanup(mgr) -> int:
@@ -204,8 +207,9 @@ def _select_consolidation_batch(mgr, cfg: Dict[str, Any]) -> tuple:
     return batch, len(candidates), total_facts
 
 
-async def _run_consolidation(mgr, cfg: Dict[str, Any], app, profile: Dict[str, Any]) -> int:
-    """执行一批合并为摘要：选批、LLM、先写新再删旧。返回本批新写入条数。"""
+async def _run_consolidation(mgr, cfg: Dict[str, Any], app, profile: Dict[str, Any]) -> Dict[str, Any]:
+    """执行一批合并为摘要：选批、LLM、写新摘要 + 移除旧事实向量。
+    返回 detail {added, added_preview, vectors_removed, count}；无合并时返回 {}。"""
     from src.utils.debug_logger import log_memory_consolidation_skip, log_memory_forgetting_step
 
     batch, candidates_count, total_facts = _select_consolidation_batch(mgr, cfg)
@@ -217,14 +221,14 @@ async def _run_consolidation(mgr, cfg: Dict[str, Any], app, profile: Dict[str, A
             mgr._profile_id, after_days, weight_below,
         )
         log_memory_consolidation_skip(mgr._profile_id, after_days, weight_below, total_facts, candidates_count)
-        return 0
+        return {}
     try:
         log_memory_forgetting_step(mgr._profile_id, "consolidation", batch_size=len(batch), candidates_count=candidates_count)
-        success, count = await mgr.run_consolidation_batch(app, profile, batch)
-        return count if success else 0
+        success, detail = await mgr.run_consolidation_batch(app, profile, batch)
+        return detail if success else {}
     except Exception as e:
         logger.warning("[daily_memory_job] 合并失败 profile=%s: %s", mgr._profile_id, e)
-        return 0
+        return {}
 
 
 def _any_forgetting_enabled(cfg: Dict[str, Any]) -> bool:
@@ -258,6 +262,13 @@ def preview_forgetting_for_profile(
             "total_facts": 0,
             "preview_facts": [],
         },
+        "portrait_refresh": {
+            "enabled": False,
+            "would_run": False,
+            "reason": "",
+            "last_updated_at": 0,
+            "refresh_count": 0,
+        },
     }
     sm = getattr(app.state, "session_manager", None)
     if not sm:
@@ -273,6 +284,33 @@ def preview_forgetting_for_profile(
         out["skip"] = True
         out["reason"] = "人格未加载"
         return out
+
+    # portrait_refresh 预览（完全独立于 memory 总开关，先填好，即便后续 skip 也保留）
+    try:
+        from src.config.profile_loader import ProfileLoader
+        _card_for_portrait = ProfileLoader().load(profile_id)
+    except Exception:
+        _card_for_portrait = {}
+    _portrait_cfg = _card_for_portrait.get("user_portrait_config") or {}
+    _portrait_block = _card_for_portrait.get("user_portrait") or {}
+    _portrait_enabled = bool(_portrait_cfg.get("enabled", True))
+    _portrait_auto = bool(_portrait_cfg.get("auto_refresh_in_daily_job", True))
+    _portrait_min_h = float(_portrait_cfg.get("min_hours_between_refresh", 6))
+    _portrait_updated = int(_portrait_block.get("updated_at") or 0)
+    out["portrait_refresh"]["enabled"] = _portrait_enabled
+    out["portrait_refresh"]["last_updated_at"] = _portrait_updated
+    out["portrait_refresh"]["refresh_count"] = int(_portrait_block.get("refresh_count") or 0)
+    if not _portrait_enabled:
+        out["portrait_refresh"]["reason"] = "画像功能未启用"
+    elif not _portrait_auto:
+        out["portrait_refresh"]["reason"] = "已关闭日批自动刷新"
+    elif _portrait_min_h > 0 and _portrait_updated > 0 and \
+            (datetime.now().timestamp() - _portrait_updated) / 3600 < _portrait_min_h:
+        out["portrait_refresh"]["reason"] = f"仍在冷却期内（< {_portrait_min_h:g}h）"
+    else:
+        out["portrait_refresh"]["would_run"] = True
+        out["portrait_refresh"]["reason"] = "将尝试刷新画像"
+
     mgr = _get_manager_for_session(session, app)
     if not mgr:
         out["skip"] = True
@@ -336,7 +374,7 @@ def preview_forgetting_for_profile(
         for f in mgr.facts.get_all():
             if f.pinned or f.id in reinforced:
                 continue
-            new_w = round(max(min_w, f.weight * decay), 2)
+            new_w = round(max(min_w, f.weight * decay), 4)
             if new_w != f.weight:
                 count += 1
         out["decay"]["would_affect_count"] = count
@@ -435,28 +473,126 @@ async def run_forgetting_for_profile(profile_id: str, app, yesterday: Optional[s
     }
     log_memory_forgetting_run(profile_id, "manual" if force else "scheduled", steps_enabled)
 
+    decay_changes: List[Dict[str, Any]] = []
+    reinforce_changes: List[Dict[str, Any]] = []
+    consolidation_detail: Dict[str, Any] = {}
+    orphan_count = 0
     if cfg.get("daily_forgetting_enabled"):
-        decay_count = await asyncio.to_thread(_run_weight_decay, mgr, cfg, yesterday)
-        log_memory_forgetting_step(profile_id, "decay", decayed_count=decay_count)
+        decay_changes = await asyncio.to_thread(_run_weight_decay, mgr, cfg, yesterday)
+        log_memory_forgetting_step(profile_id, "decay", decayed_count=len(decay_changes))
         orphan_count = await asyncio.to_thread(_run_orphan_cleanup, mgr)
         log_memory_forgetting_step(profile_id, "orphan_cleanup", deleted=orphan_count)
     if cfg.get("daily_reinforcement_enabled"):
-        rein_count = await asyncio.to_thread(_run_reinforcement, mgr, cfg, yesterday)
-        log_memory_forgetting_step(profile_id, "reinforcement", count=rein_count)
+        reinforce_changes = await asyncio.to_thread(_run_reinforcement, mgr, cfg, yesterday)
+        log_memory_forgetting_step(profile_id, "reinforcement", count=len(reinforce_changes))
     if cfg.get("daily_consolidation_enabled"):
         from src.config.profile_loader import ProfileLoader
         try:
             profile = ProfileLoader().load(profile_id)
         except Exception:
             profile = {}
-        cons_count = await _run_consolidation(mgr, cfg, app, profile)
-        log_memory_forgetting_step(profile_id, "consolidation_done", added=cons_count)
+        consolidation_detail = await _run_consolidation(mgr, cfg, app, profile)
+        log_memory_forgetting_step(profile_id, "consolidation_done", added=consolidation_detail.get("count", 0))
+
+    # 记忆变更日志：实际改动了事实才记（空跑不记）
+    try:
+        _record_memory_changelog(session.storage_root, yesterday, force, mgr, cfg,
+                                 decay_changes, reinforce_changes, consolidation_detail, orphan_count)
+    except Exception as e:
+        logger.warning("[daily_memory_job] 记忆变更日志写入失败（非致命）: %s", e)
+
     if force:
         logger.info("[daily_memory_job] 手动执行遗忘完成 profile=%s", profile_id)
 
 
+def _record_memory_changelog(storage_root: str, date_str: str, force: bool, mgr, cfg: Dict[str, Any],
+                             decay: List[Dict], reinforce: List[Dict],
+                             cons: Dict[str, Any], orphan: int) -> None:
+    """把一次遗忘任务的明细组装成 changelog 条目；仅在实际改动了事实时写入。"""
+    from src.memory import memory_changelog
+
+    rollback_data = {
+        "decay": decay,
+        "reinforce": reinforce,
+        "consolidation": {
+            "added": cons.get("added", []),
+            "vectors_removed": cons.get("vectors_removed", []),
+        },
+    }
+    if not memory_changelog.has_meaningful_changes(rollback_data):
+        return
+
+    min_w = float(cfg.get("daily_decay_min_weight", 0.1))
+    decay_floored: List[str] = []
+    for c in decay:
+        if c.get("new", 1.0) <= min_w:
+            fact = mgr.facts.get_by_id(c.get("id"))
+            if fact:
+                decay_floored.append(fact.content[:60])
+
+    entry = {
+        "run_id": datetime.now().strftime("%Y%m%d-%H%M%S"),
+        "timestamp": int(time.time()),
+        "trigger": "manual" if force else "auto",
+        "date": date_str,
+        "rolled_back": False,
+        "summary": {
+            "decay_count": len(decay),
+            "decay_floored": decay_floored[:5],
+            "reinforce_count": len(reinforce),
+            "consolidation": {
+                "added_count": len(cons.get("added", [])),
+                "added_contents": cons.get("added_contents", []),
+                "vectors_removed_count": len(cons.get("vectors_removed", [])),
+                "vectors_removed_contents": cons.get("vectors_removed_contents", []),
+            },
+            "orphan_vectors": orphan,
+        },
+        "rollback_data": rollback_data,
+    }
+    memory_changelog.record_run(storage_root, entry)
+
+
+async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool = False) -> None:
+    """日批中调用 user_portrait 刷新（受 user_portrait_config 控制，完全独立于 memory 总开关）。"""
+    sm = getattr(app.state, "session_manager", None)
+    if not sm:
+        return
+    session = None
+    for s in sm.list_sessions():
+        if s.profile_id == profile_id:
+            session = s
+            break
+    if not session:
+        logger.debug("[daily_memory_job] portrait: profile %s 未加载，跳过", profile_id)
+        return
+
+    from src.config.profile_loader import ProfileLoader
+    try:
+        card = ProfileLoader().load(profile_id)
+    except Exception:
+        return
+    cfg = card.get("user_portrait_config") or {}
+    if not cfg.get("enabled", True):
+        return
+    if not force and not cfg.get("auto_refresh_in_daily_job", True):
+        return
+
+    from src.core.user_portrait import trigger_portrait_refresh
+    try:
+        await trigger_portrait_refresh(
+            profile_id, session.storage_root, app,
+            force=force, triggered_by="manual" if force else "daily",
+        )
+    except Exception as e:
+        logger.exception("[daily_memory_job] portrait 刷新失败 profile=%s: %s", profile_id, e)
+
+
 async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
-    """对一个人格跑完整每日任务：先日摘要再遗忘。无对话时仍写安静日记，但跳过遗忘任务。"""
+    """对一个人格跑完整每日任务：先日摘要再遗忘，最后画像刷新。无对话时仍写安静日记，但跳过遗忘任务。
+
+    幂等：今天已跑过（last_daily_run.json）则跳过，避免「启动补跑 + 00:05 定时」同一天重复衰减。
+    """
     sm = getattr(app.state, "session_manager", None)
     if not sm:
         return
@@ -468,18 +604,53 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
     if not session:
         return
 
+    today_str = date.today().strftime("%Y-%m-%d")
+    if _load_last_daily_run(session.storage_root) == today_str:
+        logger.debug("[daily_memory_job] profile %s 今天已跑过每日任务，跳过", profile_id)
+        return
+
     await run_day_summary_for_profile(profile_id, yesterday, app)
 
     store = session.conversation_store
     if _has_conversation_on_date(store, yesterday):
         await run_forgetting_for_profile(profile_id, app, yesterday)
 
+    # portrait 完全独立于 memory 总开关，单独检查自己的 enabled / auto_refresh_in_daily_job
+    await run_portrait_refresh_for_profile(profile_id, app)
+
     _save_last_daily_run(session.storage_root, date.today().strftime("%Y-%m-%d"))
 
 
+async def _catch_up_missed_runs(app) -> None:
+    """启动补跑：桌面应用在 00:05 常处于关机状态，错过的每日任务在启动时补一次。
+    依据 last_daily_run.json（每人格独立），今天没跑过的才补。"""
+    sm = getattr(app.state, "session_manager", None)
+    if not sm:
+        return
+    today_str = date.today().strftime("%Y-%m-%d")
+    yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    for s in sm.list_sessions():
+        if _load_last_daily_run(s.storage_root) == today_str:
+            continue
+        logger.info("[daily_memory_job] 启动补跑每日任务 profile=%s", s.profile_id)
+        try:
+            await run_daily_for_profile(s.profile_id, yesterday, app)
+        except Exception as e:
+            logger.exception("[daily_memory_job] 补跑 profile %s 失败: %s", s.profile_id, e)
+
+
 async def run_daily_memory_loop(app) -> None:
-    """每日任务主循环：sleep 到下一日 00:05（或可配置时刻），遍历已加载且昨日有对话的 session 执行任务。"""
+    """每日任务主循环：sleep 到下一日 00:05（或可配置时刻），遍历已加载且昨日有对话的 session 执行任务。
+    启动 90 秒后先做一次补跑（见 _catch_up_missed_runs）。"""
     logger.info("[daily_memory_job] 每日记忆/遗忘循环已启动")
+    try:
+        await asyncio.sleep(90)  # 避开启动高峰（TTS 预热、引擎启动）
+        await _catch_up_missed_runs(app)
+    except asyncio.CancelledError:
+        logger.info("[daily_memory_job] 每日循环已取消")
+        return
+    except Exception as e:
+        logger.exception("[daily_memory_job] 启动补跑异常: %s", e)
     while True:
         try:
             today = date.today()

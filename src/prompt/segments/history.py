@@ -14,13 +14,53 @@ back to group store only + [sender]: content for other AIs.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, List
 
+from src.llm.message_normalization import PromptMessage
 from src.memory.merged_history import get_merged_recent_messages
 from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 
 logger = logging.getLogger(__name__)
+
+
+def _format_timestamp(timestamp: Any) -> str:
+    try:
+        return datetime.fromtimestamp(float(timestamp)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def _exclude_current_user_message(
+    formatted: List[Dict[str, str]],
+    source: List[Dict[str, Any]],
+    current_user_message: str,
+):
+    current_user_message = current_user_message or ""
+    if not formatted or not source or not current_user_message.strip():
+        return formatted, source
+    last_source = source[-1]
+    if (last_source.get("role") == "user"
+            and (last_source.get("content") or "").strip() == current_user_message.strip()):
+        return formatted[:-1], source[:-1]
+    return formatted, source
+
+
+def _result_with_time_sources(
+    formatted: List[Dict[str, str]],
+    source: List[Dict[str, Any]],
+    current_user_message: str,
+) -> SegmentResult:
+    formatted, source = _exclude_current_user_message(formatted, source, current_user_message)
+    # Reserve the index's system priority, but defer numbering until the final
+    # wire structure is known. Attributes never enter the store or JSON payload.
+    messages = ([PromptMessage({"role": "system", "content": ""},
+                               time_index_span=(0, 0))] if source else [])
+    messages.extend(PromptMessage(message, time_sources=(
+        "历史 " + (_format_timestamp(original.get("timestamp")) or "时间未知"),
+    )) for message, original in zip(formatted, source))
+    return SegmentResult(messages=messages)
 
 
 def _transform_for_group_chat(
@@ -120,10 +160,10 @@ class HistorySegment(PromptSegment):
                     cap=None,
                 )
                 msgs = _format_merged_for_group_chat(merged, reply_as, user_name, current_group_gname)
-                return SegmentResult(messages=msgs)
-            msgs = ctx.store.get_recent(ctx.n_history_turns)
-            msgs = _transform_for_group_chat(msgs, reply_as, user_name)
-            return SegmentResult(messages=msgs)
+                return _result_with_time_sources(msgs, merged, ctx.user_msg)
+            msgs = ctx.store.get_recent_with_ts(ctx.n_history_turns)
+            formatted = _transform_for_group_chat(msgs, reply_as, user_name)
+            return _result_with_time_sources(formatted, msgs, ctx.user_msg)
         merged = get_merged_recent_messages(
             ctx.session,
             app,
@@ -131,4 +171,5 @@ class HistorySegment(PromptSegment):
             ctx.n_history_turns,
             cap=None,
         )
-        return SegmentResult(messages=_format_merged_for_llm(merged))
+        formatted = _format_merged_for_llm(merged)
+        return _result_with_time_sources(formatted, merged, ctx.user_msg)

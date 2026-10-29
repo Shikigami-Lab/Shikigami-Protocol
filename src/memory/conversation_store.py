@@ -137,13 +137,14 @@ class ConversationStore:
 
     # ── Write operations ─────────────────────────────────────────────────────
 
-    def append(self, role: str, content: str, sender: str = ""):
+    def append(self, role: str, content: str, sender: str = "") -> int:
         ts = time.time()
         with self._conn:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "INSERT INTO messages (role, content, timestamp, sender) VALUES (?, ?, ?, ?)",
                 (role, content, ts, (sender or "").strip())
             )
+        message_id = int(cur.lastrowid)
         if self.max_turns > 0:
             limit = self.max_turns * 2
             with self._conn:
@@ -152,6 +153,7 @@ class ConversationStore:
                         SELECT id FROM messages ORDER BY timestamp DESC LIMIT ?
                     )
                 """, (limit,))
+        return message_id
 
     def reset_context(self):
         """Mark current time as the context start point (non-destructive)."""
@@ -177,6 +179,30 @@ class ConversationStore:
                 "INSERT INTO messages (role, content, timestamp, sender) VALUES (?, ?, ?, ?)",
                 [(m.role, m.content, m.timestamp, getattr(m, "sender", "") or "") for m in messages]
             )
+
+    def delete_from_index(self, idx: int) -> bool:
+        """Delete the idx-th message in time order (0-based, same order as get_all) and everything after it."""
+        if idx < 0:
+            return False
+        with self._conn:
+            cur = self._conn.execute("""
+                DELETE FROM messages WHERE id IN (
+                    SELECT id FROM messages ORDER BY timestamp, id LIMIT -1 OFFSET ?
+                )
+            """, (idx,))
+        return cur.rowcount > 0
+
+    def delete_at_index(self, idx: int) -> bool:
+        """Delete the idx-th message in time order (0-based, same order as get_all)."""
+        if idx < 0:
+            return False
+        with self._conn:
+            cur = self._conn.execute("""
+                DELETE FROM messages WHERE id IN (
+                    SELECT id FROM messages ORDER BY timestamp, id LIMIT 1 OFFSET ?
+                )
+            """, (idx,))
+        return cur.rowcount > 0
 
     # ── Read operations ──────────────────────────────────────────────────────
 
@@ -249,9 +275,13 @@ class ConversationStore:
         ]
 
     def get_all(self) -> List[Message]:
-        """Return all stored messages (for history API / client sync)."""
+        """Return all stored messages (for history API / client sync).
+
+        Heavy on large tables (reads everything and builds an object per row); new code should use
+        SQL-level queries such as get_last / get_page_with_id / count_all instead of slicing this.
+        """
         rows = self._conn.execute(
-            "SELECT role, content, timestamp, sender FROM messages ORDER BY timestamp"
+            "SELECT role, content, timestamp, sender FROM messages ORDER BY timestamp, id"
         ).fetchall()
         return [
             Message(role=r[0], content=r[1], timestamp=r[2], sender=(r[3] or "") if len(r) > 3 else "")
@@ -261,12 +291,75 @@ class ConversationStore:
     def get_all_with_id(self) -> List[Dict]:
         """Return all messages as dicts with id, role, content, timestamp, sender (for paginated history)."""
         rows = self._conn.execute(
-            "SELECT id, role, content, timestamp, sender FROM messages ORDER BY timestamp"
+            "SELECT id, role, content, timestamp, sender FROM messages ORDER BY timestamp, id"
         ).fetchall()
         return [
             {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
             for r in rows
         ]
+
+    def count_all(self) -> int:
+        """Total message count (used by the history API instead of len(get_all()))."""
+        row = self._conn.execute("SELECT COUNT(*) FROM messages").fetchone()
+        return row[0] if row else 0
+
+    def get_last(self, limit: int) -> List[Message]:
+        """The last `limit` messages in chronological order; limit <= 0 is the same as get_all()."""
+        if limit <= 0:
+            return self.get_all()
+        rows = self._conn.execute("""
+            SELECT role, content, timestamp, sender FROM messages
+            ORDER BY timestamp DESC, id DESC LIMIT ?
+        """, (limit,)).fetchall()
+        rows.reverse()
+        return [
+            Message(role=r[0], content=r[1], timestamp=r[2], sender=(r[3] or "") if len(r) > 3 else "")
+            for r in rows
+        ]
+
+    def get_page_with_id(self, limit: int, offset: int = 0) -> List[Dict]:
+        """Page backwards from the newest (offset=0 is the newest page); returns dicts with id, in chronological order."""
+        if limit <= 0:
+            return self.get_all_with_id()
+        rows = self._conn.execute("""
+            SELECT id, role, content, timestamp, sender FROM messages
+            ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?
+        """, (limit, max(0, offset))).fetchall()
+        rows.reverse()
+        return [
+            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
+            for r in rows
+        ]
+
+    def has_messages_between(self, start_ts: float, end_ts: float) -> bool:
+        """Whether any user/assistant message exists in [start_ts, end_ts) (used by the yesterday-summary check)."""
+        row = self._conn.execute("""
+            SELECT 1 FROM messages
+            WHERE role IN ('user', 'assistant') AND timestamp >= ? AND timestamp < ?
+            LIMIT 1
+        """, (start_ts, end_ts)).fetchone()
+        return row is not None
+
+    def count_since(self, since_ts: float, cap: int = 0) -> int:
+        """Number of user/assistant messages with timestamp > since_ts.
+
+        With cap > 0, counting stops at cap, so callers that only need to know whether a threshold
+        was reached don't scan the whole table.
+        """
+        if cap > 0:
+            row = self._conn.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT 1 FROM messages
+                    WHERE role IN ('user', 'assistant') AND timestamp > ?
+                    LIMIT ?
+                )
+            """, (since_ts, cap)).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE role IN ('user', 'assistant') AND timestamp > ?",
+                (since_ts,)
+            ).fetchone()
+        return row[0] if row else 0
 
     def search_messages(self, q: str = "", limit: int = 50,
                         offset: int = 0) -> List[Dict]:
@@ -342,6 +435,28 @@ class ConversationStore:
                 (since_ts,),
             ).fetchone()
         return row[0] if row else 0
+
+    @staticmethod
+    def read_user_message_timestamps(storage_root: str, since_ts: float) -> List[float]:
+        """Read timestamps of human messages (role='user') with timestamp >= since_ts straight
+        from an existing chat_records.db, skipping __init__'s side effects (makedirs, schema /
+        JSON migration). Used to scan every profile and group cheaply; returns [] if unreadable."""
+        db_path = os.path.join(storage_root, "chat_records.db")
+        if not os.path.exists(db_path):
+            return []
+        try:
+            conn = sqlite3.connect(db_path, timeout=5)
+            try:
+                rows = conn.execute(
+                    "SELECT timestamp FROM messages WHERE role='user' AND timestamp >= ?",
+                    (since_ts,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("[ConversationStore] read_user_message_timestamps failed (%s): %s", db_path, e)
+            return []
+        return [float(r[0]) for r in rows]
 
     def total_user_messages_count(self, human_sender: Optional[str] = None) -> int:
         """Count all human messages. When human_sender set, includes sender=human_sender OR

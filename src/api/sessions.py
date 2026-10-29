@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from src.core.broadcast import broadcast
 from src.utils.debug_logger import log_session_switch, log_session_create, log_backup, log_error
 
 logger = logging.getLogger(__name__)
@@ -119,9 +120,7 @@ async def delete_messages_from(session_id: str, msg_idx: int, request: Request):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx])
+    store.delete_from_index(msg_idx)
     return {"ok": True}
 
 
@@ -134,6 +133,10 @@ async def delete_message_by_id(session_id: str, msg_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     if hasattr(store, "delete_by_id") and store.delete_by_id(msg_id):
+        await broadcast.push(session_id, {
+            "type": "message_deleted",
+            "message_id": msg_id,
+        })
         return {"ok": True}
     raise HTTPException(status_code=404, detail="Message not found")
 
@@ -146,9 +149,7 @@ async def delete_message(session_id: str, msg_idx: int, request: Request):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx] + records[msg_idx + 1:])
+    store.delete_at_index(msg_idx)
     return {"ok": True}
 
 
@@ -164,8 +165,17 @@ async def backup_session_memory(session_id: str, request: Request):
     copied = []
     errors = []
 
+    # Flush all WAL data into the main .db file before copying, so the backup
+    # is self-contained and consistent without needing the -wal/-shm files.
+    try:
+        conn = session.conversation_store._conn
+        if conn is not None:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception as e:
+        errors.append(f"wal_checkpoint warning: {e}")
+
     # Back up the entire profile directory so any future file types are included automatically.
-    # Exclude transient SQLite WAL/SHM files (they are empty or will be rolled back on restore).
+    # Exclude -wal/-shm files: after checkpoint they are empty, so excluding them is safe.
     def _ignore(dir_path, names):
         return {n for n in names if n.endswith((".db-wal", ".db-shm"))}
 

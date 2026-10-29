@@ -3,8 +3,25 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from src.config.prompt_loader import get_locale
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
+
+
+def _user_agency_text(locale: str) -> str:
+    if locale == "en":
+        return (
+            "[Respect the other person's agency]\n"
+            "Do not treat actions, feelings, intentions, choices, or physical or mental states "
+            "the other person has not expressed as established facts. You may ask, suggest a "
+            "possibility, or respond to information they explicitly provided, but do not decide "
+            "their reactions for them."
+        )
+    return (
+        "【尊重对方的自主性】\n"
+        "不要把对方未表达的动作、感受、意图、选择或身心状态当作既定事实。"
+        "你可以询问、提出可能性，或回应对方明确提供的信息，但不要替对方决定其反应。"
+    )
 
 
 @register
@@ -51,6 +68,8 @@ class PersonaSegment(PromptSegment):
         code_expr = (profile.get("code_expression_constraint") or "").strip()
         if code_expr:
             parts.append(code_expr)
+
+        parts.append(_user_agency_text(get_locale()))
 
         content = "\n\n".join(parts) if parts else "You are a helpful AI assistant."
         return SegmentResult(messages=[{"role": "system", "content": content}])

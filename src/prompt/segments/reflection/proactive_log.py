@@ -93,7 +93,7 @@ class ReflectionProactiveLogSegment(PromptSegment):
         for entry in log[-10:]:
             ts = entry.get("timestamp", 0)
             reason = entry.get("speak_reason", entry.get("reason", "none"))
-            topic = entry.get("topic_hint", "")
+            topic = entry.get("topic_anchor", "")
             ago = _format_ago(now - ts, locale) if ts else "?"
             rlabel = reason_labels.get(reason, reason)
             if locale == "en":

@@ -45,8 +45,7 @@ async def get_emotion_keys(request: Request):
     """Ordered emotion keys for settings UI ."""
     from src.config.emotion_keys import emotion_keys_for_api
 
-    public_mode = True  # [emotion_keys]
-    return {"keys": emotion_keys_for_api(public_mode=public_mode)}
+    return {"keys": emotion_keys_for_api()}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -130,6 +129,40 @@ async def get_llm_presets(request: Request):
     }
 
 
+@router.get("/settings/llm/presets/{name}/models")
+async def list_llm_preset_models(name: str, request: Request):
+    """List model IDs available to a saved LLM preset without exposing its API key."""
+    config = request.app.state.config
+    preset = config.llm_presets.get(name)
+    if not preset:
+        raise HTTPException(status_code=404, detail={"code": "preset_not_found"})
+
+    try:
+        provider = get_provider(preset)
+        list_models = getattr(provider, "list_models", None)
+        if not callable(list_models):
+            raise HTTPException(status_code=501, detail={"code": "model_listing_unsupported"})
+        return {"models": await list_models()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        upstream_status = getattr(exc, "status_code", None)
+        logger.warning(
+            "[settings] model discovery failed for preset %s (%s)",
+            name,
+            upstream_status or type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": {
+                    "code": "model_discovery_failed",
+                    "upstream_status": upstream_status,
+                }
+            },
+        )
+
+
 class LLMPresetBody(BaseModel):
     name: str
     type: str = "openai_compat"
@@ -200,6 +233,16 @@ async def update_llm_preset(name: str, request: Request, body: LLMPresetBody):
     if name in config.llm_presets:
         existing_key = config.llm_presets[name].get("api_key", "")
     final_key = existing_key if body.api_key is None else body.api_key
+
+    # Keeping the stored key while base_url changes would send that key to the new endpoint on the
+    # next call, so anyone able to reach this API could point a preset at a server they control.
+    # Changing base_url requires entering the key again (or clearing it explicitly).
+    existing_base_url = (config.llm_presets.get(name) or {}).get("base_url", "")
+    if body.api_key is None and existing_key and (body.base_url or "") != (existing_base_url or ""):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter the API key again to change base_url — the stored key is not reused for a new endpoint.",
+        )
 
     old_name = name  # remember original name for env var migration
 
@@ -978,7 +1021,7 @@ async def update_profile(profile_id: str, body: ProfileUpdateBody):
 
     if body.user_persona is not None:
         up = {k: (v or "").strip() for k, v in body.user_persona.items()
-              if k in ("name", "description", "personality", "role_in_story")}
+              if k in ("name", "introduction")}
         if any(up.values()):
             card["user_persona"] = up
         else:
@@ -1329,6 +1372,66 @@ class ProfileWizardBody(BaseModel):
     disable_memory:     bool = False
 
 
+def _prepare_llm_json(response: str):
+    """Turn a raw LLM reply into text that json.loads can parse.
+
+    Returns a str to continue with json.loads, or a dict that is already an error
+    response for the caller to return as-is.
+
+    Empty replies and LLM-layer errors are reported explicitly; otherwise they surface
+    as "Expecting value: line 1 column 1", which reads like a JSON format problem when
+    the model actually produced nothing.
+    """
+    raw = (response or "").strip()
+    if not raw:
+        return {
+            "ok": False,
+            "error": "模型返回了空响应（可能被安全策略拦截、超时，或触发了内容过滤）。"
+                     "可在设置里换一个用于生成的模型预设后重试。",
+            "raw": "",
+        }
+    if raw.startswith("[LLM Error:"):
+        return {"ok": False, "error": f"LLM 调用失败：{raw[:300]}", "raw": raw[:1200]}
+
+    return _extract_json_text(raw)
+
+
+def _extract_json_text(raw: str) -> str:
+    """Pick the JSON object out of a reply that may wrap it in a code fence or prose.
+
+    Candidates, in order: the whole reply as one fenced block; a fenced block with prose
+    around it (matched up to the last closing fence, so fences inside JSON strings survive);
+    the reply itself. Each candidate is tried whole, then from its first "{" with whatever
+    follows the object ignored (trailing prose, a second fenced block). Raw newlines inside
+    strings are accepted, so callers parse the result with strict=False. If nothing parses,
+    the first candidate is returned so the caller reports the JSON error.
+    """
+    decoder = json.JSONDecoder(strict=False)
+    candidates = []
+    whole = re.match(r"^```(?:json)?[ \t]*\r?\n?([\s\S]*?)\r?\n?```$", raw)
+    if whole:
+        candidates.append(whole.group(1).strip())
+    embedded = re.search(r"```(?:json)?[ \t]*\r?\n([\s\S]*)\r?\n[ \t]*```", raw)
+    if embedded:
+        candidates.append(embedded.group(1).strip())
+    candidates.append(raw)
+    for candidate in candidates:
+        try:
+            decoder.decode(candidate)
+            return candidate
+        except ValueError:
+            pass
+        start = candidate.find("{")
+        if start < 0:
+            continue
+        try:
+            _, end = decoder.raw_decode(candidate, start)
+            return candidate[start:end]
+        except ValueError:
+            continue
+    return candidates[0]
+
+
 @router.post("/profiles/wizard")
 async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
     """Use the active LLM to generate a persona profile from a text description."""
@@ -1346,9 +1449,8 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
         raise HTTPException(status_code=503, detail="No LLM preset configured")
 
     provider = get_provider(preset)
-    public_mode = True  # [wizard]
     locale = get_locale()
-    emotion_keys = emotion_keys_csv_for_wizard(public_mode=public_mode)
+    emotion_keys = emotion_keys_csv_for_wizard()
 
     _extra_zh = ""
     _extra_en = ""
@@ -1493,13 +1595,11 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
         log_secondary_llm_response(role="wizard", response=response, model=model_name,
                                    duration_ms=duration_ms)
 
-        raw = response.strip()
-        # Strip optional ```json ... ``` fences
-        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
-        if m:
-            raw = m.group(1).strip()
+        raw = _prepare_llm_json(response)
+        if isinstance(raw, dict):
+            return raw
 
-        profile_data = json.loads(raw)
+        profile_data = json.loads(raw, strict=False)
         return {"ok": True, "profile": profile_data, "preset_used": preset_name}
     except json.JSONDecodeError as e:
         return {"ok": False, "error": f"LLM output was not valid JSON: {e}", "raw": response[:500]}
@@ -1706,10 +1806,9 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
         raise HTTPException(status_code=503, detail="No LLM preset configured")
 
     provider = get_provider(preset)
-    public_mode = True  # [autofill]
     from src.config.prompt_loader import get_locale
     locale = get_locale()
-    emotion_keys = emotion_keys_csv_for_wizard(public_mode=public_mode)
+    emotion_keys = emotion_keys_csv_for_wizard()
 
     allowed = _autofill_allowed_top_keys(body.scopes or None)
     if not allowed:
@@ -1792,12 +1891,11 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
             role="prompt_autofill", response=response, model=model_name, duration_ms=duration_ms
         )
 
-        raw = response.strip()
-        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
-        if m:
-            raw = m.group(1).strip()
+        raw = _prepare_llm_json(response)
+        if isinstance(raw, dict):
+            return raw
 
-        patch_raw = json.loads(raw)
+        patch_raw = json.loads(raw, strict=False)
         if not isinstance(patch_raw, dict):
             return {"ok": False, "error": "LLM output was not a JSON object", "raw": response[:1200]}
 
@@ -1894,12 +1992,16 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
     """Persist segment configuration overrides + custom segments for a profile."""
     from src.prompt.segment_config import (
         CustomSegmentDef,
-        SegmentConfig,
         SegmentMeta,
+        load_segment_config,
         save_segment_config,
     )
+    from src.prompt.base import targets_reflection, targets_ase
 
-    cfg = SegmentConfig()
+    # Load existing config to preserve ASE/reflection overrides written by the
+    # reflection_config endpoint — overwriting with a fresh object would wipe them.
+    cfg = load_segment_config(profile_id)
+
     for s in body.segments:
         cfg.set_meta(SegmentMeta(
             segment_id=s.segment_id,
@@ -1910,7 +2012,9 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
             content=s.content,
             trigger_keywords=s.trigger_keywords,
         ))
-    cfg.custom_segments = [
+
+    # Replace only chat-scoped custom segments; keep reflection/ASE custom segments intact.
+    chat_customs = [
         CustomSegmentDef(
             segment_id=c.segment_id,
             label=c.label,
@@ -1924,6 +2028,12 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
         )
         for c in body.custom_segments
     ]
+    preserved = [
+        c for c in cfg.custom_segments
+        if targets_reflection(c.inject_into) or targets_ase(c.inject_into)
+    ]
+    cfg.custom_segments = chat_customs + preserved
+
     save_segment_config(profile_id, cfg)
     return {"ok": True}
 
@@ -1942,8 +2052,13 @@ async def get_engines_config(request: Request):
     config = request.app.state.config
     engines = config.engines
     sec = config.secondary_models.get("analysis", {})
+    em_cfg = engines.get("emotion", {})
     return {
-        "emotion_freq":          engines.get("emotion",  {}).get("classification_frequency", 5),
+        "emotion_freq":          em_cfg.get("classification_frequency", 5),
+        "emotion_decay_enabled":         em_cfg.get("decay_enabled", True),
+        "emotion_decay_full_secs":       em_cfg.get("decay_full_secs", 14400),
+        "emotion_decay_skip_if_active":  em_cfg.get("decay_skip_if_active_secs", 300),
+        "emotion_neutral":               em_cfg.get("neutral_emotion", "calm"),
         "affinity_freq":         engines.get("affinity", {}).get("llm_adjust_frequency", 5),
         "affinity_delta_clamp":  engines.get("affinity", {}).get("delta_clamp", 15.0),
         "energy_interval":       engines.get("energy",   {}).get("refresh_interval", 300),
@@ -1958,7 +2073,11 @@ async def get_engines_config(request: Request):
 
 
 class EnginesConfigBody(BaseModel):
-    emotion_freq:         int   = 5
+    emotion_freq:                 int   = 5
+    emotion_decay_enabled:        Optional[bool] = None
+    emotion_decay_full_secs:      Optional[int]  = None
+    emotion_decay_skip_if_active: Optional[int]  = None
+    emotion_neutral:              Optional[str]  = None
     affinity_freq:        int   = 5
     affinity_delta_clamp: float = 15.0
     energy_interval:      int   = 300
@@ -1978,6 +2097,14 @@ async def save_engines_config(request: Request, body: EnginesConfigBody):
     en = data["engines"].setdefault("energy",   {})
 
     em["classification_frequency"] = body.emotion_freq
+    if body.emotion_decay_enabled is not None:
+        em["decay_enabled"] = bool(body.emotion_decay_enabled)
+    if body.emotion_decay_full_secs is not None:
+        em["decay_full_secs"] = max(0, int(body.emotion_decay_full_secs))
+    if body.emotion_decay_skip_if_active is not None:
+        em["decay_skip_if_active_secs"] = max(0, int(body.emotion_decay_skip_if_active))
+    if body.emotion_neutral:
+        em["neutral_emotion"] = str(body.emotion_neutral)
     af["llm_adjust_frequency"]     = body.affinity_freq
     af["delta_clamp"]              = body.affinity_delta_clamp
     en["refresh_interval"]         = body.energy_interval
@@ -1993,33 +2120,43 @@ async def save_engines_config(request: Request, body: EnginesConfigBody):
     return {"ok": True}
 
 
+def _migrate_global_user_persona_in_memory(raw: dict) -> dict:
+    """读端兼容：若全局 user_persona 仍是老 schema (description/personality)，临时合成 introduction。
+    仅用于读，不写回磁盘——save 端使用新 schema 后会自然替换。"""
+    if raw.get("introduction"):
+        return raw
+    desc = (raw.get("description") or "").strip()
+    pers = (raw.get("personality") or "").strip()
+    if not desc and not pers:
+        return raw
+    parts = [s for s in [desc, pers] if s]
+    return {**raw, "introduction": "\n\n".join(parts)}
+
+
 @router.get("/settings/user_persona")
 async def get_user_persona(request: Request):
-    """Return global user persona config."""
+    """Return global user persona config (new schema: name + introduction)."""
     config = request.app.state.config
-    p = config.user_persona or {}
+    p = _migrate_global_user_persona_in_memory(config.user_persona or {})
     return {
-        "name":        p.get("name", ""),
-        "description": p.get("description", ""),
-        "personality": p.get("personality", ""),
+        "name":         p.get("name", ""),
+        "introduction": p.get("introduction", ""),
     }
 
 
 class UserPersonaBody(BaseModel):
-    name:        str = ""
-    description: str = ""
-    personality: str = ""
+    name:         str = ""
+    introduction: str = ""
 
 
 @router.post("/settings/user_persona")
 async def save_user_persona(request: Request, body: UserPersonaBody):
-    """Persist global user persona to app.yaml and hot-reload."""
+    """Persist global user persona to app.yaml and hot-reload (new schema)."""
     config = request.app.state.config
     y, data = _load_yaml()
     data["user_persona"] = {
-        "name":        body.name.strip(),
-        "description": body.description.strip(),
-        "personality": body.personality.strip(),
+        "name":         body.name.strip(),
+        "introduction": body.introduction.strip(),
     }
     _save_yaml(y, data)
     config.user_persona = dict(data["user_persona"])
@@ -2186,6 +2323,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
     en = overrides.get("energy", {})
     rf = overrides.get("reflection", {})
     ase = overrides.get("ase", {})
+    td = overrides.get("topic_discovery", {})
 
     # 全局默认值（来自 app.yaml），供前端「继承」模式显示实际生效值
     cfg = getattr(getattr(request.app, "state", None), "config", None)
@@ -2206,6 +2344,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
             "energy_interval":      g_en.get("refresh_interval", 300),
             "reflection_enabled":   g_rf.get("enabled", True),
             "ase_enabled":          g_ase.get("enabled", True),
+            "topic_discovery_enabled": cfg.get_topic_discovery_config().get("enabled", True),
         }
 
     return {
@@ -2218,6 +2357,7 @@ async def get_profile_engine_config(profile_id: str, request: Request):
         "energy_interval":       en.get("refresh_interval"),
         "reflection_enabled":    rf.get("enabled"),
         "ase_enabled":           ase.get("enabled"),
+        "topic_discovery_enabled": td.get("enabled"),
         "global_defaults":       global_defaults,
     }
 
@@ -2232,6 +2372,7 @@ class ProfileEngineConfigBody(BaseModel):
     energy_interval:      Optional[int]   = None
     reflection_enabled:   Optional[bool]  = None
     ase_enabled:          Optional[bool]  = None
+    topic_discovery_enabled: Optional[bool] = None
 
 
 @router.put("/profiles/{profile_id}/engine_config")
@@ -2262,6 +2403,7 @@ async def save_profile_engine_config(profile_id: str, body: ProfileEngineConfigB
     _set("energy",      "enabled",                  body.energy_enabled)
     _set("reflection",  "enabled",                  body.reflection_enabled)
     _set("ase",         "enabled",                  body.ase_enabled)
+    _set("topic_discovery", "enabled",              body.topic_discovery_enabled)
     if body.emotion_freq is not None:
         ov.setdefault("emotion", {})["classification_frequency"] = max(1, min(100, body.emotion_freq))
     if body.affinity_freq is not None:
@@ -2296,7 +2438,7 @@ async def get_profile_reflection_config(profile_id: str):
         source = "base_prompt"
     else:
         source = "reflection_config"
-    chat_inject_topic_hint = ref.get("chat_inject_topic_hint", True)
+    chat_inject_topic_anchor = ref.get("chat_inject_topic_anchor", ref.get("chat_inject_topic_hint", True))
     long_absence_hours = ref.get("long_absence_hours", 48)
 
     seg_cfg = load_segment_config(profile_id)
@@ -2347,7 +2489,7 @@ async def get_profile_reflection_config(profile_id: str):
     return {
         "custom_prompt": custom_prompt,
         "source": source,
-        "chat_inject_topic_hint": chat_inject_topic_hint,
+        "chat_inject_topic_anchor": chat_inject_topic_anchor,
         "long_absence_hours": long_absence_hours,
         "segments": segments,
     }
@@ -2355,7 +2497,7 @@ async def get_profile_reflection_config(profile_id: str):
 
 class ProfileReflectionConfigBody(BaseModel):
     custom_prompt: Optional[str] = None
-    chat_inject_topic_hint: Optional[bool] = None
+    chat_inject_topic_anchor: Optional[bool] = None
     long_absence_hours: Optional[int] = None
     segments: Optional[List[Dict[str, Any]]] = None  # unified reflection+ASE segments
     # Keep for backward compat but no longer write to profile.json:
@@ -2411,8 +2553,8 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
     ref = card["reflection_config"]
     if body.custom_prompt is not None:
         ref["custom_prompt"] = (body.custom_prompt or "").strip()
-    if body.chat_inject_topic_hint is not None:
-        ref["chat_inject_topic_hint"] = bool(body.chat_inject_topic_hint)
+    if body.chat_inject_topic_anchor is not None:
+        ref["chat_inject_topic_anchor"] = bool(body.chat_inject_topic_anchor)
     if body.long_absence_hours is not None:
         ref["long_absence_hours"] = max(1, min(720, int(body.long_absence_hours)))
     with open(path, "w", encoding="utf-8") as f:
@@ -2449,7 +2591,7 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
             else:
                 # Custom: add to custom_segments with inject_into
                 inject = (s.get("inject_into") or "reflection_ase").strip().lower()
-                valid_injects = ("chat", "reflection", "ase", "reflection_ase", "chat_reflection", "chat_ase", "all")
+                valid_injects = ("chat", "reflection", "ase", "reflection_ase")
                 if inject not in valid_injects:
                     inject = "reflection_ase"
                 seg_cfg.custom_segments.append(CustomSegmentDef(
@@ -2811,6 +2953,7 @@ async def get_reflection_config(request: Request):
     ref  = config.get_reflection_config()
     ase  = config.get_ase_config()
     vlm  = config.get_vlm_config()
+    td   = config.get_topic_discovery_config()
     sec_ref = config.secondary_models.get("reflection", {})
 
     # Build per-mode params merging YAML values over defaults
@@ -2865,6 +3008,14 @@ async def get_reflection_config(request: Request):
         "vlm_for_chat":         vlm.get("for_chat", True),
         "vlm_for_ase":          vlm.get("for_ase", True),
         "vlm_ase_wait_seconds": vlm.get("ase_wait_seconds", 3),
+        # Topic discovery（主动话题发现）
+        "topic_discovery": {
+            "enabled":            td.get("enabled", True),
+            "candidate_cap":      td.get("candidate_cap", 8),
+            "recent_used_window": td.get("recent_used_window", 10),
+            "chosen_topic_ttl":   td.get("chosen_topic_ttl", 1800),
+            "sources":            td.get("sources", {}),
+        },
     }
 
 
@@ -2899,6 +3050,8 @@ class ReflectionConfigBody(BaseModel):
     vlm_for_chat:         bool = True
     vlm_for_ase:          bool = True
     vlm_ase_wait_seconds: int  = 3
+    # Topic discovery（主动话题发现）—— 整块可选，前端不传则不改动
+    topic_discovery:      Optional[Dict[str, Any]] = None
 
 
 @router.post("/settings/reflection")
@@ -2976,12 +3129,27 @@ async def save_reflection_config(request: Request, body: ReflectionConfigBody):
     vlm["for_ase"]           = body.vlm_for_ase
     vlm["ase_wait_seconds"]  = body.vlm_ase_wait_seconds
 
+    # ── topic_discovery section（主动话题发现）─────────────────────────────
+    td = data.setdefault("topic_discovery", {})
+    if body.topic_discovery is not None:
+        bt = body.topic_discovery
+        for key, caster in (("enabled", bool), ("candidate_cap", int),
+                            ("recent_used_window", int), ("chosen_topic_ttl", int)):
+            if key in bt and bt[key] is not None:
+                td[key] = caster(bt[key])
+        if isinstance(bt.get("sources"), dict):
+            td_sources = td.setdefault("sources", {})
+            for sid, sval in bt["sources"].items():
+                if isinstance(sval, dict):
+                    td_sources.setdefault(sid, {}).update(sval)
+
     _save_yaml(y, data)
 
     # ── Hot-reload ─────────────────────────────────────────────────────────
     config.reflection = dict(ref)
     config.ase        = dict(ase)
     config.vlm        = dict(vlm)
+    config.topic_discovery = dict(td)
     config.secondary_models["reflection"] = dict(sec_ref)
 
     # ── 引擎启停：UI 开关改变时，无需重启服务器即可生效 ────────────────────
@@ -3115,7 +3283,7 @@ async def set_special_dates(profile_id: str, body: SpecialDatesBody):
 
 @router.get("/profiles/{profile_id}/persona_evolution")
 async def get_persona_evolution(profile_id: str):
-    """返回当前人格演化状态：原件、演化版、core_anchor。"""
+    """返回当前人格演化状态：原件、演化版、core_anchor、距下次演化轮数。"""
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
@@ -3123,11 +3291,26 @@ async def get_persona_evolution(profile_id: str):
         card = json.load(f)
     storage_root = os.path.join(_PROFILES_DIR, profile_id)
     from src.core.persona_evolution import get_changelog
+
+    # 距下次演化：统计自上次演化（evolved_at）以来的 AI 回复数（与 chat.py 触发口径一致）
+    evolved = card.get("persona_evolved") or {}
+    interval = int(evolved.get("min_interval_turns", 200))
+    last_ts = float(evolved.get("evolved_at") or 0)
+    turns_since = 0
+    try:
+        from src.memory.conversation_store import ConversationStore
+        turns_since = ConversationStore(storage_root, max_turns=0).count_user_messages_since(last_ts)
+    except Exception:
+        pass
+    turns_until_next = max(0, interval - turns_since) if interval > 0 else 0
+
     return {
         "base_prompt_original": card.get("base_prompt", ""),
         "style_constraint_original": card.get("style_constraint", ""),
-        "persona_evolved": card.get("persona_evolved") or {},
+        "persona_evolved": evolved,
         "changelog": get_changelog(storage_root),
+        "turn_counter": turns_since,
+        "turns_until_next": turns_until_next,
     }
 
 
@@ -3151,14 +3334,19 @@ async def extract_persona_anchor(profile_id: str, _body: PersonaEvolutionAnchorB
 
     persona_name = card.get("display_name") or card.get("name") or profile_id
     app = request.app
-    from src.core.persona_evolution import extract_anchor
+    from src.core.persona_evolution import _load_profile_card, _save_profile_card, extract_anchor
     anchor = await extract_anchor(persona_name, base, style, app, profile_id=profile_id)
     if not anchor:
         raise HTTPException(status_code=500, detail="anchor extraction failed")
 
-    card.setdefault("persona_evolved", {})["core_anchor"] = anchor
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(card, f, ensure_ascii=False, indent=2)
+    # Reload before writing: a portrait refresh or an evolution may have saved the card during the call
+    latest = _load_profile_card(profile_id)
+    if not latest:
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    evolved = latest.get("persona_evolved") or {}
+    evolved["core_anchor"] = anchor
+    latest["persona_evolved"] = evolved
+    _save_profile_card(profile_id, latest)
 
     return {"ok": True, "core_anchor": anchor}
 
@@ -3170,6 +3358,9 @@ class PersonaEvolutionSaveBody(BaseModel):
     style_constraint: Optional[str] = None
     enabled: Optional[bool] = None
     min_interval_turns: Optional[int] = None
+    max_evolution_facts: Optional[int] = None
+    max_evolution_conv_turns: Optional[int] = None
+    baseline_review_interval: Optional[int] = None
 
 
 @router.put("/profiles/{profile_id}/persona_evolution")
@@ -3192,6 +3383,12 @@ async def save_persona_evolution(profile_id: str, body: PersonaEvolutionSaveBody
         card["persona_evolved"]["enabled"] = body.enabled
     if body.min_interval_turns is not None:
         card["persona_evolved"]["min_interval_turns"] = max(10, body.min_interval_turns)
+    if body.max_evolution_facts is not None:
+        card["persona_evolved"]["max_evolution_facts"] = max(5, body.max_evolution_facts)
+    if body.max_evolution_conv_turns is not None:
+        card["persona_evolved"]["max_evolution_conv_turns"] = max(0, body.max_evolution_conv_turns)
+    if body.baseline_review_interval is not None:
+        card["persona_evolved"]["baseline_review_interval"] = max(0, min(50, body.baseline_review_interval))
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(card, f, ensure_ascii=False, indent=2)
@@ -3211,3 +3408,202 @@ async def rollback_persona_evolution(profile_id: str, body: PersonaRollbackBody)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Version {body.version} not found in changelog")
     return {"ok": True}
+
+
+@router.post("/profiles/{profile_id}/persona_evolution/trigger")
+async def trigger_persona_evolution_manual(profile_id: str, request: Request):
+    """手动触发一次人格演化。"""
+    storage_root = os.path.join(_PROFILES_DIR, profile_id)
+    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.persona_evolution import trigger_evolution
+    entry = await trigger_evolution(profile_id, storage_root, request.app)
+    if entry is None:
+        return {"ok": False, "reason": "evolution skipped (no facts, anchor init, or disabled)"}
+    return {"ok": True, "entry": entry}
+
+
+# ── User Portrait (AI-maintained user image) ─────────────────────────────────
+
+
+def _portrait_paths(profile_id: str) -> tuple[str, str]:
+    """Return (profile_json_path, storage_root)."""
+    return (
+        os.path.join(_PROFILES_DIR, f"{profile_id}.json"),
+        os.path.join(_PROFILES_DIR, profile_id),
+    )
+
+
+@router.get("/profiles/{profile_id}/user_portrait")
+async def get_user_portrait(profile_id: str):
+    """读取画像当前状态 + 配置 + 元数据。"""
+    path, storage_root = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+    portrait = card.get("user_portrait") or {}
+    from src.config.profile_loader import DEFAULT_USER_PORTRAIT_CONFIG
+    cfg = {**DEFAULT_USER_PORTRAIT_CONFIG, **(card.get("user_portrait_config") or {})}
+    from src.core.user_portrait import (
+        get_changelog,
+        list_contextual_details,
+        recent_context_status,
+        recent_context_ttl_hours,
+    )
+    changelog_count = len(get_changelog(storage_root))
+    address_block = portrait.get("address_forms") or {}
+    return {
+        "content": portrait.get("content", ""),
+        "updated_at": int(portrait.get("updated_at") or 0),
+        "refresh_count": int(portrait.get("refresh_count") or 0),
+        "config": cfg,
+        "changelog_count": changelog_count,
+        "address_forms": [f for f in (address_block.get("forms") or [])
+                          if isinstance(f, dict) and f.get("form")],
+        # The layers sent to the chat model besides the stable portrait: recent context
+        # (with its expiry, as the prompt applies it) and keyword-triggered details.
+        "recent_context": recent_context_status(portrait, recent_context_ttl_hours(cfg), time.time()),
+        "contextual_details": list_contextual_details(portrait),
+    }
+
+
+class UserPortraitAddressDeleteBody(BaseModel):
+    form: str = ""
+
+
+@router.post("/profiles/{profile_id}/user_portrait/address_forms/delete")
+async def delete_user_portrait_address_form(profile_id: str, body: UserPortraitAddressDeleteBody):
+    """Delete one detected form of address (corrects a misdetection; the only way to remove one)."""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import delete_address_form
+    return {"ok": delete_address_form(profile_id, body.form)}
+
+
+@router.post("/profiles/{profile_id}/user_portrait/recent_context/clear")
+async def clear_user_portrait_recent_context(profile_id: str):
+    """Clear the portrait's recent-context layer so it is no longer sent to the model."""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import clear_recent_context
+    return {"ok": clear_recent_context(profile_id)}
+
+
+class UserPortraitDetailDeleteBody(BaseModel):
+    summary: str = ""
+
+
+@router.post("/profiles/{profile_id}/user_portrait/contextual_details/delete")
+async def delete_user_portrait_contextual_detail(profile_id: str, body: UserPortraitDetailDeleteBody):
+    """Delete one contextual detail, identified by its summary."""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import delete_contextual_detail
+    return {"ok": delete_contextual_detail(profile_id, body.summary)}
+
+
+class UserPortraitEditBody(BaseModel):
+    content: str = ""
+
+
+@router.post("/profiles/{profile_id}/user_portrait/edit")
+async def edit_user_portrait(profile_id: str, body: UserPortraitEditBody):
+    """用户手动编辑画像（不走 LLM）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import manual_edit
+    ok = manual_edit(profile_id, body.content)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Edit failed")
+    return {"ok": True}
+
+
+@router.post("/profiles/{profile_id}/user_portrait/reset")
+async def reset_user_portrait(profile_id: str):
+    """清空 content（下次刷新从 introduction 重新长出）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import reset_portrait
+    ok = reset_portrait(profile_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Reset failed")
+    return {"ok": True}
+
+
+@router.post("/profiles/{profile_id}/user_portrait/refresh")
+async def refresh_user_portrait_manual(profile_id: str, request: Request):
+    """立即触发一次 LLM 画像刷新（force=True，跳过冷却与 signature 短路）。"""
+    path, storage_root = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    from src.core.user_portrait import trigger_portrait_refresh
+    entry = await trigger_portrait_refresh(
+        profile_id, storage_root, request.app, force=True, triggered_by="manual",
+    )
+    if entry is None:
+        return {"ok": False, "reason": "refresh skipped (disabled / no input / LLM error)"}
+    return {"ok": True, "entry": entry}
+
+
+@router.get("/profiles/{profile_id}/user_portrait/changelog")
+async def get_user_portrait_changelog(profile_id: str):
+    """读取画像变更历史。"""
+    _, storage_root = _portrait_paths(profile_id)
+    from src.core.user_portrait import get_changelog
+    return {"entries": get_changelog(storage_root)}
+
+
+class UserPortraitRollbackBody(BaseModel):
+    version: int
+
+
+@router.post("/profiles/{profile_id}/user_portrait/rollback")
+async def rollback_user_portrait(profile_id: str, body: UserPortraitRollbackBody):
+    """回滚画像到指定 version 的 content_before。"""
+    _, storage_root = _portrait_paths(profile_id)
+    from src.core.user_portrait import rollback as portrait_rollback
+    ok = portrait_rollback(profile_id, storage_root, body.version)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Version {body.version} not found in changelog")
+    return {"ok": True}
+
+
+class UserPortraitConfigBody(BaseModel):
+    enabled: Optional[bool] = None
+    auto_refresh_in_daily_job: Optional[bool] = None
+    min_turns_for_burst_refresh: Optional[int] = None
+    min_hours_between_refresh: Optional[int] = None
+    use_day_summary_as_input: Optional[bool] = None
+    use_facts_as_input: Optional[bool] = None
+    max_input_conv_turns: Optional[int] = None
+    address_forms_enabled: Optional[bool] = None
+
+
+@router.post("/profiles/{profile_id}/user_portrait/config")
+async def update_user_portrait_config(profile_id: str, body: UserPortraitConfigBody):
+    """更新 user_portrait_config（partial update）。"""
+    path, _ = _portrait_paths(profile_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        card = json.load(f)
+    cfg = card.setdefault("user_portrait_config", {})
+    updates = body.model_dump(exclude_none=True)
+    # 数值字段的下限保护
+    if "min_turns_for_burst_refresh" in updates:
+        updates["min_turns_for_burst_refresh"] = max(0, int(updates["min_turns_for_burst_refresh"]))
+    if "min_hours_between_refresh" in updates:
+        updates["min_hours_between_refresh"] = max(0, int(updates["min_hours_between_refresh"]))
+    if "max_input_conv_turns" in updates:
+        updates["max_input_conv_turns"] = max(10, int(updates["max_input_conv_turns"]))
+    cfg.update(updates)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(card, f, ensure_ascii=False, indent=2)
+    return {"ok": True, "config": cfg}

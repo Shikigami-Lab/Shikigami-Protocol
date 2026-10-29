@@ -121,16 +121,8 @@ async def get_group_history(
     store = mgr.get_conversation_store(group_id)
     if store is None:
         raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
-    all_msgs = store.get_all_with_id()
-    total = len(all_msgs)
-    if limit <= 0:
-        subset = all_msgs
-    elif offset <= 0:
-        subset = all_msgs[-limit:]
-    else:
-        end = total - offset
-        start = max(0, end - limit)
-        subset = all_msgs[start:end]
+    total = store.count_all()
+    subset = store.get_page_with_id(limit, offset)
     return {"group_id": group_id, "total": total, "messages": subset}
 
 
@@ -145,9 +137,7 @@ async def delete_group_messages_from(
     store = mgr.get_conversation_store(group_id)
     if store is None:
         raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx])
+    store.delete_from_index(msg_idx)
     return {"ok": True}
 
 
@@ -162,9 +152,29 @@ async def delete_group_message(
     store = mgr.get_conversation_store(group_id)
     if store is None:
         raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
-    records = store.get_all()
-    if 0 <= msg_idx < len(records):
-        store.save_all(records[:msg_idx] + records[msg_idx + 1:])
+    store.delete_at_index(msg_idx)
+    return {"ok": True}
+
+
+@router.delete("/groups/{group_id}/messages/by-id/{msg_id}")
+async def delete_group_message_by_id(
+    request: Request,
+    group_id: str,
+    msg_id: int,
+):
+    """Delete one group-chat message by its stable SQLite row id."""
+    mgr = _get_group_manager(request)
+    if mgr.get_group(group_id) is None:
+        raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
+    store = mgr.get_conversation_store(group_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail=f"Group store '{group_id}' not available")
+    if not store.delete_by_id(msg_id):
+        raise HTTPException(status_code=404, detail="Message not found")
+    await broadcast.push(f"group:{group_id}", {
+        "type": "message_deleted",
+        "message_id": msg_id,
+    })
     return {"ok": True}
 
 
@@ -282,10 +292,11 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
 
     # 用户消息写入群 store 并广播
     now = time.time()
-    store.append("user", body.message, sender=user_name)
+    user_message_id = store.append("user", body.message, sender=user_name)
     channel = f"group:{group_id}"
     await broadcast.push(channel, {
         "type": "new_message",
+        "message_id": user_message_id,
         "role": "user",
         "content": body.message,
         "timestamp": now,
@@ -320,6 +331,7 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
     reply_sequence = [order[i % len(order)] for i in range(reply_count)]
 
     async def generate():
+        yield f"data: {json.dumps({'message_id': user_message_id, 'message_role': 'user'})}\n\n"
         prev_sender: Optional[str] = None
         prev_content: Optional[str] = None
         for participant in reply_sequence:
@@ -401,24 +413,26 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
                         actual_error,
                         {"group_id": group_id, "reply_as": display_name, "response_preview": (full_response or "(empty)")[:500], "reason": reason},
                     )
-                    store.append("assistant", "", sender=display_name)
+                    assistant_message_id = store.append("assistant", "", sender=display_name)
                     log_llm_response(session_id=group_id, response=full_response or "(empty)", model=preset.get("model", ""))
                     await broadcast.push(channel, {
                         "type": "new_message",
+                        "message_id": assistant_message_id,
                         "role": "assistant",
                         "content": "回复生成失败，请重试。",
                         "timestamp": time.time(),
                         "client_id": body.client_id,
                         "sender": display_name,
                     })
-                    yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response', 'sender': display_name})}\n\n"
+                    yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response', 'sender': display_name, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
                     prev_sender = display_name
                     prev_content = ""
                 else:
-                    store.append("assistant", full_response, sender=display_name)
+                    assistant_message_id = store.append("assistant", full_response, sender=display_name)
                     log_llm_response(session_id=group_id, response=full_response, model=preset.get("model", ""))
                     await broadcast.push(channel, {
                         "type": "new_message",
+                        "message_id": assistant_message_id,
                         "role": "assistant",
                         "content": full_response,
                         "timestamp": time.time(),
@@ -461,7 +475,7 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
                         logger.warning("[group_chat] _fire_memory_tasks 失败: %s", mem_err)
                     prev_sender = display_name
                     prev_content = full_response
-                    yield f"data: {json.dumps({'token': '', 'done': True, 'sender': display_name})}\n\n"
+                    yield f"data: {json.dumps({'token': '', 'done': True, 'sender': display_name, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
             except (GeneratorExit, asyncio.CancelledError):
                 logger.info("[group_chat] 流被客户端中断，停止后续回复")
                 raise

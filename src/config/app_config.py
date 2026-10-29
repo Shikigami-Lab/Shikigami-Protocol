@@ -17,7 +17,7 @@ class AppConfig:
     log_level: str = "info"
     default_llm: str = "custom_api_1"
     default_tts: str = "edge_tts"
-    max_history_turns: int = 20
+    max_history_turns: int = 60
     user_name: str = "用户"  # 人类发言者标识，群聊认用户与 sender 一致
     user_persona: Dict[str, Any] = field(default_factory=dict)  # 主角（用户）全局设定
     llm_presets: Dict[str, Any] = field(default_factory=dict)
@@ -29,6 +29,7 @@ class AppConfig:
     ase: Dict[str, Any] = field(default_factory=dict)
     vlm: Dict[str, Any] = field(default_factory=dict)
     stt: Dict[str, Any] = field(default_factory=dict)
+    topic_discovery: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str = None) -> "AppConfig":
@@ -65,7 +66,7 @@ class AppConfig:
             log_level=raw.get("log_level", "info"),
             default_llm=raw.get("default_llm", "custom_api_1"),
             default_tts=raw.get("default_tts", "edge_tts"),
-            max_history_turns=int(raw.get("max_history_turns", 20)),
+            max_history_turns=int(raw.get("max_history_turns", 60)),
             user_name=str(raw.get("user_name", "用户")).strip() or "用户",
             user_persona=raw.get("user_persona", {}),
             llm_presets=presets,
@@ -77,6 +78,7 @@ class AppConfig:
             ase=raw.get("ase", {}),
             vlm=raw.get("vlm", {}),
             stt=raw.get("stt", {}),
+            topic_discovery=raw.get("topic_discovery", {}),
         )
 
     def get_analysis_preset(self) -> Optional[Dict[str, Any]]:
@@ -116,7 +118,7 @@ class AppConfig:
             "extraction_frequency": 5,
             "extraction_weight_threshold": 0.5,
             "max_facts_in_prompt": 8,
-            "max_history_turns": 20,
+            "max_history_turns": 60,
             "day_summary_enabled": False,
             "day_summary_keep_days": 14,
             "day_summary_max_messages": 100,      # 写日记/日摘要时单日最多取多少条对话（超出截断）
@@ -181,6 +183,36 @@ class AppConfig:
             "check_in_after_silent_seconds": ph.get("check_in_after_silent_seconds", 3600),
             "check_in_probability": ph.get("check_in_probability", 0.5),
         }
+        return result
+
+    def get_topic_discovery_config(self) -> Dict[str, Any]:
+        """返回 topic_discovery 节配置，含默认值（主动话题发现）。"""
+        defaults: Dict[str, Any] = {
+            "enabled": True,
+            "candidate_cap": 8,
+            "recent_used_window": 10,
+            "chosen_topic_ttl": 1800,
+            "sources": {},
+        }
+        source_defaults = {
+            "trend":               {"enabled": True},
+            "conversation_recall": {"enabled": True},
+            "user_life":           {"enabled": True},
+            "ai_self":             {"enabled": True},
+            "random_api": {
+                "enabled": False,
+                "mode": "builtin",
+                "builtin_pool": "icebreaker",
+                "http_url": "",
+                "http_json_path": "",
+            },
+        }
+        result = {**defaults, **self.topic_discovery}
+        merged_sources = {}
+        user_sources = self.topic_discovery.get("sources", {}) or {}
+        for sid, sdef in source_defaults.items():
+            merged_sources[sid] = {**sdef, **(user_sources.get(sid) or {})}
+        result["sources"] = merged_sources
         return result
 
     def get_vlm_config(self) -> Dict[str, Any]:

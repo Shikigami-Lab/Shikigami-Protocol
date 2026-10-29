@@ -41,18 +41,6 @@ logger = logging.getLogger(__name__)
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
-def _load_persona_evolved_config(profile_id: str) -> Optional[Dict]:
-    """读取 profile.persona_evolved 字段（含 enabled / min_interval_turns）。轻量只读，不抛异常。"""
-    path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
-    try:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f).get("persona_evolved") or {}
-    except Exception:
-        pass
-    return {}
-
-
 # 前置过滤：时间相对词（此类事实时效性差，跳过）
 _STALE_WORDS = frozenset(["刚才", "今天", "昨天", "刚刚", "这次", "这会儿", "现在", "今晚", "刚好"])
 
@@ -205,6 +193,26 @@ class MemoryManager:
         )
 
     # ── 公共 API ──────────────────────────────────────────────────────────────
+
+    def _expand_card_macros(self, text: str, profile: Dict = None, app=None) -> str:
+        """Expand SillyTavern macros in custom prompts.
+
+        Profiles imported from character cards often have {{char}}/{{user}} in extraction_prompt /
+        day_summary_prompt. Unexpanded, the helper model reads the literal macros and may copy them
+        into extracted facts or day summaries, which memory injection then amplifies.
+        """
+        if not text or "{{" not in text:
+            return text
+        from src.core.user_portrait import _resolve_user_intro
+        from src.prompt.macros import build_macro_table, expand_macros
+        from src.utils.persona_context import resolve_user_name
+        profile = profile or {}
+        _, introduction = _resolve_user_intro(profile, app)
+        return expand_macros(text, build_macro_table(
+            char_name=profile.get("display_name") or profile.get("name") or "",
+            user_name=resolve_user_name(profile, app) or "用户",
+            persona=introduction,
+        ))
 
     def status(self) -> Dict[str, Any]:
         vec_ok = bool(self.vectors and self.vectors.is_available())
@@ -390,25 +398,53 @@ class MemoryManager:
                            len(facts_list), added_count)
         logger.info("[MemoryManager] auto_extract 完成 profile=%s extracted=%d added=%d",
                     self._profile_id, len(facts_list), added_count)
-
-        # ── 触发人格演化（fire-and-forget，不阻塞对话流）────────────────────
-        # 使用与情绪/好感度引擎相同的 turn_counter % interval 模式
-        _evo_card = _load_persona_evolved_config(self._profile_id)
-        _evo_interval = int((_evo_card or {}).get("min_interval_turns", 200))
-        if (_evo_card or {}).get("enabled", True) and self._turn_counter > 0 and self._turn_counter % _evo_interval == 0:
-            try:
-                from src.core.persona_evolution import trigger_evolution
-                asyncio.ensure_future(
-                    trigger_evolution(self._profile_id, self._storage_root, app,
-                                      turn_counter=self._turn_counter)
-                )
-            except Exception as _e:
-                logger.warning("[MemoryManager] 人格演化触发失败（非致命）: %s", _e)
+        # 人格演化触发已移出此处：旧实现挂在 auto_extract 末尾，会被 memory 总开关
+        # 绑死，且 turn_counter % interval 的判定在频率不整除时会永远命不中。
+        # 现由 chat.py::_fire_persona_evolution_check 按消息计数独立触发。
 
     def _build_day_summary_context(self, date_str: str, msg_count: int, profile: Dict, app) -> Dict[str, str]:
         """收集日摘要所需的上下文变量：角色名、近期日记、好感状态、活跃度备注。"""
         # 角色名
         character_name = (profile or {}).get("display_name", "") or self._profile_id
+
+        # Persona: the diary asks for first-person inner feelings. With only a name the model has no
+        # character to hold on to, and on content that conflicts with its safety alignment it falls back
+        # to its own identity and writes "as an AI…" disclaimers. mid_term_memory injects these texts
+        # back into every chat turn, which breaks the roleplay directly.
+        persona_brief = ""
+        try:
+            from src.utils.persona_context import get_persona_context_for_secondary_llm, resolve_user_name
+            persona_brief = get_persona_context_for_secondary_llm(
+                profile,
+                max_chars=1200,
+                user_name=resolve_user_name(profile, app),
+            )
+        except Exception:
+            persona_brief = ""
+        if not persona_brief:
+            # Without reflection_config.custom_prompt, fall back to the persona text (evolved version
+            # first). This path must expand {{char}}/{{user}} too, or a persona imported from a
+            # character card feeds literal macros to the diary model.
+            _ev = (profile or {}).get("persona_evolved") or {}
+            _bp = ((_ev.get("base_prompt") or "") if _ev.get("enabled", True) else "") \
+                  or (profile or {}).get("base_prompt") or ""
+            persona_brief = self._expand_card_macros(_bp.strip()[:1200], profile, app)
+        if not persona_brief:
+            persona_brief = f"（暂无角色设定，请仅以「{character_name}」这个身份书写）"
+
+        # How to refer to the user: a system word like 「用户」 in the prompt pushes the diary toward a
+        # report tone, so the default config name counts as unset. Order: the user's own name, a custom
+        # config name, how the character usually addresses them, then a neutral word.
+        from src.config.prompt_loader import get_locale
+        from src.core.user_portrait import _resolve_user_intro, extract_style_address_form
+        _cfg2 = getattr(getattr(app, "state", None), "config", None) if app else None
+        _configured = str(getattr(_cfg2, "user_name", "") or "").strip() if _cfg2 else ""
+        user_name = (
+            _resolve_user_intro(profile or {}, app)[0]
+            or ("" if _configured.casefold() in {"用户", "user", "the user"} else _configured)
+            or extract_style_address_form(profile or {})
+            or ("them" if get_locale() == "en" else "对方")
+        )
 
         # 近期日记（最多 3 条，放在对话内容之前）
         recent = self.day_store.get_recent(4)  # 取 4 条，排除当天后留 3 条
@@ -452,6 +488,8 @@ class MemoryManager:
 
         return {
             "character_name": character_name,
+            "persona_brief": persona_brief,
+            "user_name": user_name,
             "recent_summaries": recent_summaries,
             "affinity_status": affinity_status,
             "activity_note": ("\n" + activity_note) if activity_note else "",
@@ -520,13 +558,36 @@ class MemoryManager:
 
         ctx = self._build_day_summary_context(date_str, len(day_msgs), profile, app)
 
-        custom_summary_prompt = self._cfg.get("day_summary_prompt", "")
+        custom_summary_prompt = self._expand_card_macros(self._cfg.get("day_summary_prompt", ""), profile, app)
         if custom_summary_prompt:
-            prompt_template = custom_summary_prompt.replace("{conversation}", conv_text).replace("{date}", date_str)
+            # A custom prompt only names the character, so give it the same persona and address context
+            # as the built-in prompts; without it the model can fall back to writing as an assistant.
+            from src.config.prompt_loader import get_locale, render
+            _locale = get_locale()
+            preamble = render(
+                "memory.day_summary_custom_preamble", locale=_locale,
+                default=(
+                    "You are $character_name. Your persona:\n$persona_brief\n\n"
+                    "Refer to the other person as \"$user_name\". Write as yourself, in your own voice; "
+                    "never speak as an assistant or model."
+                    if _locale == "en" else
+                    "你是 $character_name。你的人设：\n$persona_brief\n\n"
+                    "称呼对方为「$user_name」。始终以你自己的身份和口吻书写，不要以助手或模型的身份说话。"
+                ),
+                character_name=ctx["character_name"],
+                persona_brief=ctx["persona_brief"],
+                user_name=ctx["user_name"],
+            )
+            prompt_template = (
+                preamble.strip() + "\n\n"
+                + custom_summary_prompt.replace("{conversation}", conv_text).replace("{date}", date_str)
+            )
         elif quiet:
             prompt_template = Template(get_prompt("memory.day_summary_quiet")).safe_substitute(
                 date_str=date_str,
                 character_name=ctx["character_name"],
+                persona_brief=ctx["persona_brief"],
+                user_name=ctx["user_name"],
                 recent_summaries=ctx["recent_summaries"],
                 affinity_status=ctx["affinity_status"],
             )
@@ -535,6 +596,8 @@ class MemoryManager:
                 date_str=date_str,
                 conv_text=conv_text,
                 character_name=ctx["character_name"],
+                persona_brief=ctx["persona_brief"],
+                user_name=ctx["user_name"],
                 recent_summaries=ctx["recent_summaries"],
                 affinity_status=ctx["affinity_status"],
                 activity_note=ctx["activity_note"],
@@ -604,16 +667,19 @@ class MemoryManager:
 
     async def run_consolidation_batch(
         self, app: Any, profile: Dict[str, Any], batch: List[Any]
-    ) -> Tuple[bool, int]:
-        """将一批「已很淡」的事实交给 LLM 合并为 1～2 条新事实，先写新再删旧。返回 (成功, 新写入条数)。"""
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """将一批「已很淡」的事实交给 LLM 合并为 1～2 条新事实，新摘要入库 + 移除旧事实向量（事实库不删）。
+        返回 (成功, detail)；detail 含 added/added_contents/vectors_removed/vectors_removed_contents/count，
+        供记忆变更日志记录，失败或无事可做时为 {}。"""
         if not batch:
-            return True, 0
+            return True, {}
         valid_categories = {"habit", "preference", "taboo", "relationship", "location", "milestone", "ai_insight", "other"}
         fact_list = "\n".join(
             f"{f.content} [{getattr(f, 'category', 'other')}] [{getattr(f, 'emotional_note', '')}]"
             for f in batch
         )
         base_prompt = (profile.get("memory_config") or {}).get("extraction_prompt") or self._cfg.get("extraction_prompt") or "从对话中提取事实，保持角色口吻。"
+        base_prompt = self._expand_card_macros(base_prompt, profile, app)
         system_content = base_prompt + _consolidation_appendix(fact_list) + _extraction_format_block()
         messages = [
             {"role": "system", "content": system_content},
@@ -625,7 +691,7 @@ class MemoryManager:
             extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
             # 特殊值："__none__"=不做合并；""=使用激活模型
             if extraction_preset_name == "__none__":
-                return False, 0
+                return False, {}
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:
@@ -651,7 +717,7 @@ class MemoryManager:
             )
         except Exception as e:
             logger.warning("[MemoryManager] 合并 LLM 调用失败 profile=%s: %s", self._profile_id, e)
-            return False, 0
+            return False, {}
         raw = raw.strip()
         for prefix in ("```json", "```"):
             if raw.startswith(prefix):
@@ -679,9 +745,9 @@ class MemoryManager:
                 data = json.loads(raw)
             except Exception as e2:
                 logger.warning("[MemoryManager] 合并重试仍失败 profile=%s: %s", self._profile_id, e2)
-                return False, 0
+                return False, {}
         if not isinstance(data, list):
-            return False, 0
+            return False, {}
         min_old_updated = min(f.updated_at for f in batch)
         valid_items = []
         # 合并产出是 1～2 条概括性陈述，允许比「单条提取 50 字」更长，上限 500 字
@@ -704,7 +770,7 @@ class MemoryManager:
                 tags = _normalize_keywords(tags)
             valid_items.append({"content": content, "category": cat, "weight": weight, "emotional_note": emotional_note, "tags": tags})
         if not valid_items:
-            return False, 0
+            return False, {}
         added = []
         for it in valid_items:
             fact = self.facts.add(
@@ -718,7 +784,7 @@ class MemoryManager:
             )
             if not fact:
                 logger.warning("[MemoryManager] 合并写新事实失败（重复或错误）profile=%s", self._profile_id)
-                return False, 0
+                return False, {}
             added.append(fact)
             log_fact_add(
                 self._profile_id,
@@ -748,7 +814,32 @@ class MemoryManager:
             "[MemoryManager] 合并完成 profile=%s 旧向量删除 %d 新事实写入 %d（事实库未删，永久保留）",
             self._profile_id, len(old_ids), len(added),
         )
-        return True, len(added)
+        # detail 供 memory_changelog 记录：added=新摘要 fact id；vectors_removed=被移除向量的旧事实 id；
+        # *_contents 为对应全文（日志展示用，不截断）
+        detail = {
+            "added": [f.id for f in added],
+            "added_contents": [f.content for f in added],
+            "vectors_removed": list(old_ids),
+            "vectors_removed_contents": [f.content for f in batch],
+            "count": len(added),
+        }
+        return True, detail
+
+    async def reembed_fact(self, fact_id: str) -> bool:
+        """把某条仍在档案里的事实重新嵌入向量库（记忆变更回滚用）。"""
+        if not (self.vectors and self.vectors.is_available()):
+            return False
+        fact = self.facts.get_by_id(fact_id)
+        if not fact:
+            return False
+        try:
+            doc = _vector_document_for_fact(fact)
+            meta = _vector_metadata_for_fact(fact)
+            await asyncio.to_thread(self.vectors.add, doc, metadata=meta, skip_dedup=True)
+            return True
+        except Exception as e:
+            logger.warning("[MemoryManager] reembed_fact 失败 %s: %s", fact_id, e)
+            return False
 
     def get_summary_range_preview(
         self,
@@ -956,7 +1047,7 @@ class MemoryManager:
             )
             return []
 
-        custom_prompt = self._cfg.get("extraction_prompt", "")
+        custom_prompt = self._expand_card_macros(self._cfg.get("extraction_prompt", ""), profile, app)
         if custom_prompt:
             extraction_prompt = custom_prompt.replace("{conversation}", conv_text)
             # 若自定义模板里没有占位符 {conversation}，replace 不会插入对话，导致模型只收到人设而输出角色话而非 JSON
@@ -990,7 +1081,7 @@ class MemoryManager:
             # 特殊值："__none__"=不做记忆提取；""=使用激活模型
             if extraction_preset_name == "__none__":
                 logger.debug("[MemoryManager] extraction_llm_preset='__none__', skip extraction")
-                return 0
+                return []
             if extraction_preset_name:
                 preset = app.state.config.get_llm_preset(extraction_preset_name)
             else:

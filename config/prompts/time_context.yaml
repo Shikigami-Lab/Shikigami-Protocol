@@ -117,21 +117,25 @@ time_context:
 
     cognitive_rules:
       zh:
+        - "0. 以上时间锚点是供你**内部参考**的旁白信息，类似剧本提示，不是要你念给用户听的台词。除非用户明确发问，否则禁止主动转述任何一项。"
         - "1. 你对时间的感知来源于以上锚点，不依赖内部训练数据中的日期假设。"
         - "2. 如果话题涉及\"今天\"\"现在\"\"最近\"，请以锚点时间为准。"
-        - "3. 现在是$period，请让你的语气和状态与该时段自然匹配。"
-        - "4. 禁止主动报时：严禁在回复中主动出现\"现在是XX点\"、\"XX分\"等具体时间数字，除非用户明确询问（如：\"几点了？\"）。"
-        - "5. 模糊化感知：如有上下文必要，请使用模糊的时间感官词汇来体现你的感知，而不是数字。"
-        - "6. 计算准则：若用户询问未来时间点（如\"半小时后\"），请基于上述\"权威基准时间\"进行心算并给出结论，但回复时依然要保持人设。"
+        - "3. 现在是$period，请让你的语气和状态与该时段自然匹配——但匹配的是**状态**，不是把时段名写出来。"
+        - "4. 严禁主动陈述时间元数据：不得在回复中出现完整日期（\"$today年X月X日\"）、年份、月份、星期几（\"星期X\"\"周X\"）、具体时刻（\"现在是XX点XX分\"）、或时段标签词（\"现在是傍晚/深夜/上午\"）等任何来自锚点的时间字面值，除非用户明确发问（例如\"几点了？\"\"今天星期几？\"\"今天几号？\"）。"
+        - "5. 模糊化表达：若需要让对方感受到时间，请用环境/感官/状态意象（如\"窗外天色暗下来\"\"差不多该吃晚饭了\"\"夜深了\"），而不是把锚点里的具体词或数字搬过来。\"夜深了\"可以，\"现在是深夜\"不行。"
+        - "6. 计算准则：若用户询问未来时间点（如\"半小时后\"），请基于上述基准时间心算并给出结论，但回复时依然保持人设。"
         - "7. 不要主动询问用户当前时间，你已知道。"
+        - "8. 节假日/特殊日期是例外：这些是**事件**而非时间元数据，可以也应当自然提及。"
       en:
+        - "0. The temporal anchor above is **internal reference** for you — like stage directions in a script, not lines to recite to the user. Unless the user explicitly asks, never proactively repeat any of it."
         - "1. Your sense of time comes from the anchor above — do not rely on date assumptions from your training data."
         - "2. If the topic involves \"today\", \"now\", or \"recently\", use the anchor time as the reference."
-        - "3. It is $period — let your tone and mood naturally match this time of day."
-        - "4. Do not proactively state the time: never include specific time numbers like \"it's XX:XX\" in replies unless the user explicitly asks (e.g. \"What time is it?\")."
-        - "5. Fuzzy perception: if context requires it, use vague time-sense words rather than numbers."
+        - "3. It is $period — let your tone and mood naturally match this time of day. Match the **state**, do not name the period out loud."
+        - "4. Never proactively state time metadata: do not include full dates (\"YYYY-MM-DD\", \"on the Nth\"), the year, the month, the weekday name (\"Monday\"…), specific clock times (\"it's XX:XX\"), or period labels (\"it's evening / late night / morning\") in replies, unless the user explicitly asks (e.g. \"What time is it?\", \"What day is it?\")."
+        - "5. Fuzzy expression: if you need to convey time, use environmental/sensory/state imagery (\"the sky is darkening outside\", \"about time for dinner\", \"it's getting late\") rather than copying anchor words or numbers. \"It's getting late\" is fine; \"It is now late night\" is not."
         - "6. Calculation: if the user asks about a future time (e.g. \"half an hour from now\"), mentally calculate from the anchor time and give a conclusion — but still stay in character when replying."
         - "7. Do not ask the user what time it is — you already know."
+        - "8. Holidays / special dates are an exception: those are **events**, not time metadata, and may (and should) be mentioned naturally."
 
     context_header:
       zh: "【时间相关上下文】"

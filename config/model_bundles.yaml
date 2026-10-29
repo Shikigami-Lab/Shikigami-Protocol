@@ -1,9 +1,9 @@
-# 入门 / 启动器「下载模型」清单（技术字段）
-# 卡片标题与说明：static/js/i18n.js → modelBundle_<id>_title / modelBundle_<id>_desc
-# 私库合并时若需在 YAML 写 title_zh 等，仍可作为无 i18n 键时的回退由 API 下发
-# HF 镜像（hf-mirror.com）或 ModelScope 均可下载，在界面按钮选择
-# modelscope_repo_id: 国内 ModelScope 镜像源
-models_root_env: SHIKIGAMI_MODELS_ROOT  # 未设置则使用 项目根/models
+# Model download bundles for onboarding and the launcher (technical fields only)
+# Card titles and descriptions: static/js/i18n.js → modelBundle_<id>_title / modelBundle_<id>_desc
+# title_* / description_* in this file are still served as a fallback when no i18n key exists
+# Downloads work from the HF mirror (hf-mirror.com) or ModelScope; pick one with the buttons in the UI
+# modelscope_repo_id: ModelScope mirror (useful in mainland China)
+models_root_env: SHIKIGAMI_MODELS_ROOT  # defaults to <project root>/models when unset
 
 bundles:
 

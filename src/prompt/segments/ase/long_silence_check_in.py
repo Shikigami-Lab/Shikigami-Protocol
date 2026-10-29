@@ -16,7 +16,9 @@ class AseLongSilenceCheckInSegment(PromptSegment):
     is_core = False
     priority = 60
     label = "长时间沉默时可问在干嘛"
+    label_en = "Long Silence Check-in"
     description = "用户沉默超过「触发方式」设定分钟数时注入；若担心太频繁可在同一段落用「冷却时间」限制。"
+    description_en = "Injects a check-in hint when the user has been silent longer than the configured threshold"
     default_trigger_mode = "first_after_silence"
     default_trigger_param = 60.0  # 60 minutes silence
 

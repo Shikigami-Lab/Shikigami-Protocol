@@ -391,3 +391,33 @@ async def run_forgetting_now(profile_id: str, request: Request):
     await run_forgetting_for_profile(profile_id, request.app, yesterday, force=True)
     log_app_event("forgetting_run_done", profile_id=profile_id)
     return {"ok": True, "message": "已执行一次遗忘任务（衰减、强化、孤儿清理）"}
+
+
+# ── 记忆变更日志 + 回滚 ───────────────────────────────────────────────────────
+
+@router.get("/{profile_id}/changelog")
+async def get_memory_changelog(profile_id: str, request: Request):
+    """返回该人格的记忆变更历史（最近 20 条，最新在前）。无需人格已加载。"""
+    import os
+    from src.memory.memory_changelog import get_changelog
+    from src.utils.paths import get_project_root
+    storage_root = os.path.join(get_project_root(), "profiles", profile_id)
+    return {"changelog": get_changelog(storage_root)}
+
+
+class MemoryRollbackBody(BaseModel):
+    run_id: str
+
+
+@router.post("/{profile_id}/changelog/rollback")
+async def rollback_memory_changelog(profile_id: str, body: MemoryRollbackBody, request: Request):
+    """回滚某次记忆变更：撤销该次权重变化、删除其新增摘要、重新嵌入其移除的向量。
+    需人格已加载（回滚要操作 MemoryManager）。"""
+    mgr = _require_manager(request, profile_id)
+    from src.memory import memory_changelog
+    result = await memory_changelog.rollback(mgr._storage_root, body.run_id, mgr)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "rollback_failed"))
+    log_app_event("memory_rollback", profile_id=profile_id, run_id=body.run_id,
+                  restored=result.get("restored"), skipped=result.get("skipped"))
+    return result

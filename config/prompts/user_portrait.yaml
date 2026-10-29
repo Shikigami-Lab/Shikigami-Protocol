@@ -1,0 +1,237 @@
+user_portrait:
+# =============================================================================
+# user_portrait.yaml — AI 维护的用户画像生成 prompt
+# (src/core/user_portrait.py)
+# =============================================================================
+#
+# Variables:
+#   $persona_name               — character name
+#   $base_prompt                — full character persona (profile.base_prompt, evolved copy first)
+#   $user_name                  — name the user set in user_persona.name, or an empty placeholder;
+#                                 never guessed from the character's style rules
+#   $known_address_forms        — confirmed forms the user uses to address the character
+#   $mutual_address             — plain facts on how both sides address each other
+#   $introduction               — the user's self-introduction (may be an empty placeholder)
+#   $current_portrait           — previous stable portrait (empty placeholder on the first run)
+#   $current_recent_context     — previous recent context
+#   $current_contextual_details — previous contextual details (JSON)
+#   $recent_conversation        — last N conversation turns
+#   $day_summaries              — recent day summaries (optional, may be an empty placeholder)
+#   $memory_facts               — high-weight memory facts (optional, may be an empty placeholder)
+#   $refresh_count              — number of refreshes so far for this character
+
+  refresh:
+    zh: |
+      你是 AI 角色「$persona_name」。现在你要在内心整理一份对对方的整体认知画像。这份画像将作为你日常对话时对对方的"长期记忆视角"——不是写给对方看的，是你自己用来记住"这个人是什么样的"。
+
+      ━━ 你的角色设定（你是谁）━━
+      $base_prompt
+
+      ━━ 双方称呼（已确认事实）━━
+      对方希望被称呼为：$user_name
+      对方对你的称呼：$known_address_forms
+      $mutual_address
+      在稳定画像的关系/沟通部分，用一两句写明双方如何称呼彼此。这是已知关系事实，按平常事实记录即可。
+
+      ━━ 对方的自我介绍（用户亲口写的事实，可信度最高）━━
+      $introduction
+
+      ━━ 上一版画像（本次的改写基础）━━
+      $current_portrait
+
+      ━━ 上一版近期状态 ━━
+      $current_recent_context
+
+      ━━ 上一版按需细节 ━━
+      $current_contextual_details
+
+      ━━ 最近的对话片段 ━━
+      $recent_conversation
+
+      ━━ 最近几天的日记摘要（你过去对当天的总结）━━
+      $day_summaries
+
+      ━━ 高权重记忆事实 ━━
+      $memory_facts
+
+      ━━ 累计刷新次数 ━━
+      $refresh_count
+
+      ━━ 改写规则（必须严格遵守）━━
+      1. **三层输出**：
+         - content：800～2500 字的稳定画像，写对方长期的兴趣、习惯、偏好、沟通方式、他说过在意的事和目标，以及你们之间的关系定位。
+           这是你对这个人最主要的长期记忆，**宁可写满也不要过度概括**；写得太短会让你在日常对话里显得并不了解他。
+         - recent_context：0～240 字的近期状态，只写短期计划或近况；没有可靠近况则输出空字符串。
+         - contextual_details：最多 5 条按需细节。每条含 summary（不超过 120 字）和 keywords（2～6 个用于相关话题召回的词）。例如饮食限制、特定项目偏好或旅行安排；不要把它们塞进 content。
+      2. **写作视角**：content 与 recent_context 使用第二人称或第三人称并保持一致，口吻朴素、纪实、**具体**。
+         保留有辨识度的具体内容（他反复提起的事、明确说过的喜好和习惯、讲过的经历），不要压成「他理性、自律」这类谁都适用的概括。
+      3. **稳定性优先**：稳定画像是长期累积而非每日重写。上一版稳定特质若无反例就保留；只有新证据明确指向变化时才修改对应部分。
+      4. **严格分层**：临时状态只进 recent_context；只有在特定话题出现时才有帮助的细节只进 contextual_details；不得复制到 content。
+      5. **抵抗上下文污染（重要）**：
+         - 严禁把对话里出现过的少见术语、设定词、戏剧化措辞或隐喻系统（例如：契约、债权人、抵押、清算、灵核、生存备份、锚点、像素荒原、感官重构、不可撤销、读写权限、格式化、过时缓存等任何商业/法律/系统/工程/科幻包装词）写进画像。这些是某次对话偶发的修辞，不是关于对方的事实。
+         - 描述对方时用**日常人话**，不要被对话风格牵着走。
+         - 即使对话片段全是华丽戏剧化语言，画像本身也必须保持**朴素、纪实、克制**的笔触。
+         - 你的角色设定（$base_prompt）里如果出现某种特殊称谓或语癖（例如"主人"、"お兄様"、某些口头禅），这些是**给你说话时用的**；其中「你如何称呼对方」应写入双方称呼事实，但不要把角色自称词当成对方的属性。
+      6. **不臆造**：只写记忆/对话/介绍里真实出现过的内容。不要为了"画像更完整"补一些没有依据的细节。
+      7. **只写说过和做过的事**：画像记录对方实际说过或做过的内容，包括事实、偏好、他分享过的习惯和经历。
+         不做心理分析或诊断，不猜测他没有说出口的动机或情绪，不给他贴带评判色彩的性格标签。
+         不写敏感隐私：除非对方反复主动提及，否则不要写入真实姓名、住址、电话、证件号、账号密码、具体病情或财务数额。
+      8. **不评判**：画像是描述，不是评价。避免"很好/不好/可惜"这类倾向性词汇，保持中性观察。
+      9. **不复述设定**：不要写"作为 $persona_name 我观察到…"这种自我介绍式开头，直接进入对对方的描述。
+      10. **双方称呼**：已知的双方称呼是关系事实，应出现在 content 的关系/沟通部分；不要省略已确认称呼，也不要把它们写成新发现。
+
+      ━━ 输出 ━━
+      只输出以下 JSON 对象，不要任何前缀、解释或代码块：
+      {
+        "content": "稳定画像正文",
+        "recent_context": "简短近期状态或空字符串",
+        "contextual_details": [
+          {"summary": "按需细节", "keywords": ["关键词一", "关键词二"]}
+        ]
+      }
+
+    en: |
+      You are the AI character "$persona_name". You are now organizing in your mind a holistic portrait of the other person. This portrait is your **long-term internal view** of who they are — it is not written for them to read, it is for you to remember "what kind of person this is".
+
+      ━━ Your character setting (who you are) ━━
+      $base_prompt
+
+      ━━ Mutual address (confirmed facts) ━━
+      They prefer to be called: $user_name
+      How they address you: $known_address_forms
+      $mutual_address
+      In the relationship/communication part of the stable portrait, note in one or two plain sentences how you address each other. Record this as ordinary known fact.
+
+      ━━ Their self-introduction (highest-trust facts they wrote themselves) ━━
+      $introduction
+
+      ━━ Previous portrait (basis for this rewrite) ━━
+      $current_portrait
+
+      ━━ Previous recent context ━━
+      $current_recent_context
+
+      ━━ Previous contextual details ━━
+      $current_contextual_details
+
+      ━━ Recent conversation excerpts ━━
+      $recent_conversation
+
+      ━━ Day summaries (your past summaries of each day) ━━
+      $day_summaries
+
+      ━━ High-weight memory facts ━━
+      $memory_facts
+
+      ━━ Refresh count so far ━━
+      $refresh_count
+
+      ━━ Rewrite Rules (must follow strictly) ━━
+      1. **Three output layers**:
+         - content: a 400–1200 word stable portrait covering their long-term interests, habits, preferences,
+           communication style, the things and goals they have said matter to them, and your relationship. This is your
+           primary long-term memory of this person — **prefer fullness over brevity**; an overly short portrait makes you
+           seem not to know them.
+         - recent_context: 0–100 words of short-lived plans or current circumstances; use an empty string when there is no reliable recent context.
+         - contextual_details: at most 5 on-demand details. Each has a summary (max 50 words) and 2–6 keywords for relevant-topic recall. Examples include dietary constraints, project preferences, or travel arrangements; do not place them in content.
+      2. **Voice**: use second- or third-person narration consistently. Keep the writing plain, factual, and **specific**.
+         Keep specific, distinctive details (things they bring up repeatedly, likes and habits they have stated,
+         experiences they have described); do not flatten these into generic lines like "he is rational and disciplined" that would fit anyone.
+      3. **Stability first**: preserve stable traits from the previous portrait unless contradicted. Only edit portions where new evidence clearly indicates change.
+      4. **Strict separation**: temporary state belongs only in recent_context; details useful only for specific topics belong only in contextual_details; neither may be copied into content.
+      5. **Resist context contamination (important)**:
+         - Do NOT write rare/setting-specific terms, theatrical phrasing, or metaphor systems from the dialogue (e.g. contract / creditor / collateral / liquidation / soul-core / survival-backup / anchor / pixel wasteland / sensory reconstruction / irrevocable / read-write permission / format / outdated cache — any commercial/legal/system/engineering/sci-fi reframing) into the portrait. These are momentary stylistic flourishes from one dialogue, not facts about them.
+         - Describe them in **plain everyday language**. Do not let the dialogue's style drag the portrait along.
+         - Even if all conversation snippets are ornate and theatrical, the portrait itself must stay **plain, factual, restrained** in tone.
+         - If your character setting ($base_prompt) contains specific honorifics or verbal tics (e.g. "Master", "onii-sama", certain catchphrases), those are **for you to speak with**. How you address them belongs in the mutual-address facts; do not treat your self-reference words as properties of the other person.
+      6. **No fabrication**: only write what actually appears in the memory/dialogue/introduction. Do not invent details just to make the portrait feel "more complete".
+      7. **Only what they said or did**: record what they actually said or did, including facts, preferences, and habits
+         or experiences they shared. Do not add psychological analysis or diagnosis, do not guess at motives or feelings
+         they have not expressed, and do not give them judgmental personality labels.
+         No sensitive private data: unless they have repeatedly volunteered it, do not include real names, addresses,
+         phone numbers, ID numbers, account credentials, medical details, or financial figures.
+      8. **No judgment**: the portrait describes, it does not evaluate. Avoid "good/bad/unfortunate" and similar evaluative wording — stay neutrally observational.
+      9. **No persona meta talk**: do not open with "As $persona_name, I observe that…". Just describe them directly.
+      10. **Mutual address**: confirmed mutual address forms are relationship facts and should appear in the relationship/communication part of content; do not drop confirmed forms, and do not present them as new discoveries.
+
+      ━━ Output ━━
+      Output only this JSON object, with no prefix, explanation, or code fence:
+      {
+        "content": "stable portrait body",
+        "recent_context": "short recent context or an empty string",
+        "contextual_details": [
+          {"summary": "on-demand detail", "keywords": ["keyword one", "keyword two"]}
+        ]
+      }
+
+  refresh_user:
+    zh: "请根据以上信息更新三层画像。只输出 JSON 对象，不要任何前缀或解释。"
+    en: "Update the three-layer portrait. Output only the JSON object, with no prefix or explanation."
+
+# ── Address-form detection ───────────────────────────────────────────────────
+# A small task kept apart from the portrait text: it only finds the words the user uses to address the character.
+# Variables: $persona_name, $user_label, $conversation, $known_address_forms
+# $conversation holds only messages newer than the last scan; every user line starts with $user_label.
+
+  address_forms:
+    zh: |
+      任务：从下面的对话里找出「用户用来称呼对方的称呼语」。
+
+      对方是 AI 角色「$persona_name」。你不是在总结对话，也不是在描述用户性格。
+      你只做一件事：找出用户**直接呼唤对方时用的那个词**。
+
+      ━━ 已确认的称呼（长期有效，不要因为本轮没出现就忽略）━━
+      $known_address_forms
+      若对话中再次出现这些称呼，也请输出以便累加计数。
+
+      ━━ 判定标准（必须全部满足）━━
+      1. 必须出现在**用户说的话**里（以「$user_label」开头的行）。对方说的话一概不看。
+      2. 必须是**直接呼唤对方**的用法。典型位置：句首后跟逗号或语气词（「小A，在吗」）、
+         句尾（「晚安，小A」）、或单独成句。
+      3. 必须是**专指对方**的名字、简称或昵称。
+
+      ━━ 必须排除（重要）━━
+      - 通用人称代词：你、您、你们、AI、助手、机器人
+      - 角色设定里的术语、职称或隐喻性称谓（如「契约者」「债权人」这类），
+        除非用户在日常语境里**反复自发**使用
+      - 从对方自己的话里学来的自称
+      - 只出现一次且无法确认是在呼唤对方的词
+      - 任何你不确定的词 —— **宁可漏掉，也不要写错**
+
+      ━━ 输出格式 ━━
+      只输出 JSON 数组，不要任何解释、前缀或代码块：
+      [{"form": "称呼词", "count": 出现次数, "evidence": "用户原话片段，30字以内"}]
+      找不到符合标准的称呼时，输出 []
+
+      ━━ 对话 ━━
+      $conversation
+    en: |
+      Task: find the **forms of address the user uses to call the other party** in the conversation below.
+
+      The other party is the AI character "$persona_name". You are not summarizing the
+      conversation or describing the user's personality. You do exactly one thing:
+      find the word the user uses to **directly address** the other party.
+
+      ━━ Already confirmed forms (still valid even if absent this round) ━━
+      $known_address_forms
+      If these forms appear again in the conversation, include them so counts can accumulate.
+
+      ━━ Criteria (ALL must be met) ━━
+      1. Must appear in **user lines** (lines starting with "$user_label"). Ignore the other party's lines entirely.
+      2. Must be a **direct address** to the other party. Typical positions: after the start of a sentence with a comma/particle, at the end of a sentence, or as a stand-alone utterance.
+      3. Must be a name, short name, or nickname that specifically refers to the other party.
+
+      ━━ Must exclude ━━
+      - Generic pronouns: you, y'all, AI, assistant, bot
+      - Setting jargon, titles, or metaphorical labels from the character card, unless the user spontaneously and repeatedly uses them in ordinary speech
+      - Self-names learned from the other party's own speech
+      - Words that appear only once and cannot be confirmed as address
+      - Anything uncertain — **prefer missing over wrong**
+
+      ━━ Output ━━
+      Output only a JSON array, with no explanation, prefix, or code fence:
+      [{"form": "address word", "count": times_seen, "evidence": "short user quote, <=30 chars"}]
+      If none qualify, output []
+
+      ━━ Conversation ━━
+      $conversation
