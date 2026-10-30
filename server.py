@@ -190,6 +190,9 @@ async def lifespan(app: FastAPI):
     await sm.init()
     app.state.session_manager = sm
 
+    from src.agent.runtime import AgentRuntime
+    app.state.agent_runtime = AgentRuntime(app)
+
     # ── P6 记忆管理器注册表（懒创建，key=profile_id）──────────────────────────
     app.state.memory_managers = {}
 
@@ -341,6 +344,7 @@ async def lifespan(app: FastAPI):
                 pass
     await reflection_engine.stop()
     await ase_engine.stop()
+    await app.state.agent_runtime.close()
     await sm.cleanup()
 
 
@@ -407,6 +411,10 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+from src.api.agent import router as agent_router
+app.include_router(agent_router)
+from src.api.workspace import router as workspace_router
+app.include_router(workspace_router)
 app.include_router(sessions_router)
 app.include_router(settings_router)
 app.include_router(settings_ext_router)

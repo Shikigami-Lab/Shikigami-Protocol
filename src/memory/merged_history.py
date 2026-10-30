@@ -20,6 +20,18 @@ _DEFAULT_MAX_UTTERANCES_PER_GROUP = 10
 _DEFAULT_MAX_GROUPS = 5
 
 
+def _provenance(message: Any) -> Dict[str, Any]:
+    """Forward store metadata without changing speech; legacy rows are complete.
+
+    IDs remain local to their source store, not globally unique across groups.
+    Memory consumers must inspect status before flattening these records.
+    """
+    def value(key, default=None):
+        return message.get(key, default) if isinstance(message, dict) else getattr(message, key, default)
+    return {"id": value("id"), "agent_run_id": value("agent_run_id"),
+            "generation_status": value("generation_status", "completed")}
+
+
 def _msg_date(msg) -> str:
     """从消息的 timestamp 提取 YYYY-MM-DD。支持 dict 和带 timestamp 的对象。"""
     ts = msg.get("timestamp") if isinstance(msg, dict) else getattr(msg, "timestamp", None)
@@ -81,7 +93,8 @@ def get_merged_recent_messages(
     当 group_chat_merge_into_history 为 False 时，仅返回单聊 store 的 get_recent_with_ts，
     并统一为与合并时相同的 dict 结构（含 role, content, sender, timestamp, source='single'）。
 
-    返回每项: role, content, sender, timestamp, source('single'|'group'), gname(仅 group)。
+    返回每项: role, content, sender, timestamp, source('single'|'group'), gname(仅 group)，
+    以及 id、agent_run_id、generation_status。保留未完成回复，由消费者决定如何呈现。
     """
     store = session.conversation_store
     merge_enabled, max_utterances, max_groups, merged_cap_cfg = _merge_enabled_and_caps(profile)
@@ -97,6 +110,7 @@ def get_merged_recent_messages(
                 "sender": (m.get("sender") or "").strip(),
                 "timestamp": float(m.get("timestamp") or 0),
                 "source": "single",
+                **_provenance(m),
             }
             for m in raw
         ]
@@ -115,6 +129,7 @@ def get_merged_recent_messages(
             "content": (m.get("content") or "").strip(),
             "source": "single",
             "sender": (m.get("sender") or "").strip(),
+            **_provenance(m),
         })
 
     group_manager = getattr(getattr(app, "state", None), "group_manager", None) if app else None
@@ -148,6 +163,7 @@ def get_merged_recent_messages(
                         "source": "group",
                         "gname": gname,
                         "sender": sender,
+                        **_provenance(m),
                     })
 
     combined.sort(key=lambda x: x["ts"])
@@ -162,6 +178,7 @@ def get_merged_recent_messages(
             "timestamp": m["ts"],
             "source": m.get("source", "single"),
             "gname": m.get("gname", ""),
+            **_provenance(m),
         })
     return out
 
@@ -187,12 +204,14 @@ def get_merged_messages_for_date(
                 "content": (m.get("content") or "").strip(),
                 "timestamp": float(m.get("timestamp") or 0),
                 "sender": (m.get("sender") or "").strip(),
+                **_provenance(m),
             }
         return {
             "role": getattr(m, "role", "user"),
             "content": (getattr(m, "content", None) or "").strip(),
             "timestamp": float(getattr(m, "timestamp", 0)),
             "sender": (getattr(m, "sender", None) or "").strip(),
+            **_provenance(m),
         }
 
     day_list: List[Dict[str, Any]] = []

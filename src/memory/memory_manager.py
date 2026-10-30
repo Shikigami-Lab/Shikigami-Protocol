@@ -45,6 +45,19 @@ _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 _STALE_WORDS = frozenset(["刚才", "今天", "昨天", "刚刚", "这次", "这会儿", "现在", "今晚", "刚好"])
 
 
+def _is_memory_turn(message: Any) -> bool:
+    """Keep user speech and completed AI speech for extraction and summaries.
+
+    Both store Message objects and merged dictionaries carry generation_status.
+    Legacy rows without the field remain eligible. An explicit non-completed
+    status is never treated as a finished reply. This does not mutate chat data.
+    """
+    def value(key, default=None):
+        return message.get(key, default) if isinstance(message, dict) else getattr(message, key, default)
+    role = value("role")
+    return role == "user" or (role == "assistant" and value("generation_status", "completed") == "completed")
+
+
 def _passes_filters(content: str) -> bool:
     """长度过滤 + 时间相对词过滤。"""
     if len(content.replace(" ", "")) < 12:
@@ -524,7 +537,7 @@ class MemoryManager:
             day_msgs = []
         elif day_msgs_override is not None:
             day_msgs = [m for m in day_msgs_override
-                        if _msg_date(m) == date_str and _msg_role(m) in ("user", "assistant")]
+                        if _msg_date(m) == date_str and _is_memory_turn(m)]
         else:
             try:
                 all_msgs = store.get_all()
@@ -533,7 +546,7 @@ class MemoryManager:
                 log_error("memory", str(e), {"profile_id": self._profile_id, "op": "read_history"}, traceback_str=traceback.format_exc())
                 return None
             day_msgs = [m for m in all_msgs
-                        if _msg_date(m) == date_str and _msg_role(m) in ("user", "assistant")]
+                        if _msg_date(m) == date_str and _is_memory_turn(m)]
 
         if not day_msgs and not quiet:
             return None
@@ -874,16 +887,15 @@ class MemoryManager:
                 d = base + timedelta(days=i)
                 date_str = d.strftime("%Y-%m-%d")
                 day_msgs = get_merged_messages_for_date(session, app, profile, date_str)
-                date_to_count[date_str] = len(day_msgs)
+                date_to_count[date_str] = sum(_is_memory_turn(m) for m in day_msgs)
         else:
             try:
                 all_msgs = store.get_all()
             except Exception:
                 all_msgs = []
-            def _role(m): return m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
             date_to_count = {}
             for m in all_msgs:
-                if _role(m) not in ("user", "assistant"):
+                if not _is_memory_turn(m):
                     continue
                 d = _msg_date(m)
                 if d:
@@ -933,16 +945,16 @@ class MemoryManager:
             for i in range(days):
                 d = base + timedelta(days=i)
                 date_str = d.strftime("%Y-%m-%d")
-                date_to_count[date_str] = len(get_merged_messages_for_date(session, app, profile, date_str))
+                date_to_count[date_str] = sum(_is_memory_turn(m) for m in
+                    get_merged_messages_for_date(session, app, profile, date_str))
         else:
             try:
                 all_msgs = store.get_all()
             except Exception:
                 all_msgs = []
-            def _role(m): return m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
             date_to_count = {}
             for m in all_msgs:
-                if _role(m) not in ("user", "assistant"):
+                if not _is_memory_turn(m):
                     continue
                 d = _msg_date(m)
                 if d:
@@ -1038,7 +1050,7 @@ class MemoryManager:
         conv_text = "\n".join(
             f"{user_label if _is_human(m) else persona_name}: {m.get('content', '')}"
             for m in recent_turns
-            if m.get("role") in ("user", "assistant")
+            if _is_memory_turn(m)
         )
         if not conv_text.strip():
             logger.warning(

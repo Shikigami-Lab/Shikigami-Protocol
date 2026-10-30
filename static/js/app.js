@@ -120,6 +120,13 @@ function inferLocaleFromNavigator() {
 const CLIENT_ID = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
   (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
+function createChatRequestId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  // LAN HTTP pages may not expose randomUUID; retain a cryptographic v4 fallback.
+  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+}
+
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -175,7 +182,7 @@ function uiWarn(prefix, msg, data) {
 }
 
 const App = {
-  mixins: [SettingsMixin],
+  mixins: [SettingsMixin, AgentUIMixin],
   // 把 t() 注入给全局组件（components.js）。子组件 inject('gt') 即可调用；
   // 因 t() 内部读 this.locale（响应式），子组件渲染时建立依赖，切语言会重渲染。
   provide() {
@@ -333,6 +340,7 @@ const App = {
 
       // Timers panel
       timerList: [],
+      timerFetchSequence: 0,
       newTimerLabel: '',
       newTimerSeconds: 60,
       _timerRefreshId: null,
@@ -832,7 +840,8 @@ const App = {
     },
 
     async switchSession(sessionId) {
-      if (sessionId === this.currentSessionId || this.isStreaming) return;
+      const canDetach = !this.currentGroupId && !!this.agentChatContext?.runKey;
+      if (sessionId === this.currentSessionId || (this.isStreaming && !canDetach)) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionSwitch(), {
           method: 'POST',
@@ -856,6 +865,8 @@ const App = {
             ...s,
             is_current: s.id === sessionId,
           }));
+          // Let the profile watcher establish the new view before requesting history.
+          await this.$nextTick();
           await this.loadHistory(sessionId);
           this.subscribeEvents(sessionId);
           this.fetchStatus();
@@ -915,6 +926,7 @@ const App = {
         const res = await fetch(getBaseUrl() + API_PATHS.groupHistory(groupId, 200));
         if (!res.ok) return;
         const data = await res.json();
+        if (groupId !== this.currentGroupId) return;
         const msgs = (data.messages || [])
           .filter(m => m.role === 'user' || m.role === 'assistant')
           .map(m => ({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '' }));
@@ -1206,17 +1218,36 @@ const App = {
     /* ─────────────────── History & Live Sync ─────────────────── */
 
     async loadHistory(sessionId) {
+      const viewVersion = this.agentViewVersion, sequence = ++this.agentHistorySequence;
+      const before = this.messages.map(message => ({ ...message }));
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionHistory(sessionId) + '?limit=200');
         if (!res.ok) return;
         const data = await res.json();
+        if (sessionId !== this.currentSessionId || this.currentGroupId || viewVersion !== this.agentViewVersion || sequence !== this.agentHistorySequence) return;
         const msgs = (data.messages || [])
           .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '' }));
+          .map(m => ({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, sender: m.sender || '',
+            request_id: m.request_id, partial: m.generation_status === 'completed' ? false : (m.partial === true || ['cancelled', 'failed'].includes(m.generation_status)),
+            generation_status: m.generation_status, agent_run_id: m.agent_run_id, session_id: sessionId, _serverConfirmed: true }));
         // If history is truncated, prepend a system notice
         const total = data.total || msgs.length;
         // Store the offset so bubble-delete ops can compute the correct store index
         this._historyOffset = Math.max(0, total - msgs.length);
+        // A broadcast/local partial can arrive while this history snapshot is in flight.
+        // Keep only request-tagged messages from this exact chat; reconcile by saved ID.
+        for (const live of this.messages.filter(m => m.request_id && m.session_id === sessionId)) {
+          const saved = msgs.find(m => m.role === live.role && ((live.id != null && m.id === live.id) || m.request_id === live.request_id));
+          if (saved) {
+            const previous = before.find(m => m.role === live.role && m.request_id === live.request_id);
+            // A broadcast received after this GET began is newer than its snapshot.
+            if (live._serverConfirmed && (!previous || previous.content !== live.content ||
+                previous.generation_status !== live.generation_status || previous.partial !== live.partial || previous.id !== live.id)) {
+              Object.assign(saved, live);
+            }
+            if (!saved.request_id) saved.request_id = live.request_id;
+          } else msgs.push(live);
+        }
         // Always reset display count so we start from the bottom
         this.msgDisplayCount = 60;
         if (total > msgs.length) {
@@ -1252,6 +1283,11 @@ const App = {
       source.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          if (data.agent_event) {
+            this.receiveAgentEvent(data.agent_event, { sessionId });
+            return;
+          }
+          if (source !== this._sseSource || sessionId !== this.currentSessionId || this.currentGroupId) return;
 
           // ── ASE proactive token stream ─────────────────────────────────────
           // Normal chat tokens come via HTTP response; only ASE/heartbeat tokens
@@ -1289,16 +1325,29 @@ const App = {
 
           // ── Regular broadcast events ───────────────────────────────────────
           if (data.type === 'new_message') {
-            if (data.client_id === CLIENT_ID) return; /* 本端已从请求流添加，避免群聊重复 */
+            const own = data.client_id === CLIENT_ID;
+            const context = this.agentChatContext;
+            const message = { id: data.message_id, role: data.role, content: data.content,
+              timestamp: data.timestamp || this._now(), sender: data.sender || '',
+              request_id: data.request_id, partial: data.generation_status === 'completed' ? false : (data.partial === true || ['cancelled', 'failed'].includes(data.generation_status)),
+              generation_status: data.generation_status, agent_run_id: data.agent_run_id, session_id: sessionId };
+            // Only the still-visible owning stream may defer its own assistant broadcast.
+            // Retain the authoritative payload in case abort arrives before the done frame.
+            if (own && data.role === 'assistant' && data.request_id && context?.requestId === data.request_id &&
+                this.isStreaming && this.agentChatIsVisible(context)) {
+              context.serverReply = message;
+              return;
+            }
+            if (own && data.role !== 'assistant' && !data.request_id) return;
             // Skip ASE new_message if we already rendered it token-by-token
             if (this._aseStreaming && data.client_id === '') {
               const last = this.messages[this.messages.length - 1];
               if (last && last._streaming && data.message_id != null) last.id = data.message_id;
               return;
             }
-            this.messages.push({ id: data.message_id, role: data.role, content: data.content, timestamp: this._now(), sender: data.sender || '' });
+            const reconciled = this.reconcileChatMessage(message, true);
             // TTS for server-originated messages (system_trigger, etc.) not streamed as tokens
-            if (data.role === 'assistant' && data.client_id === '' && this.ttsEnabled && data.content?.trim()) {
+            if (reconciled.added && data.role === 'assistant' && data.client_id === '' && !data.partial && this.ttsEnabled && data.content?.trim()) {
               this.sendToTTS(data.content);
             }
             this.$nextTick(() => this.scrollToBottom());
@@ -1326,6 +1375,7 @@ const App = {
       const text = (this.inputText || '').trim();
       const hasImage = !!this.pendingScreenshot;
       if ((!text && !hasImage) || this.isStreaming) return;
+      if (this.agentContinueRunId && (this.agentOwnTaskActive || text.startsWith('/'))) { this.statusText = this.t('agentContinueBlocked'); return; }
       if (text.startsWith('/')) this._recordRecentCommand(text);
 
       if (this.currentGroupId) {
@@ -1333,15 +1383,23 @@ const App = {
         return;
       }
 
+      // Allocate once per user send, before VLM/streaming; replaying this request
+      // must reuse context.requestId rather than minting an ID per fetch attempt.
+      const context = { sessionId: this.currentSessionId, viewVersion: this.agentViewVersion,
+        runKey: null, requestId: createChatRequestId(),
+        continueRunId: this.agentContinueRunId || undefined, conversationOnly: this.agentOwnTaskActive || undefined };
+      this.agentChatContext = context;
+      const controller = new AbortController();
       const displayText = text || '请根据当前画面回复';
       this.inputText = '';
       this.isStreaming = true;
       this.streamingText = '';
       this.statusText = this.t('statusThinking');
-      this._chatAbortController = new AbortController();
+      this._chatAbortController = controller;
 
       // Show user bubble immediately (sender 与后端一致，单聊为「用户」)
-      const localUserMessage = { role: 'user', content: displayText, timestamp: this._now(), is_command: displayText.startsWith('/'), sender: '用户' };
+      const localUserMessage = { role: 'user', content: displayText, timestamp: this._now(), is_command: displayText.startsWith('/'), sender: '用户',
+        request_id: context.requestId, session_id: context.sessionId };
       this.messages.push(localUserMessage);
       await this.$nextTick();
       this.scrollToBottom();
@@ -1356,10 +1414,11 @@ const App = {
         try {
           uiLog('VLM', 'image pending, requesting description...', { imageType });
           const vlmResp = await fetch(getBaseUrl() + API_PATHS.vlm(), {
+            signal: controller.signal,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              session_id: this.currentSessionId,
+              session_id: context.sessionId,
               image_b64: screenshotB64,
               source: 'chat',
               image_type: imageType,
@@ -1378,18 +1437,24 @@ const App = {
       }
 
       try {
+        if (controller.signal.aborted || !this.agentChatIsVisible(context)) throw new DOMException('Chat view changed or stopped', 'AbortError');
         const response = await fetch(getBaseUrl() + API_PATHS.chat(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: messageToSend,
             client_id: CLIENT_ID,
+            request_id: context.requestId,
+            continue_run_id: context.continueRunId,
+            conversation_only: context.conversationOnly,
+            session_id: context.sessionId,
           }),
-          signal: this._chatAbortController.signal,
+          signal: controller.signal,
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
+        if (this.agentChatIsVisible(context) && this.agentContinueRunId === context.continueRunId) this.agentContinueRunId = '';
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -1406,12 +1471,19 @@ const App = {
             if (!line.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(line.slice(6));
+              if (data.agent_event) {
+                this.receiveAgentEvent(data.agent_event, context);
+                continue;
+              }
+              if (context.detached) { this.receiveDetachedChatFrame(context, data); continue; }
+              if (!this.agentChatIsVisible(context)) continue;
 
               if (data.message_role === 'user' && data.message_id != null) {
                 localUserMessage.id = data.message_id;
               }
 
               if (data.error) {
+                this.preserveChatReply(context);
                 this.statusText = `${this.t('statusError')}: ${data.error}`;
                 this.isStreaming = false;
                 this.streamingText = '';
@@ -1425,14 +1497,24 @@ const App = {
               }
 
               if (data.done) {
-                const finalText = this.streamingText;
-                const displayName = this.sessions.find(s => s.id === this.currentSessionId)?.display_name || '';
-                this.messages.push({ id: data.message_id, role: 'assistant', content: finalText, timestamp: this._now(), sender: displayName });
+                const run = this.agentRuns[context.runKey];
+                const partial = !!(data.partial || data.cancelled || data.generation_status === 'cancelled' || data.generation_status === 'failed' || (run && (run.cancelling || run.state === 'cancelled')));
+                if (data.discard_partial) {
+                  this.streamingText = '';
+                  this.messages = this.messages.filter(m => !(m.role === 'assistant' && m.partial && m.request_id === context.requestId));
+                }
+                const reply = data.discard_partial ? null : this.preserveChatReply(context, { id: data.message_id, partial });
+                if (reply) {
+                  if (data.agent_run_id) reply.agent_run_id = data.agent_run_id;
+                  if (data.generation_status) reply.generation_status = data.generation_status;
+                }
+                const finalText = reply?.content || '';
+                context.replyDone = true;
                 this.streamingText = '';
                 this.isStreaming = false;
-                this.statusText = this.t('statusReady');
+                this.statusText = run ? this.agentStateLabel(run) : this.t('statusReady');
 
-                if (this.ttsEnabled && finalText.trim()) {
+                if (this.ttsEnabled && !partial && !reply?.partial && finalText.trim()) {
                   this.sendToTTS(finalText);
                 }
 
@@ -1443,8 +1525,12 @@ const App = {
           }
         }
       } catch (e) {
+        if (context.detached) this.receiveDetachedChatFrame(context, { error: e.message, generation_status: e.name === 'AbortError' ? 'cancelled' : 'failed' });
+        if (!this.agentChatIsVisible(context)) return;
+        this.preserveChatReply(context);
         if (e && e.name === 'AbortError') {
-          this.statusText = this.t('statusAborted');
+          const run = this.agentRuns[context.runKey];
+          this.statusText = run ? this.agentStateLabel(run) : this.t('statusAborted');
           // 对话模式下用户取消回复：TTS 不会播放，_playNext 不会触发，需手动调度下一轮
           if (this.voiceConversationMode && !this.voiceRecording) {
             this._scheduleVoiceConversationNext();
@@ -1455,7 +1541,12 @@ const App = {
         this.isStreaming = false;
         this.streamingText = '';
       } finally {
-        this._chatAbortController = null;
+        if (this.agentChatIsVisible(context)) {
+          if (!context.replyDone) this.preserveChatReply(context);
+          this._chatAbortController = null;
+          this.isStreaming = false;
+          this.streamingText = '';
+        }
       }
     },
 
@@ -1465,9 +1556,19 @@ const App = {
       }
     },
 
-    abortChat() {
-      if (this._chatAbortController) {
-        this._chatAbortController.abort();
+    async abortChat() {
+      if (this.currentGroupId) { this.abortGroupChat(); return; }
+      // Capture ownership before awaiting: a later profile switch or new send
+      // must never redirect these controls to a different chat or controller.
+      const profile = this.currentSessionId, controller = this._chatAbortController;
+      const context = this.agentChatContext;
+      const runs = Object.values(this.agentRuns).filter(run => run.profile_id === profile && !this.agentTerminal(run.state));
+      const confirmations = await Promise.all(runs.map(run => this.cancelAgentRun(run, null, { abortAttached: false })));
+      if (confirmations.every(Boolean)) {
+        if (controller) controller.abort();
+      } else if (context && this.agentChatIsVisible(context)) {
+        const errors = runs.map(run => this.agentRuns[this.agentRunKey(run)]?.error).filter(Boolean);
+        this.statusText = errors.join('; ') || this.t('agentCancelRejected');
       }
     },
 
@@ -2764,12 +2865,16 @@ const App = {
     },
 
     async refreshTimers() {
+      const sessionId = this.currentSessionId, viewVersion = this.agentViewVersion;
+      const sequence = this.timerFetchSequence = (this.timerFetchSequence || 0) + 1;
+      if (!sessionId || this.currentGroupId) { this.timerList = []; return; }
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.timers());
         if (!res.ok) return;
         const raw = (await res.json()).timers || [];
+        if (sessionId !== this.currentSessionId || this.currentGroupId || viewVersion !== this.agentViewVersion || sequence !== this.timerFetchSequence) return;
         const now = Date.now() / 1000;
-        this.timerList = raw.map((t) => {
+        this.timerList = raw.filter(t => !t.session_id || t.session_id === sessionId).map((t) => {
           const end = t.end_timestamp != null ? Number(t.end_timestamp) : (now + (t.remaining || 0));
           const rem = Math.max(0, Math.floor(end - now));
           return { ...t, end_timestamp: end, remaining: rem };
@@ -2946,7 +3051,7 @@ const App = {
       }
       const absIdx = this._absoluteIdx(displayIdx);
       const msg = this.messages[absIdx];
-      if (!msg) return;
+      if (!msg || msg.partial) return;
       const cacheKey = msg.content.trim();
       const cached = this._ttsCache[cacheKey];
       if (cached && cached.length > 0) {

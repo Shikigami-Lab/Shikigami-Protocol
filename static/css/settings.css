@@ -3869,3 +3869,11 @@ textarea.form-input {
   color: var(--text-tertiary);
   font-size: var(--fs-2xs);
 }
+/* Agent controls share the existing cards, inputs and button system. */
+.agent-settings-card { margin-bottom: var(--space-4); }
+.agent-settings-card > .form-hint { margin-bottom: var(--space-3); }
+.agent-settings-card .toggle-switch:focus-within .toggle-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agent-settings-model { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.agent-settings-model .form-input { flex: 1; min-width: 120px; }
+.agent-settings-advanced { border-top: 1px solid var(--border); margin-top: var(--space-3); padding-top: var(--space-3); }
+.agent-settings-advanced summary { cursor: pointer; color: var(--text-secondary); font-size: var(--fs-sm); }

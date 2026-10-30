@@ -8,12 +8,25 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _validate_provenance(agent_run_id, generation_status):
+    if not isinstance(generation_status, str) or generation_status not in ("completed", "cancelled", "failed"):
+        raise ValueError("generation_status must be completed, cancelled or failed")
+    if agent_run_id is not None and (
+        not isinstance(agent_run_id, str) or not agent_run_id.strip() or len(agent_run_id) > 256
+        or any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in agent_run_id)
+    ):
+        raise ValueError("agent_run_id must be a nonblank, control-free ID or None")
+
+
 @dataclass
 class Message:
     role: str       # "user" | "assistant" | "system"
     content: str
     timestamp: float = 0.0
     sender: str = ""  # 发言者标识：用户名或人格 display_name，群聊防污染用
+    agent_run_id: Optional[str] = None
+    generation_status: str = "completed"
+    id: Optional[int] = None
 
     def __post_init__(self):
         if not self.timestamp:
@@ -72,16 +85,22 @@ class ConversationStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON messages(timestamp)")
         conn.commit()
 
-        # Schema migration: add sender column if missing (existing DBs)
+        # Additive migration, serialized across connections; old rows are completed.
         try:
-            cur = conn.execute("PRAGMA table_info(messages)")
-            columns = [row[1] for row in cur.fetchall()]
-            if "sender" not in columns:
-                conn.execute("ALTER TABLE messages ADD COLUMN sender TEXT NOT NULL DEFAULT ''")
-                conn.commit()
-                logger.info("[ConversationStore] migrated schema: added sender column (%s)", self._db_path)
-        except Exception as e:
-            logger.warning("[ConversationStore] sender column migration failed: %s", e)
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                for name, declaration in (
+                    ("sender", "TEXT NOT NULL DEFAULT ''"),
+                    ("agent_run_id", "TEXT"),
+                    ("generation_status", "TEXT NOT NULL DEFAULT 'completed' "
+                     "CHECK(generation_status IN ('completed','cancelled','failed'))"),
+                ):
+                    if name not in columns:
+                        conn.execute(f"ALTER TABLE messages ADD COLUMN {name} {declaration}")
+        except BaseException:
+            conn.close()
+            raise
 
         # Auto-migrate from JSON if .bak doesn't already exist
         json_path = os.path.join(self.storage_root, "chat_records.json")
@@ -137,12 +156,16 @@ class ConversationStore:
 
     # ── Write operations ─────────────────────────────────────────────────────
 
-    def append(self, role: str, content: str, sender: str = "") -> int:
+    def append(self, role: str, content: str, sender: str = "", *,
+               agent_run_id: Optional[str] = None, generation_status: str = "completed") -> int:
+        """Persist speech unchanged; provenance is metadata, never a speech prefix."""
+        _validate_provenance(agent_run_id, generation_status)
         ts = time.time()
         with self._conn:
             cur = self._conn.execute(
-                "INSERT INTO messages (role, content, timestamp, sender) VALUES (?, ?, ?, ?)",
-                (role, content, ts, (sender or "").strip())
+                "INSERT INTO messages (role, content, timestamp, sender, agent_run_id, generation_status) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (role, content, ts, (sender or "").strip(), agent_run_id, generation_status)
             )
         message_id = int(cur.lastrowid)
         if self.max_turns > 0:
@@ -150,7 +173,7 @@ class ConversationStore:
             with self._conn:
                 self._conn.execute("""
                     DELETE FROM messages WHERE id NOT IN (
-                        SELECT id FROM messages ORDER BY timestamp DESC LIMIT ?
+                        SELECT id FROM messages ORDER BY timestamp DESC, id DESC LIMIT ?
                     )
                 """, (limit,))
         return message_id
@@ -172,12 +195,19 @@ class ConversationStore:
                 pass
 
     def save_all(self, messages: List[Message]) -> None:
-        """Replace all stored messages with the given list (used for message deletion)."""
+        """Replace messages, retaining IDs/provenance on previously read messages."""
+        rows = []
+        for m in messages:
+            run_id = getattr(m, "agent_run_id", None)
+            status = getattr(m, "generation_status", "completed")
+            _validate_provenance(run_id, status)
+            rows.append((getattr(m, "id", None), m.role, m.content, m.timestamp,
+                         getattr(m, "sender", "") or "", run_id, status))
         with self._conn:
             self._conn.execute("DELETE FROM messages")
             self._conn.executemany(
-                "INSERT INTO messages (role, content, timestamp, sender) VALUES (?, ?, ?, ?)",
-                [(m.role, m.content, m.timestamp, getattr(m, "sender", "") or "") for m in messages]
+                "INSERT INTO messages (id, role, content, timestamp, sender, agent_run_id, generation_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)", rows
             )
 
     def delete_from_index(self, idx: int) -> bool:
@@ -206,71 +236,78 @@ class ConversationStore:
 
     # ── Read operations ──────────────────────────────────────────────────────
 
-    def get_recent(self, n_turns: int = 20) -> List[Dict[str, str]]:
-        """Return the last n_turns rounds as [{role, content, sender?}, ...] for the LLM.
+    def get_recent(self, n_turns: int = 20) -> List[Dict]:
+        """Return recent speech with IDs and structured generation metadata.
 
         Excludes messages with timestamp < context_since_ts so that a short-term
         memory reset is respected without deleting visible chat history.
+        Includes incomplete AI replies unchanged for compatibility. Memory and
+        summary consumers must inspect generation_status before flattening
+        content; history prompts render it separately as trusted context.
         """
         since = self._context_since_ts
         rows = self._conn.execute("""
-            SELECT role, content, sender FROM messages
+            SELECT role, content, sender, id, agent_run_id, generation_status FROM messages
             WHERE role IN ('user', 'assistant')
               AND (? = 0 OR timestamp >= ?)
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, id DESC
             LIMIT ?
         """, (since, since, n_turns * 2)).fetchall()
         rows.reverse()
-        return [{"role": r[0], "content": r[1], "sender": (r[2] or "") if len(r) > 2 else ""} for r in rows]
+        return [{"role": r[0], "content": r[1], "sender": r[2] or "",
+                 "id": r[3], "agent_run_id": r[4], "generation_status": r[5]} for r in rows]
 
     def get_recent_with_ts(self, n_turns: int = 20) -> List[Dict]:
         """Like get_recent but each dict includes 'timestamp' for merging with group messages."""
         since = self._context_since_ts
         rows = self._conn.execute("""
-            SELECT role, content, sender, timestamp FROM messages
+            SELECT role, content, sender, timestamp, id, agent_run_id, generation_status FROM messages
             WHERE role IN ('user', 'assistant')
               AND (? = 0 OR timestamp >= ?)
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, id DESC
             LIMIT ?
         """, (since, since, n_turns * 2)).fetchall()
         rows.reverse()
         return [
-            {"role": r[0], "content": r[1], "sender": (r[2] or "") if len(r) > 2 else "", "timestamp": r[3] if len(r) > 3 else 0.0}
+            {"role": r[0], "content": r[1], "sender": r[2] or "", "timestamp": r[3],
+             "id": r[4], "agent_run_id": r[5], "generation_status": r[6]}
             for r in rows
         ]
 
-    def get_recent_by_sender(self, n: int = 10, sender: str = "") -> List[Dict[str, str]]:
+    def get_recent_by_sender(self, n: int = 10, sender: str = "") -> List[Dict]:
         """Return the last n messages where sender matches (e.g. 群聊按发言人召回)."""
         if not (sender and sender.strip()):
             return []
         s = sender.strip()
         rows = self._conn.execute("""
-            SELECT role, content, sender FROM messages
+            SELECT role, content, sender, id, agent_run_id, generation_status FROM messages
             WHERE sender = ? AND role IN ('user', 'assistant')
-            ORDER BY timestamp DESC LIMIT ?
+            ORDER BY timestamp DESC, id DESC LIMIT ?
         """, (s, n)).fetchall()
         rows.reverse()
-        return [{"role": r[0], "content": r[1], "sender": (r[2] or "") if len(r) > 2 else ""} for r in rows]
+        return [{"role": r[0], "content": r[1], "sender": r[2] or "",
+                 "id": r[3], "agent_run_id": r[4], "generation_status": r[5]} for r in rows]
 
-    def get_recent_since(self, since_ts: float, limit: int = 50) -> List[Dict[str, str]]:
+    def get_recent_since(self, since_ts: float, limit: int = 50) -> List[Dict]:
         """Return up to `limit` messages with timestamp >= since_ts (all senders), chronological order.
         Used for 单聊合并群近期：merged_history 在短期上下文时间窗内取群消息。
         """
         items = self.get_recent_since_with_ts(since_ts, limit)
-        return [{"role": m["role"], "content": m["content"], "sender": m.get("sender", "")} for m in items]
+        return [{k: v for k, v in m.items() if k != "timestamp"} for m in items]
 
     def get_recent_since_with_ts(self, since_ts: float, limit: int = 50) -> List[Dict]:
         """Like get_recent_since but each dict includes 'timestamp' for merging (单聊+群聊合并)."""
         if limit <= 0:
             return []
         rows = self._conn.execute("""
-            SELECT role, content, sender, timestamp FROM messages
+            SELECT role, content, sender, timestamp, id, agent_run_id, generation_status FROM messages
             WHERE role IN ('user', 'assistant') AND timestamp >= ?
-            ORDER BY timestamp DESC LIMIT ?
+            ORDER BY timestamp DESC, id DESC LIMIT ?
         """, (max(0.0, since_ts), max(1, limit))).fetchall()
         rows.reverse()
         return [
-            {"role": r[0], "content": r[1], "sender": (r[2] or "") if len(r) > 2 else "", "timestamp": r[3] if len(r) > 3 else 0.0}
+            {"role": r[0], "content": r[1], "sender": r[2] or "", "timestamp": r[3],
+             "id": r[4], "agent_run_id": r[5], "generation_status": r[6]}
             for r in rows
         ]
 
@@ -281,20 +318,22 @@ class ConversationStore:
         SQL-level queries such as get_last / get_page_with_id / count_all instead of slicing this.
         """
         rows = self._conn.execute(
-            "SELECT role, content, timestamp, sender FROM messages ORDER BY timestamp, id"
+            "SELECT role, content, timestamp, sender, id, agent_run_id, generation_status FROM messages ORDER BY timestamp, id"
         ).fetchall()
         return [
-            Message(role=r[0], content=r[1], timestamp=r[2], sender=(r[3] or "") if len(r) > 3 else "")
+            Message(role=r[0], content=r[1], timestamp=r[2], sender=r[3] or "",
+                    id=r[4], agent_run_id=r[5], generation_status=r[6])
             for r in rows
         ]
 
     def get_all_with_id(self) -> List[Dict]:
         """Return all messages as dicts with id, role, content, timestamp, sender (for paginated history)."""
         rows = self._conn.execute(
-            "SELECT id, role, content, timestamp, sender FROM messages ORDER BY timestamp, id"
+            "SELECT id, role, content, timestamp, sender, agent_run_id, generation_status FROM messages ORDER BY timestamp, id"
         ).fetchall()
         return [
-            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
+            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": r[4] or "",
+             "agent_run_id": r[5], "generation_status": r[6]}
             for r in rows
         ]
 
@@ -308,12 +347,13 @@ class ConversationStore:
         if limit <= 0:
             return self.get_all()
         rows = self._conn.execute("""
-            SELECT role, content, timestamp, sender FROM messages
+            SELECT role, content, timestamp, sender, id, agent_run_id, generation_status FROM messages
             ORDER BY timestamp DESC, id DESC LIMIT ?
         """, (limit,)).fetchall()
         rows.reverse()
         return [
-            Message(role=r[0], content=r[1], timestamp=r[2], sender=(r[3] or "") if len(r) > 3 else "")
+            Message(role=r[0], content=r[1], timestamp=r[2], sender=r[3] or "",
+                    id=r[4], agent_run_id=r[5], generation_status=r[6])
             for r in rows
         ]
 
@@ -322,12 +362,13 @@ class ConversationStore:
         if limit <= 0:
             return self.get_all_with_id()
         rows = self._conn.execute("""
-            SELECT id, role, content, timestamp, sender FROM messages
+            SELECT id, role, content, timestamp, sender, agent_run_id, generation_status FROM messages
             ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?
         """, (limit, max(0, offset))).fetchall()
         rows.reverse()
         return [
-            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
+            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": r[4] or "",
+             "agent_run_id": r[5], "generation_status": r[6]}
             for r in rows
         ]
 
@@ -370,13 +411,14 @@ class ConversationStore:
         """
         pattern = f"%{q}%" if q else "%"
         rows = self._conn.execute("""
-            SELECT id, role, content, timestamp, sender FROM messages
+            SELECT id, role, content, timestamp, sender, agent_run_id, generation_status FROM messages
             WHERE content LIKE ?
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, id DESC
             LIMIT ? OFFSET ?
         """, (pattern, limit, offset)).fetchall()
         return [
-            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": (r[4] or "") if len(r) > 4 else ""}
+            {"id": r[0], "role": r[1], "content": r[2], "timestamp": r[3], "sender": r[4] or "",
+             "agent_run_id": r[5], "generation_status": r[6]}
             for r in rows
         ]
 
@@ -403,12 +445,12 @@ class ConversationStore:
             row = self._conn.execute(
                 """SELECT timestamp FROM messages
                    WHERE sender = ? OR (role = 'user' AND (sender = '' OR sender IS NULL))
-                   ORDER BY timestamp DESC LIMIT 1""",
+                   ORDER BY timestamp DESC, id DESC LIMIT 1""",
                 (human_sender.strip(),),
             ).fetchone()
         else:
             row = self._conn.execute(
-                "SELECT timestamp FROM messages WHERE role='user' ORDER BY timestamp DESC LIMIT 1"
+                "SELECT timestamp FROM messages WHERE role='user' ORDER BY timestamp DESC, id DESC LIMIT 1"
             ).fetchone()
         return row[0] if row else None
 
@@ -474,9 +516,10 @@ class ConversationStore:
         return row[0] if row else 0
 
     def get_recent_ai_messages(self, n: int) -> List[str]:
-        """返回最近 n 条 assistant 消息的 content（用于情绪分类器）。"""
+        """Completed assistant contents for the legacy text-only emotion reader."""
         rows = self._conn.execute(
-            "SELECT content FROM messages WHERE role='assistant' ORDER BY timestamp DESC LIMIT ?",
+            "SELECT content FROM messages WHERE role='assistant' AND generation_status='completed' "
+            "ORDER BY timestamp DESC, id DESC LIMIT ?",
             (n,)
         ).fetchall()
         rows.reverse()
@@ -494,7 +537,7 @@ class ConversationStore:
                 SELECT timestamp FROM messages
                 WHERE role IN ('user', 'assistant')
                   AND (? = 0 OR timestamp >= ?)
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, id DESC
                 LIMIT ?
             )
         """, (since, since, n_turns * 2)).fetchone()

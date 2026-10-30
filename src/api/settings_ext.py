@@ -1269,6 +1269,10 @@ async def delete_profile(profile_id: str, request: Request):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
 
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime:
+        await runtime.invalidate(profile_id)
+
     # If profile is active, switch away first (so periodic engines won't keep references)
     # If deleting the active profile, switch to another one first
     if sm._current_id == profile_id:

@@ -211,6 +211,12 @@ const SettingsMixin = {
       toolsList: [],            // [{tool_id, label, type, description, config, ...}]
       toolsLoading: false,
       toolsSaving: {},          // { tool_id: bool }
+      toolsLoadSequence: 0,
+      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null },
+      agentRuntime: null,
+      agentSettingsLoaded: false,
+      agentSettingsBusy: false,
+      agentSettingsError: '',
       trendStatus: { unused_count: 0, total_count: 0, last_fetched_at: null },
       trendFetching: false,
       trendNewSource: { type: 'rss', label: '', url: '', query: '' },
@@ -938,6 +944,7 @@ const SettingsMixin = {
       }
       if (newTab === 'tools' && this.settingsOpen) {
         this.loadToolsConfig();
+        this.loadAgentSettings();
       }
       if (newTab === 'memory' && this.settingsOpen) {
         this.memoryPanelLoading = true;
@@ -1063,6 +1070,10 @@ const SettingsMixin = {
 
     openSettings() {
       this.settingsOpen = true;
+      if (this.activeTab === 'tools') {
+        this.loadToolsConfig();
+        this.loadAgentSettings();
+      }
       this.confirmingAction = null;
       {
         let t = localStorage.getItem('theme') || '';
@@ -5104,22 +5115,66 @@ const SettingsMixin = {
 
     /* ─────────────── Tools tab ─────────────── */
 
+    async loadAgentSettings(check = false) {
+      if (this.agentSettingsBusy) return;
+      this.agentSettingsBusy = true;
+      this.agentSettingsError = '';
+      try {
+        const settings = await this.agentFetch(API_PATHS.agentSettings());
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, ...settings };
+        this.agentSettingsLoaded = true;
+        this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
+      } catch (error) {
+        this.agentSettingsError = error.message;
+        this.agentRuntime = null;
+      } finally { this.agentSettingsBusy = false; }
+    },
+
+    async saveAgentSettings(patch) {
+      if (this.agentSettingsBusy || !this.agentSettingsLoaded) return;
+      if (('max_model_requests' in patch && (!Number.isInteger(patch.max_model_requests) || patch.max_model_requests < 1 || patch.max_model_requests > 32)) ||
+          ('timeout_seconds' in patch && (!Number.isInteger(patch.timeout_seconds) || patch.timeout_seconds < 10 || patch.timeout_seconds > 600))) {
+        this.agentSettingsError = this.t('agentLimitsInvalid');
+        return;
+      }
+      this.agentSettingsBusy = true;
+      this.agentSettingsError = '';
+      try {
+        const settings = await this.agentFetch(API_PATHS.agentSettings(), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+        });
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, ...settings };
+        this.agentRuntime = await this.agentFetch(API_PATHS.agentStatus());
+        this.showToast(this.t('savedOk'), 'success');
+      } catch (error) {
+        this.agentSettingsError = error.message;
+        this.agentRuntime = null;
+      } finally { this.agentSettingsBusy = false; }
+    },
+
     async loadToolsConfig(profileId) {
       const pid = profileId || this.selectedProfileId || '';
+      const sequence = ++this.toolsLoadSequence;
+      const selected = this.selectedProfileId, tab = this.activeTab;
       this.toolsLoading = true;
       try {
         const url = pid ? `/api/tools?profile_id=${encodeURIComponent(pid)}` : '/api/tools';
         const res = await fetch(getBaseUrl() + url);
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        if (sequence !== this.toolsLoadSequence || selected !== this.selectedProfileId || tab !== this.activeTab) return;
         this.toolsList = data.tools || [];
         if (pid) {
           await this.loadTrendStatus(pid);
           await this.loadWeatherStatus(pid);
         }
       } catch (e) {
-        this.showToast(this.t('errLoadTools'), 'error');
+        if (sequence === this.toolsLoadSequence) {
+          this.toolsList = [];
+          this.showToast(this.t('errLoadTools'), 'error');
+        }
       } finally {
-        this.toolsLoading = false;
+        if (sequence === this.toolsLoadSequence) this.toolsLoading = false;
       }
     },
 
@@ -5128,21 +5183,28 @@ const SettingsMixin = {
       if (!pid) return;
       this.toolsSaving = { ...this.toolsSaving, [toolId]: true };
       try {
-        const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/tool_configs`, {
+        const res = await fetch(getBaseUrl() + `/api/profiles/${encodeURIComponent(pid)}/tool_configs`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tool_id: toolId, config }),
         });
         const data = await res.json();
-        if (data.ok) {
+        if (!res.ok || !data.ok) throw new Error(data.detail || this.t('errSave'));
+        if (pid === this.selectedProfileId) {
           this.showToast(this.t('savedOk'), 'success');
-          await this.loadToolsConfig(pid);
+          if (toolId === 'agent') await this.loadProfiles();
+          if (pid === this.selectedProfileId) await this.loadToolsConfig(pid);
         }
       } catch (e) {
         this.showToast(this.t('errSave'), 'error');
       } finally {
         this.toolsSaving = { ...this.toolsSaving, [toolId]: false };
       }
+    },
+
+    getProfileAgentPermission(key) {
+      const profile = this.profiles.find(p => p.profile_id === this.selectedProfileId);
+      return profile?.tool_configs?.agent?.[key] !== false;
     },
 
     getToolConfig(toolId) {

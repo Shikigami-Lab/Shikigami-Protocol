@@ -28,11 +28,20 @@ async def _on_expire(app, timer_info: dict):
     config = app.state.config
 
     session = sm.get_by_id(session_id) if session_id else None
-    if session is None:
+    if session is None and not session_id:
         session = sm.get_current()
     if session is None:
-        logger.warning("[timer_expire] 无活跃 session，跳过 system_trigger label=%s", label)
+        logger.warning("[timer_expire] session 不存在，跳过 system_trigger session=%s label=%s", session_id, label)
         return
+
+    # Record the observation once for its original persona, even when the
+    # existing reminder cannot run (e.g. no model configured). No extra LLM.
+    runtime = getattr(app.state, "agent_runtime", None)
+    if runtime is not None:
+        try:
+            runtime.record_timer_expiry(timer_info, session.profile_id)
+        except Exception as exc:
+            logger.warning("[timer_expire] result recording failed id=%s: %s", timer_id, exc)
 
     preset = config.get_active_llm_preset()
     if not preset.get("api_key") and not preset.get("base_url"):

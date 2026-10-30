@@ -25,6 +25,18 @@ window.API_PATHS = {
   sessionMessagesFrom: (sid, storeIdx) => `/sessions/${encodeURIComponent(sid)}/messages/from/${storeIdx}`,
   sessionMessagesDelete: (sid, storeIdx) => `/sessions/${encodeURIComponent(sid)}/messages/${storeIdx}`,
 
+  agentWorkspaceFiles: (pid) => `/api/agent/workspace/files?profile_id=${encodeURIComponent(pid)}`,
+  agentWorkspaceFile: (pid, path, download = false) => `/api/agent/workspace/file?profile_id=${encodeURIComponent(pid)}&path=${encodeURIComponent(path)}${download ? '&download=true' : ''}`,
+  agentWorkspaceVersions: (pid, path) => `/api/agent/workspace/versions?profile_id=${encodeURIComponent(pid)}&path=${encodeURIComponent(path)}`,
+  agentWorkspaceRestore: () => '/api/agent/workspace/restore',
+  agentWorkspaceUpload: () => '/api/agent/workspace/upload',
+  agentSettings: () => '/api/agent/settings',
+  agentStatus: () => '/api/agent/status',
+  agentCheck: () => '/api/agent/check',
+  agentRuns: (profileId) => `/api/agent/runs?profile_id=${encodeURIComponent(profileId)}`,
+  agentRunCancel: (id) => `/api/agent/runs/${encodeURIComponent(id)}/cancel`,
+  agentRunApproval: (id) => `/api/agent/runs/${encodeURIComponent(id)}/approval`,
+
   chat: () => '/chat',
   vlm: () => '/vlm',
   events: (sessionId) => `/events/messages?session_id=${encodeURIComponent(sessionId)}`,

@@ -30,6 +30,7 @@ class AppConfig:
     vlm: Dict[str, Any] = field(default_factory=dict)
     stt: Dict[str, Any] = field(default_factory=dict)
     topic_discovery: Dict[str, Any] = field(default_factory=dict)
+    agent: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str = None) -> "AppConfig":
@@ -79,6 +80,7 @@ class AppConfig:
             vlm=raw.get("vlm", {}),
             stt=raw.get("stt", {}),
             topic_discovery=raw.get("topic_discovery", {}),
+            agent=raw.get("agent", {}),
         )
 
     def get_analysis_preset(self) -> Optional[Dict[str, Any]]:
