@@ -12,6 +12,7 @@ from datetime import datetime
 from src.prompt.base import PromptSegment, ReflectionBuildContext, SegmentResult
 from src.prompt.registry import register
 from src.config.prompt_loader import get_locale
+from src.context.sleep_window import LOOKBACK_DAYS, get_user_sleep_window
 
 
 def _get_period_zh(hour: int) -> str:
@@ -110,15 +111,29 @@ class ReflectionUserEngagementSegment(PromptSegment):
             except Exception:
                 pass
 
-        # Active hour hint from silent_seconds + current time
+        # Sleep window learned from the user's last LOOKBACK_DAYS days of messages;
+        # falls back to 23:00-06:00 when there is not enough data.
         silent = ctx.silent_seconds or 0
+        sleep = get_user_sleep_window()
+        asleep = sleep.contains(hour)
         if locale == "en":
-            if hour >= 23 or hour < 6:
+            if asleep and sleep.learned:
+                lines.append(
+                    f"Over the last {LOOKBACK_DAYS} days the user is usually asleep {sleep.label()} "
+                    "(they almost never message then). It's within that window now — they're most likely "
+                    "still asleep; keep urgency at 0.0–0.1, and don't assume they're up just because it's morning."
+                )
+            elif asleep:
                 lines.append("Current time is late night/early dawn — user may be asleep; keep urgency low.")
             elif silent > 14400:
                 lines.append(f"User has been silent {int(silent/3600)}h+ — if no strong reason, don't interrupt repeatedly.")
         else:
-            if hour >= 23 or hour < 6:
+            if asleep and sleep.learned:
+                lines.append(
+                    f"按近 {LOOKBACK_DAYS} 天的作息，用户通常 {sleep.label()} 在睡觉（这段时间几乎从不发消息）。"
+                    "现在正处于这段时间 → 用户多半还在睡，urgency 保持 0.0~0.1；不要因为到了清晨就默认用户该醒了。"
+                )
+            elif asleep:
                 lines.append("当前属于深夜/清晨时段，用户可能已入睡 → urgency 保持低位。")
             elif silent > 14400:
                 lines.append(f"用户已沉默 {int(silent/3600)} 小时以上，如无强烈动机不要反复打扰。")

@@ -53,6 +53,9 @@ let setupWizardWindow = null;
 let splashWindow     = null;
 let tray             = null;
 let serverProcess    = null;
+let serverStartedAt  = 0;              // process.uptime() in ms at the spawn (monotonic, unlike Date.now())
+let serverExited     = false;          // the spawned server process has exited or failed to spawn
+let serverExitDetail = '';             // exit code, signal or spawn error, for the log and error dialog
 let isQuitting       = false;
 let currentSplashPct = 0;
 let currentSplashMsg = 'Starting...';
@@ -494,6 +497,9 @@ function startServer() {
   if (!isCompiled) console.log(`[electron] script:    ${args[0]}`);
   console.log(`[electron] endpoint:  ${SERVER_URL}`);
 
+  serverStartedAt  = process.uptime() * 1000;
+  serverExited     = false;
+  serverExitDetail = '';
   serverProcess = spawn(pythonCmd, args, {
     cwd: appRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -518,10 +524,21 @@ function startServer() {
   serverProcess.stderr.on('data', (d) =>
     process.stderr.write(`[server:err] ${d}`)
   );
-  serverProcess.on('exit', (code) => {
+  serverProcess.on('exit', (code, signal) => {
+    serverExited = true;
+    serverExitDetail = signal ? `signal ${signal}` : `code ${code}`;
     if (!isQuitting) {
       console.error(`[server] exited unexpectedly (code=${code})`);
     }
+  });
+  // A spawn failure (e.g. the Python executable is missing) emits 'error' without 'exit', and an
+  // 'error' event with no listener would throw in the main process.
+  const child = serverProcess;
+  serverProcess.on('error', (err) => {
+    if (child.pid !== undefined) return;   // the process did start, so this is not a spawn failure
+    serverExited = true;
+    serverExitDetail = err.message;
+    console.error(`[server] failed to start: ${err.message}`);
   });
 }
 
@@ -589,6 +606,10 @@ function serverReady() {
     }
 
     function scheduleRetry() {
+      if (serverExited) {
+        reject(new Error(`Python server process exited before it became ready (${serverExitDetail})`));
+        return;
+      }
       if (tries >= POLL_MAX_TRIES) {
         setSplashProgress(100, 'Connection timed out, opening window...');
         reject(new Error('Python server did not become ready in time'));
@@ -605,6 +626,8 @@ function killServer() {
   if (!serverProcess) return;
   const pid = serverProcess.pid;
   serverProcess = null;
+  // Once the process has exited its PID may already belong to an unrelated process
+  if (serverExited) return;
   try {
     if (process.platform === 'win32') {
       // execFileSync blocks until taskkill exits — ensures server.exe is dead
@@ -720,6 +743,56 @@ function closeSplashWindow() {
 
 // ─────────────────── Browser window ───────────────────
 
+/** True when `url` has the same origin as the local server (SERVER_URL). */
+function isServerOrigin(url) {
+  try {
+    return new URL(url).origin === new URL(SERVER_URL).origin;
+  } catch (_) {
+    return false;   // about:blank, data: and malformed URLs count as external
+  }
+}
+
+/** Only the docs viewer page served by the local server may open as an in-app window. */
+function isDocsViewerUrl(url) {
+  return isServerOrigin(url) && new URL(url).pathname === '/docs-viewer.html';
+}
+
+/** Hand http(s) URLs to the system browser; any other scheme is dropped. */
+function openExternalHttp(url) {
+  if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+}
+
+/**
+ * State of the server process spawned by startServer(): 'running', 'exited' (also after a spawn
+ * failure), or 'none' when main.js has not spawned one and talks to a server it does not own.
+ */
+function serverProcessState() {
+  if (serverExited) return 'exited';
+  return serverProcess ? 'running' : 'none';
+}
+
+/**
+ * Called when the main window cannot reach the local server: its process has exited, or it still
+ * does not respond after every retry. Without it the splash would just close and no window would
+ * ever appear. If the app page never loaded, nothing usable sits behind the dialog, so the app quits.
+ */
+function reportServerUnreachable(neverLoaded, exited) {
+  const logDir = path.join(getAppRoot(), 'data', 'logs');
+  const detail = exited && serverExitDetail ? serverExitDetail : '';
+  dialog.showErrorBox(
+    exited ? 'Local service exited / 本地服务已退出' : 'Local service did not start / 本地服务未能启动',
+    (exited
+      ? `The local service exited unexpectedly${detail ? ` (${detail})` : ''}.\n`
+      : `The local service did not start or is not responding (${SERVER_URL}).\n`) +
+    `Logs: ${logDir}\n\n` +
+    (exited
+      ? `本地服务意外退出${detail ? `（${detail}）` : ''}。\n`
+      : `本地服务未能启动或无响应（${SERVER_URL}）。\n`) +
+    `日志目录：${logDir}`
+  );
+  if (neverLoaded) quitApp();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -738,13 +811,15 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(SERVER_URL);
+  // Load failures (e.g. the server is still starting) are handled by did-fail-load below.
+  mainWindow.loadURL(SERVER_URL).catch(() => {});
   mainWindow.setMenuBarVisibility(false);
 
-  // Handle target="_blank" links: open docs-viewer pages in a proper child window.
-  // Any other same-origin navigation is allowed in-place; deny everything else.
+  // Only window.open / target="_blank" come through here; in-place navigation (a bare <a href>)
+  // does not, see will-navigate below. The docs viewer served by the local server opens as its
+  // own child window; other http(s) links go to the system browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.includes('/docs-viewer.html')) {
+    if (isDocsViewerUrl(url)) {
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -757,8 +832,99 @@ function createWindow() {
       };
     }
     // Open external URLs in the system browser, deny new windows for everything else.
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    openExternalHttp(url);
     return { action: 'deny' };
+  });
+
+  // The docs viewer child window gets the same guards as the main window: it never navigates
+  // away from the local server, and links leaving it (in place or via target="_blank") open in
+  // the system browser.
+  mainWindow.webContents.on('did-create-window', (child) => {
+    child.webContents.on('will-navigate', (e, url) => {
+      if (isServerOrigin(url)) return;
+      e.preventDefault();
+      openExternalHttp(url);
+    });
+    child.webContents.setWindowOpenHandler(({ url }) => {
+      openExternalHttp(url);
+      return { action: 'deny' };
+    });
+  });
+
+  // In-place navigation guard: clicking a bare <a href="https://…"> in a chat bubble (rendered
+  // by marked, no target) navigates the main window itself, which setWindowOpenHandler never
+  // sees. Unguarded, the whole Vue app would be replaced by the external page, and with the menu
+  // bar hidden there is no way back except restarting the app.
+  // Same origin (local server) is allowed; everything else is blocked and sent to the system browser.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (isServerOrigin(url)) return;
+    e.preventDefault();
+    openExternalHttp(url);
+  });
+
+  // Startup race fallback: after a serverReady() poll timeout we still get here and call loadURL
+  // while the Python side may still be importing modules with its port not yet listening. The
+  // first load then fails with ERR_CONNECTION_REFUSED and the window would stay blank for good,
+  // even though the service usually comes up a few seconds later. Failed loads are retried here
+  // so the window recovers by itself.
+  const RELOAD_MAX = 60;          // at a 1 s interval: wait up to 60 more seconds
+  // A slow first run (heavy imports) can outlast RELOAD_MAX. While the process spawned by
+  // startServer() is still alive, startup keeps retrying until this long after the spawn.
+  const STARTUP_WAIT_MAX_MS = 5 * 60 * 1000;
+  // Once the page has loaded, only these connection-level failures are retried
+  const RETRIABLE = new Set([
+    -102,  // ERR_CONNECTION_REFUSED
+    -101,  // ERR_CONNECTION_RESET
+    -109,  // ERR_ADDRESS_UNREACHABLE
+    -7,    // ERR_TIMED_OUT
+    -105,  // ERR_NAME_NOT_RESOLVED
+  ]);
+  let reloadTries = 0;
+  let lastLoadFailed = false;     // latest main-frame load failed (cleared by did-navigate)
+  let loadedOnce = false;         // the app page has loaded successfully at least once
+  mainWindow.webContents.on('did-fail-load', (e, errorCode, errorDesc, validatedURL, isMainFrame) => {
+    if (!isMainFrame || isQuitting || mainWindow.isDestroyed()) return;
+    lastLoadFailed = true;
+    // Only retry the local server address, never failures of external pages
+    try {
+      if (validatedURL && new URL(validatedURL).origin !== new URL(SERVER_URL).origin) return;
+    } catch (_) { /* unparsable URL: treat it as the local server */ }
+    // Before the first successful load every failure is retried. The window stays hidden until
+    // ready-to-show, so ignoring one (e.g. -21 ERR_NETWORK_CHANGED while a VPN adapter comes up
+    // at login) would leave the splash on screen for good.
+    if (loadedOnce && !RETRIABLE.has(errorCode)) return;
+
+    const proc = serverProcessState();
+    const exited = proc === 'exited';   // retrying cannot bring back a process that is gone
+    const stillStarting = !loadedOnce && proc === 'running' && reloadTries >= RELOAD_MAX &&
+      process.uptime() * 1000 - serverStartedAt < STARTUP_WAIT_MAX_MS;
+    if (exited || (reloadTries >= RELOAD_MAX && !stillStarting)) {
+      console.error(exited
+        ? `[electron] server process exited (${serverExitDetail}), not retrying (${errorDesc})`
+        : `[electron] server unreachable after ${reloadTries} retries (${errorDesc})`);
+      closeSplashWindow();
+      // Deferred so the blocking dialog does not run inside the navigation event
+      setTimeout(() => reportServerUnreachable(!loadedOnce, exited), 0);
+      return;
+    }
+    reloadTries += 1;
+    setSplashProgress(95, stillStarting
+      ? `Service is still starting… (${reloadTries})`
+      : `Waiting for service… (${reloadTries})`);
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) mainWindow.loadURL(SERVER_URL).catch(() => {});
+    }, 1000);
+  });
+
+  // A successful load restores the full retry budget, so a later reload that hits a restarting
+  // server is not left with what the startup wait used up. Chromium can also fire
+  // did-finish-load for its network error page, so it only counts after did-navigate, which is
+  // emitted for committed, non-error main-frame navigations only.
+  mainWindow.webContents.on('did-navigate', () => { lastLoadFailed = false; });
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (lastLoadFailed) return;
+    reloadTries = 0;
+    loadedOnce = true;
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -1115,8 +1281,16 @@ app.whenReady().then(async () => {
     await serverReady();
     console.log('[electron] server ready — opening main window');
   } catch (e) {
-    console.error('[electron]', e.message);
-    closeSplashWindow();
+    // A poll timeout does not mean startup failed: the Python side is often just slow to import
+    // modules. Keep the splash; did-fail-load in createWindow() keeps retrying, ready-to-show
+    // closes the splash once the page renders, and an error box appears if retries run out.
+    if (serverExited) {
+      // Nothing to wait for: the first failed load in createWindow() reports the exit
+      console.error('[electron]', e.message);
+    } else {
+      console.error('[electron]', e.message, '— still retrying the connection');
+      setSplashProgress(95, 'Service is slow to start, still waiting…');
+    }
   }
 
   createWindow();

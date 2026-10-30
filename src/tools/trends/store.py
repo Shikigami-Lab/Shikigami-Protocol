@@ -120,6 +120,27 @@ class TrendStore:
         all_items = sorted(self._items, key=lambda x: x.fetched_at, reverse=True)
         return all_items[:n]
 
+    def get_unused_raw(self, n: int = 5) -> List[TrendItem]:
+        """只读：返回 n 条未使用条目，不标记 used（供话题候选列举使用）。"""
+        return [i for i in self._items if not i.used][:n]
+
+    def get_by_id(self, item_id: str) -> Optional[TrendItem]:
+        """按 id 查找条目；不存在返回 None。"""
+        for i in self._items:
+            if i.id == item_id:
+                return i
+        return None
+
+    def mark_used(self, item_id: str) -> bool:
+        """按 id 把条目标记为 used（供话题被 ASE 采用后调用）。"""
+        for i in self._items:
+            if i.id == item_id and not i.used:
+                i.used = True
+                i.used_at = datetime.now().isoformat()
+                self._save()
+                return True
+        return False
+
     def count_unused(self) -> int:
         return sum(1 for i in self._items if not i.used)
 

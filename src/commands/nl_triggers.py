@@ -217,6 +217,50 @@ class WebSearchNLTrigger(NLTrigger):
         )
 
 
+# ── TopicNLTrigger ────────────────────────────────────────────────────────────
+
+_TOPIC_PATTERNS = _re.compile(
+    r"(换个话题|聊点别的|聊点新的|聊点新鲜的|说点别的|说点新鲜的|"
+    r"有什么新鲜事|有啥新鲜事|讲点新鲜事|"
+    r"change the topic|talk about something (else|new)|anything new)",
+    _re.IGNORECASE,
+)
+# Filler allowed to remain once the trigger phrase is removed ("那我们换个话题吧" leaves "那我们吧")
+_TOPIC_FILLER = _re.compile(
+    r"(?i)(let'?s|so|then|okay|ok|hey|well|now|is there|那我们|那就|我们|咱们|最近|那|就|来|你|"
+    r"好不好|行不行|好吗|可以吗|怎么样|呗)"
+    r"|[吧呗呀啊吗呢哦喔嘛诶哈~～!！?？。，,.\s]+"
+)
+
+
+class TopicNLTrigger(NLTrigger):
+    """Topic-finding NL trigger; reuses the zero-LLM-call material picker behind /topic.
+
+    Fires only on a bare request: after removing the trigger phrase and filler words,
+    nothing may remain. Any leftover means the user said something else, such as a
+    negation (别换个话题), a complaint (又换个话题), a statement (我没有什么新鲜事) or a
+    topic of their own (换个话题，聊聊电影), so the message is left to normal chat.
+    """
+
+    def detect(self, msg: str) -> bool:
+        m = msg.strip()
+        if len(m) > 36 or not _TOPIC_PATTERNS.search(m):
+            return False
+        if _SEARCH_PATTERNS.search(m):
+            return False  # explicit search requests belong to WebSearchNLTrigger
+        rest = _TOPIC_FILLER.sub("", _TOPIC_PATTERNS.sub("", m))
+        return not rest
+
+    async def execute(self, msg: str, session, app) -> Optional[CommandResult]:
+        from src.commands.topic_cmds import pick_topic_material, _format_context
+        picked = pick_topic_material(session, app)
+        if picked is None:
+            # No material: inject nothing and let the character change the topic on its own
+            return None
+        return CommandResult(context_for_llm=_format_context(picked, msg.strip()))
+
+
 # ── 注册默认触发器 ─────────────────────────────────────────────────────────────
 register_nl_trigger(TimerNLTrigger())
 register_nl_trigger(WebSearchNLTrigger())
+register_nl_trigger(TopicNLTrigger())

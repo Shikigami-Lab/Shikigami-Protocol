@@ -117,7 +117,8 @@ class LongTermStore:
                 fact.category = v
                 semantic_changed = True
             elif k == "weight":
-                fact.weight = round(float(v), 2)
+                # 4 位小数：每日衰减 0.998 的单步变化约 0.002，2 位精度会把它整个舍掉
+                fact.weight = round(float(v), 4)
             elif k == "tags" and isinstance(v, list):
                 fact.tags = v
             elif k == "pinned":

@@ -7,7 +7,7 @@ Key design principles:
     - Single cooldown concept: urgency-weighted (higher urgency = shorter wait)
     - Mode system: 5 predefined profiles (low/medium/high/game/focus)
     - No conditional branches on mode in the engine code — just reads mode params
-    - heartbeat_speak() uses build_messages() with extra_system injection
+    - heartbeat_speak() uses build_messages(); scene context goes into user message
     - Only saves the assistant response (no artificial user message in history)
     - Timer expiry NOT handled here — it has its own path via system_trigger
 
@@ -54,11 +54,13 @@ def _load_ase_state(storage_root: str) -> Dict[str, Any]:
 
 
 def _save_ase_state(storage_root: str, state: Dict[str, Any]) -> None:
-    """Persist ASE state to disk (best-effort)."""
+    """Persist ASE state to disk (best-effort, atomic tmp+replace)."""
     path = _ase_state_path(storage_root)
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception as e:
         logger.warning("[ASE] save_ase_state failed (%s): %s", path, e)
 
@@ -269,136 +271,59 @@ def _get_time_ctx(hour: int, locale: str) -> str:
     return entry.get(locale) or entry.get("zh") or ("night" if locale == "en" else "深夜")
 
 
-def _build_heartbeat_ctx(
-    reflection_state: Dict,
-    vlm_description: str = "",
-    last_ase_content: str = "",
-    greeting_hint: str = "",
-    style_hint: str = "",
-) -> str:
-    """Build the extra_system content for ASE proactive speech."""
-    from datetime import datetime
-    locale = get_locale()
-    thought    = reflection_state.get("thought", "")
-    topic_hint = reflection_state.get("topic_hint", "")
-    hour = datetime.now().hour
-    time_ctx = _get_time_ctx(hour, locale)
 
-    parts = []
+# ── Silence replies ───────────────────────────────────────────────────────────
+# The ASE prompts let the model answer with a bare silence marker such as "（静默）"
+# or "(silence)" when nothing is worth saying. Such a reply must not be stored, shown
+# or spoken, so it is detected before anything reaches the frontend.
 
-    # 接续上次主动发言
-    if last_ase_content and last_ase_content.strip():
-        raw = last_ase_content.strip()
-        snippet = raw[:120] + ("…" if len(raw) > 120 else "")
-        parts.append(render("ase.last_spoke_continuation", locale=locale,
-                            default=(
-                                "[Continue Your Last Proactive Message] You last initiated with: \"$snippet\". The user has not replied yet. "
-                                "Continue from it or take a new angle — do not repeat it verbatim, and do not ask whether they are away or unwilling to reply."
-                                if locale == "en"
-                                else "【接续上次主动发言】你上次主动说的是：「$snippet」。用户尚未回复。"
-                                     "请接着这句话往下说或换一个角度，不要原样重复，也不要问对方是否不在或不想回复。"
-                            ),
-                            snippet=snippet))
-
-    # 情境提示
-    if greeting_hint and greeting_hint.strip():
-        parts.append(greeting_hint.strip())
-
-    # 时段备注（仅深夜/清晨）
-    night_labels = {
-        get_prompt("ase.time_periods.night", locale=locale, default=("night" if locale == "en" else "深夜")),
-        get_prompt("ase.time_periods.dawn", locale=locale, default=("dawn" if locale == "en" else "清晨")),
-    }
-    if time_ctx in night_labels and not vlm_description:
-        parts.append(render("ase.time_note", locale=locale,
-                            default=("It's $time_ctx right now." if locale == "en" else "此刻是$time_ctx。"),
-                            time_ctx=time_ctx))
-
-    # 场景上下文
-    if vlm_description:
-        parts.append(render("ase.vlm_notice", locale=locale,
-                            default=("You notice on their screen — $vlm_description" if locale == "en" else "你注意到对方的屏幕上——$vlm_description"),
-                            vlm_description=vlm_description))
-        if thought:
-            parts.append(render("ase.thought_after_vlm", locale=locale,
-                                default=("That makes you think of: $thought" if locale == "en" else "这让你想起了：$thought"),
-                                thought=thought))
-    elif thought:
-        parts.append(render("ase.thought_alone", locale=locale,
-                            default=("You've been keeping in mind: $thought" if locale == "en" else "你一直留意着：$thought"),
-                            thought=thought))
-        if topic_hint:
-            parts.append(render("ase.topic_with_thought", locale=locale,
-                                default=("Last time you also talked about \"$topic_hint\"." if locale == "en" else "你们上次还聊到了「$topic_hint」。"),
-                                topic_hint=topic_hint))
-    elif topic_hint:
-        parts.append(render("ase.topic_alone", locale=locale,
-                            default=("You recall a previous conversation about \"$topic_hint\"." if locale == "en" else "你想起了之前关于「$topic_hint」的对话。"),
-                            topic_hint=topic_hint))
-    else:
-        parts.append(render("ase.silence_generic", locale=locale,
-                            default=("It's $time_ctx now, and it's quiet around." if locale == "en" else "现在是$time_ctx，四周很静。"),
-                            time_ctx=time_ctx))
-
-    parts.append(get_prompt("ase.date_hint", locale=locale,
-                            default=(
-                                "The current date/holiday is shown in the time context above; if it fits naturally, you may mention a brief holiday/date-related line."
-                                if locale == "en"
-                                else "当前日期与节日见上方时间上下文；若自然可带出节日或日期相关的一句。"
-                            )))
-
-    if style_hint and style_hint.strip():
-        parts.append(render("ase.style_hint_prefix", locale=locale,
-                            default=("Current tendency: $style_hint" if locale == "en" else "角色此刻倾向：$style_hint"),
-                            style_hint=style_hint.strip()))
-
-    parts.append(get_prompt("ase.behavioral_guidance", locale=locale,
-                            default=(
-                                "[You are initiating proactively, not answering a question]\n"
-                                "- Say what you want to say directly; avoid openings like \"Is there anything I can help with?\" or \"I want to ask you...\"\n"
-                                "- Keep it short and natural; stop when it's enough — no long monologues\n"
-                                "- Don't bring up themes like \"you're not here\" / \"you stopped talking\"\n"
-                                "- If there's truly nothing worth saying, you may reply with \"(silence)\""
-                                if locale == "en"
-                                else "【此刻你是主动开口，不是在回应对方的提问】\n"
-                                     "- 直接说你想说的，不要以「有什么我能帮你的吗」或「我想问你……」之类的开头\n"
-                                     "- 简短、自然，说完就够，不需要展开成长篇\n"
-                                     "- 不要主动提起对方「不在」「不说话了」之类的话题\n"
-                                     "- 如果此刻真的没有值得说的话，可以只回复「（静默）」"
-                            )))
-
-    return "\n".join(parts)
+_SILENCE_MARKERS = frozenset({"静默", "(静默)", "[静默]", "silence", "(silence)", "[silence]"})
+_SILENCE_QUOTES = "\"'`“”‘’「」『』«»*"                            # ignored at either end
+_SILENCE_TRAILING = _SILENCE_QUOTES + ".,!?;:。，、！？；：…~～"   # ignored at the end
+_SILENCE_BRACKETS = str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]"})
 
 
-def _build_stage_trigger(reflection_state: Dict, vlm_description: str = "") -> str:
-    """Build a context-derived trigger user message for ASE proactive speech.
+def _fold_for_silence_match(text: str) -> str:
+    """Case-fold, drop all whitespace and map full-width brackets to ASCII."""
+    return "".join((text or "").casefold().split()).translate(_SILENCE_BRACKETS)
 
-    Uses explicit second-person "你" to signal this is context about the AI,
-    not user speech — same mechanism as effective AI-directed user messages.
-    Character-agnostic: no physical traits or species-specific stage business.
+
+def is_silence_reply(text: str) -> bool:
+    """Return True if the whole reply is a silence marker and nothing else.
+
+    Whitespace, surrounding quotes and trailing punctuation are ignored and the match
+    is case-insensitive, so "（静默）", "「（静默）」" and "(Silence)." all qualify.
+    A reply that merely contains the word alongside other text does not.
     """
-    thought    = reflection_state.get("thought", "")
-    topic_hint = reflection_state.get("topic_hint", "")
+    core = _fold_for_silence_match(text).lstrip(_SILENCE_QUOTES).rstrip(_SILENCE_TRAILING)
+    return core in _SILENCE_MARKERS
 
-    locale = get_locale()
-    triggers = get_raw("ase.stage_triggers") or {}
 
-    def _pick(key: str, fallback: list) -> str:
-        entry = triggers.get(key, {})
-        options = entry.get(locale) or entry.get("zh") or fallback
-        if isinstance(options, list):
-            return random.choice(options)
-        return str(options)
+def could_become_silence_reply(prefix: str) -> bool:
+    """Return True while a partially streamed reply may still turn out to be silence.
 
-    if vlm_description:
-        return _pick("vlm", ["You noticed something on the screen and have something to say."] if locale == "en" else ["你注意到了屏幕上的一些东西，心里有话想说。"])
-    if thought:
-        return _pick("thought", ["You feel like speaking up."] if locale == "en" else ["你有点想开口了。"])
-    if topic_hint:
-        entry = triggers.get("topic", {})
-        val = entry.get(locale) or entry.get("zh") or ("You recall something unfinished from before, and you have something to say." if locale == "en" else "你想起了之前没说完的事，心里有话想说。")
-        return str(val)
-    return _pick("default", ["You've been quiet for a while, and you have something to say now."] if locale == "en" else ["你沉默了一段时间，此刻有话想说。"])
+    True when some continuation of ``prefix`` would satisfy is_silence_reply(); in
+    particular every prefix of a silence reply returns True. Used to hold streamed
+    tokens back until the reply can no longer be silence. Ordinary replies are
+    released within their first few characters.
+    """
+    head = _fold_for_silence_match(prefix).lstrip(_SILENCE_QUOTES)
+    for marker in _SILENCE_MARKERS:
+        if marker.startswith(head):
+            return True
+        if head.startswith(marker) and not head[len(marker):].strip(_SILENCE_TRAILING):
+            return True
+    return False
+
+
+# Providers put this string into the stream instead of raising when a request fails.
+_LLM_ERROR_PREFIX = "[LLM Error:"
+
+
+def could_be_llm_error(prefix: str) -> bool:
+    """Return True while a streamed reply may be, or already is, a provider error string."""
+    head = (prefix or "").lstrip()
+    return _LLM_ERROR_PREFIX.startswith(head) or head.startswith(_LLM_ERROR_PREFIX)
 
 
 class AseEngine:
@@ -502,6 +427,11 @@ class AseEngine:
                 if not current or current.id != session.id:
                     await asyncio.sleep(check_interval)
                     continue
+                # Session 对象可能已被替换（编辑人格保存 / 重新勾选「加载到聊天」都会
+                # 用 add_session/load_session 覆盖同 id 的 session）。必须切换到 live
+                # 对象，否则读到的是旧对象的 reflection_state——urgency 永远 0，
+                # ASE 永远 low_urgency 跳过，而状态面板读新对象显示一切正常。
+                session = current
                 # 人格级别覆盖：该人格单独关闭了 ASE 则跳过
                 try:
                     from src.config.effective_config import get_effective_engine_config
@@ -524,7 +454,12 @@ class AseEngine:
                 silent_seconds = now - effective_last
                 min_silent = float(mode_cfg.get("min_silent_seconds", 300))
                 silence_remaining = max(0.0, min_silent - silent_seconds)
-                sleep_secs = min(check_interval, max(1.0, silence_remaining))
+                # 窗口未开：在开窗时刻附近醒来；窗口已开：按正常节奏 check_interval 检查
+                # （此前窗口已开时 max(1.0, 0) 退化成 1 秒忙循环，刷爆 ase.log）
+                if silence_remaining > 0:
+                    sleep_secs = min(check_interval, max(1.0, silence_remaining))
+                else:
+                    sleep_secs = check_interval
                 profile_state["next_check_at"] = time.time() + sleep_secs
                 profile_state["this_round_sleep_secs"] = sleep_secs
                 _save_ase_state(session.storage_root, profile_state)
@@ -677,6 +612,94 @@ class AseEngine:
 
         await self._speak(session, reflection_state, mode_name, mode_cfg)
 
+    def _resolve_chosen_topic(self, session) -> Optional[Dict[str, Any]]:
+        """读自省选定的 chosen_topic，按 TTL 校验后 resolve 出完整新鲜素材。
+
+        返回 dict（含 material/angle/framing_hint/source_id/item_id 及内部 _source/_tctx），
+        无 chosen_topic / 已过期 / resolve 失败 / 来源被禁用时返回 None（ASE 走兜底）。
+        """
+        rs = getattr(session, "reflection_state", None) or {}
+        chosen = rs.get("chosen_topic")
+        if not chosen:
+            return None
+
+        app = self._app
+        try:
+            from src.config.effective_config import get_effective_topic_discovery_config
+            td_cfg = get_effective_topic_discovery_config(app, session.profile_id)
+        except Exception:
+            td_cfg = {}
+        if not td_cfg.get("enabled", True):
+            return None
+
+        ttl = float(td_cfg.get("chosen_topic_ttl", 1800))
+        if ttl > 0 and (time.time() - float(chosen.get("picked_at", 0) or 0)) > ttl:
+            logger.debug("[ASE] chosen_topic 已过期，走兜底 session=%s", session.id)
+            return None
+
+        source_id = chosen.get("source", "")
+        item_id = chosen.get("item_id", "")
+        if not source_id or not item_id:
+            return None
+
+        from src.core.topics import get_source
+        from src.core.topics.base import TopicSourceContext
+
+        src = get_source(source_id)
+        if src is None:
+            return None
+        # 来源在 pick 之后被禁用 → 兜底
+        src_entry = (td_cfg.get("sources") or {}).get(source_id) or {}
+        if not src_entry.get("enabled", src.enabled_by_default):
+            return None
+
+        # profile 卡 + 情绪状态（部分来源 resolve 需要）
+        from src.config.effective_config import _load_profile_card
+        profile = _load_profile_card(session.profile_id)
+        emotion = None
+        try:
+            epath = os.path.join(session.storage_root, "emotion_state.json")
+            if os.path.exists(epath):
+                with open(epath, encoding="utf-8") as f:
+                    emotion = json.load(f)
+        except Exception:
+            pass
+        mm = None
+        try:
+            mm = getattr(app.state, "memory_managers", {}).get(session.profile_id)
+        except Exception:
+            pass
+
+        tctx = TopicSourceContext(
+            profile_id=session.profile_id,
+            storage_root=session.storage_root,
+            profile=profile,
+            config=td_cfg,
+            reflection_thought=rs.get("thought", ""),
+            emotion=emotion,
+            memory_manager=mm,
+            session=session,
+            app=app,
+        )
+        try:
+            material = src.resolve(item_id, tctx)
+        except Exception as e:
+            logger.debug("[ASE] chosen_topic resolve 失败 (%s:%s): %s", source_id, item_id, e)
+            return None
+        if material is None:
+            logger.debug("[ASE] chosen_topic resolve 返回 None，走兜底 (%s:%s)", source_id, item_id)
+            return None
+
+        return {
+            "source_id": source_id,
+            "item_id": item_id,
+            "material": material.material,
+            "angle": chosen.get("angle", ""),
+            "framing_hint": src.get_framing_hint(get_locale()),
+            "_source": src,
+            "_tctx": tctx,
+        }
+
     async def _speak(
         self,
         session,
@@ -688,7 +711,9 @@ class AseEngine:
         from src.core.broadcast import broadcast
         from src.prompt.pipeline import build_messages
         from src.llm.registry import get_provider
-        from src.utils.debug_logger import log_ase_speak, log_ase_error, log_llm_call, log_llm_response
+        from src.utils.debug_logger import (
+            log_ase_check, log_ase_speak, log_ase_error, log_llm_call, log_llm_response,
+        )
 
         app = self._app
         config = app.state.config
@@ -749,31 +774,22 @@ class AseEngine:
             last_user_ts=last_user_ts_float,
         )
         greeting_hint = "\n".join(segment_texts) if segment_texts else ""
-        style_hint = (reflection_state.get("style_hint") or "").strip()
 
-        extra_system = _build_heartbeat_ctx(
-            reflection_state, vlm_description, last_ase_content,
-            greeting_hint=greeting_hint, style_hint=style_hint,
-        )
-        if extra_behavior:
-            extra_system += "\n\n" + extra_behavior
+        # extra_system: only per-mode extra_behavior (behavioral guidance is now a segment)
+        extra_system = extra_behavior or ""
 
-        # ── Stage-direction trigger message (not saved to history) ────────────
-        trigger_msg = _build_stage_trigger(reflection_state, vlm_description)
+        # 主动话题发现：解析自省选定的话题，开口前现拉完整新鲜素材
+        chosen_topic = self._resolve_chosen_topic(session)
 
         # ── Build messages ────────────────────────────────────────────────────
         store = session.conversation_store
 
         # Ensure MemoryManager exists so memory segments can access it
+        # （复用 memory API 的工厂：旧实现 MemoryManager(profile_id, mem_cfg) 参数错位，
+        #   mem_cfg 被当成 storage_root，记忆段落静默失效）
         try:
-            managers = getattr(app.state, "memory_managers", None)
-            if managers is None:
-                app.state.memory_managers = {}
-                managers = app.state.memory_managers
-            if session.profile_id not in managers:
-                from src.memory.memory_manager import MemoryManager
-                mem_cfg = config.get_memory_config()
-                managers[session.profile_id] = MemoryManager(session.profile_id, mem_cfg)
+            from src.api.memory import get_or_create_manager_for_session
+            get_or_create_manager_for_session(app, session)
         except Exception:
             pass
 
@@ -784,23 +800,28 @@ class AseEngine:
 
         messages = build_messages(
             session,
-            "",  # empty user_msg — we add trigger as the final user message
+            "",  # empty user_msg — scene context injected via ase_scene_context segment
             store,
             n_history_turns=n_history,
             preset=preset,
             app=app,
             extra_system=extra_system,
             max_facts_override=max_facts,
+            pipeline_mode="ase",
+            extra_context={
+                "ase_vlm_description": vlm_description,
+                "ase_last_content": last_ase_content,
+                "ase_greeting_hint": greeting_hint,
+                "ase_chosen_topic": chosen_topic,
+                "ase_silent_seconds": silent_seconds,
+            },
         )
 
-        # Remove empty user placeholder that build_messages appends
+        # Remove empty user messages (if pipeline produced any before scene context)
         messages = [
             m for m in messages
             if not (m["role"] == "user" and not m["content"].strip())
         ]
-        # Append stage-direction as final user message (not saved)
-        #messages.append({"role": "user", "content": trigger_msg})extra_system
-        messages.append({"role": "user", "content": extra_system})
 
         llm = get_provider(preset)
         gen_kwargs = {
@@ -820,24 +841,78 @@ class AseEngine:
         full_response = ""
         vlm_used = bool(vlm_description)
         try:
+            # Hold tokens back while the reply could still be a bare silence marker or a provider
+            # error string: the frontend renders tokens as they arrive and starts TTS on "done",
+            # so neither may ever be pushed. Ordinary replies are released after a few characters.
+            holding = True
             async for token in llm.stream_chat(messages):
                 full_response += token
+                if holding:
+                    if could_become_silence_reply(full_response) or could_be_llm_error(full_response):
+                        continue
+                    holding = False
+                    token = full_response
                 await broadcast.push(session.id, {"token": token, "done": False})
 
+            raw_response = full_response
             full_response = full_response.replace("**", "").strip()
 
+            is_llm_error = holding and full_response.startswith(_LLM_ERROR_PREFIX)
+            if holding and (not full_response or is_silence_reply(full_response) or is_llm_error):
+                # The model chose not to speak, returned nothing, or the request failed. Nothing
+                # is stored, broadcast or spoken, and no proactive counter, cooldown or segment
+                # trigger is updated. As with a low-urgency skip, the loop simply waits for its
+                # next check. Urgency is cleared, as after a real speak, so that check does not
+                # call the model again on the same reflection state (and a failing provider is not
+                # retried on every check); the next reflection sets it afresh.
+                if is_llm_error:
+                    skip_reason = "llm_error"
+                    log_ase_error(session_id=session.id, error=full_response[:500])
+                else:
+                    skip_reason = "silence_reply" if full_response else "empty_reply"
+                log_llm_response(
+                    session_id=session.id,
+                    response=raw_response,
+                    model=preset.get("model", ""),
+                )
+                log_ase_check(
+                    session_id=session.id,
+                    mode=mode_name,
+                    urgency=reflection_state.get("urgency", 0.0),
+                    threshold=float(mode_cfg.get("urgency_threshold", 0.35)),
+                    silent_seconds=silent_seconds,
+                    decision="skip",
+                    skip_reason=skip_reason,
+                )
+                logger.info(
+                    "[ASE] session=%s model chose not to speak (%s); nothing sent or stored",
+                    session.id, skip_reason,
+                )
+                if session.reflection_state:
+                    session.reflection_state["urgency"] = 0.0
+                    session.save_runtime_state()
+                return
+
+            if holding:
+                # The whole reply was held back and turned out not to be silence: send it now.
+                await broadcast.push(session.id, {"token": raw_response, "done": False})
+
             # Save only the assistant response (no user trigger message)
-            store.append("assistant", full_response, sender=session.display_name or "")
+            assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
 
             await broadcast.push(session.id, {
                 "type": "new_message",
+                "message_id": assistant_message_id,
                 "role": "assistant",
                 "content": full_response,
                 "timestamp": time.time(),
                 "client_id": "",
                 "sender": session.display_name or "",
             })
-            await broadcast.push(session.id, {"token": "", "done": True})
+            await broadcast.push(session.id, {
+                "token": "", "done": True,
+                "message_id": assistant_message_id, "message_role": "assistant",
+            })
 
             duration_ms = int((time.time() - t0) * 1000)
             log_llm_response(
@@ -863,7 +938,11 @@ class AseEngine:
             state = self._state.setdefault(session.profile_id, {})
             state["last_speak_time"] = time.time()
             state["last_speak_content"] = (full_response[:250] or "").strip()
-            state.setdefault("timestamps_24h", []).append(time.time())
+            # 先按 24h 窗口裁剪再追加，否则过期时间戳会在磁盘上无限累积
+            _now = time.time()
+            _cutoff = _now - 86400
+            state["timestamps_24h"] = [t for t in state.get("timestamps_24h", []) if t > _cutoff]
+            state["timestamps_24h"].append(_now)
             state["consecutive_speaks"] = state.get("consecutive_speaks", 0) + 1
             if injected_builtin_ids:
                 state["hint_last_used"] = _hint_last_used_after_speak(
@@ -872,16 +951,25 @@ class AseEngine:
                 )
             # Write proactive_log entry for topic deduplication in reflection
             speak_reason = reflection_state.get("speak_reason", "none") if reflection_state else "none"
-            topic_hint = reflection_state.get("topic_hint", "") if reflection_state else ""
+            topic_anchor = reflection_state.get("topic_anchor", "") if reflection_state else ""
             log_entry = {
                 "timestamp": time.time(),
-                "topic_hint": topic_hint[:80],
+                "topic_anchor": topic_anchor[:80],
                 "speak_reason": speak_reason,
                 "urgency": reflection_state.get("urgency", 0.0) if reflection_state else 0.0,
             }
+            # 主动话题发现：记录来源与条目 ID，供后续候选去重；并通知来源标记已用
+            if chosen_topic:
+                log_entry["source"] = chosen_topic["source_id"]
+                log_entry["item_id"] = chosen_topic["item_id"]
+                try:
+                    chosen_topic["_source"].mark_used(
+                        chosen_topic["item_id"], chosen_topic["_tctx"])
+                except Exception as e:
+                    logger.debug("[ASE] topic mark_used 失败: %s", e)
             proactive_log = state.get("proactive_log", [])
             proactive_log.append(log_entry)
-            state["proactive_log"] = proactive_log[-10:]  # keep last 10
+            state["proactive_log"] = proactive_log[-15:]  # keep last 15
             _save_ase_state(session.storage_root, state)
 
             # Reset urgency so we don't speak again immediately

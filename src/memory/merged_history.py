@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from src.memory.conversation_store import ConversationStore
@@ -25,7 +25,9 @@ def _msg_date(msg) -> str:
     ts = msg.get("timestamp") if isinstance(msg, dict) else getattr(msg, "timestamp", None)
     if ts:
         try:
-            return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d")
+            # 本地时区：与 chat / daily_memory_job / memory_manager 的 _msg_date 一致，
+            # 否则同一条消息在不同读取路径会落到不同日期，日摘要会取错某天的对话。
+            return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d")
         except Exception:
             pass
     return ""

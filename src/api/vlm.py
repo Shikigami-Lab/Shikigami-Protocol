@@ -17,6 +17,7 @@ import traceback
 from string import Template
 
 from src.config.prompt_loader import get_prompt
+from src.llm.openai_compat import _normalize_base_url
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -180,7 +181,7 @@ async def _call_vlm(
 
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url=base_url or None,
+        base_url=_normalize_base_url(base_url) or None,
     )
 
     _ocr_prefix = ""
@@ -211,13 +212,16 @@ async def _call_vlm(
         }
     ]
 
+    # Screenshots (incl. ASE) and uploads both use a higher token limit.
+    _max_tokens = 5000
+
     # Log call — skip the base64 image block to avoid huge log entries
     _log_messages = [{"role": "user", "content": f"[image ~{len(image_b64)*3//4} bytes, {mime}] {_text_prompt}"}]
     log_secondary_llm_call(
         role="vlm",
         messages=_log_messages,
         model=model,
-        gen_kwargs={"max_tokens": 400},
+        gen_kwargs={"max_tokens": _max_tokens},
         session_id=session_id,
     )
 
@@ -226,7 +230,7 @@ async def _call_vlm(
         model=model,
         messages=messages,
         stream=False,
-        max_tokens=400,
+        max_tokens=_max_tokens,
     )
     description = result.choices[0].message.content.strip()
     log_secondary_llm_response(

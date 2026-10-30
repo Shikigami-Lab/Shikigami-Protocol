@@ -51,8 +51,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 return
 
             preset = config.get_active_llm_preset()
-            if not preset.get("api_key") and not preset.get("base_url"):
-                yield f"data: {json.dumps({'error': 'LLM not configured. Set api_key and base_url in config/app.yaml', 'done': True})}\n\n"
+            # openai_compat 必需 base_url + model；api_key 对本地模型(Ollama/LM Studio)可空，
+            # 故不能用 api_key 判断「已配置」。
+            if not preset.get("base_url") or not preset.get("model"):
+                yield f"data: {json.dumps({'error': 'LLM not configured. Set base_url and model for the active preset (Settings → Models).', 'done': True})}\n\n"
                 return
 
             store = session.conversation_store
@@ -99,15 +101,17 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
             # Record user message（带 sender，群聊防污染）
             user_name = getattr(config, "user_name", "用户") or "用户"
-            store.append("user", body.message, sender=user_name)
+            user_message_id = store.append("user", body.message, sender=user_name)
             await broadcast.push(session.id, {
                 "type": "new_message",
+                "message_id": user_message_id,
                 "role": "user",
                 "content": body.message,
                 "timestamp": time.time(),
                 "client_id": body.client_id,
                 "sender": user_name,
             })
+            yield f"data: {json.dumps({'message_id': user_message_id, 'message_role': 'user'})}\n\n"
 
             # ── 双轨工具检测（消息保存后、LLM 调用前）───────────────────────────
 
@@ -204,9 +208,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         actual_error,
                         {"session_id": session.id, "response_preview": (full_response or "(empty)")[:500], "reason": reason},
                     )
-                    store.append("assistant", "", sender=session.display_name or "")
+                    assistant_message_id = store.append("assistant", "", sender=session.display_name or "")
                     await broadcast.push(session.id, {
                         "type": "new_message",
+                        "message_id": assistant_message_id,
                         "role": "assistant",
                         "content": "回复生成失败，请重试。",
                         "timestamp": time.time(),
@@ -214,9 +219,10 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         "sender": session.display_name or "",
                     })
                     log_llm_response(session_id=session.id, response=full_response or "(empty)", model=preset.get("model", ""))
-                    yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response'})}\n\n"
+                    yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response', 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
+                    return  # 错误/空回复到此结束：不再走后续引擎/广播，也不重复 yield done
                 else:
-                    store.append("assistant", full_response, sender=session.display_name or "")
+                    assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
 
                 # ── P4: 情绪分类 + 好感度 LLM（fire-and-forget）──────────────────
                 if not is_error_or_empty:
@@ -269,9 +275,22 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     except Exception as mem_err:
                         logger.warning("[chat] _fire_memory_tasks 失败: %s", mem_err)
 
+                    # ── user_portrait 对话量兜底（完全独立于 memory 总开关）─────────────
+                    try:
+                        _fire_portrait_burst_check(session, request.app)
+                    except Exception as port_err:
+                        logger.warning("[chat] _fire_portrait_burst_check 失败: %s", port_err)
+
+                    # ── 人格演化兜底（同样独立于 memory 总开关）──────────────────────
+                    try:
+                        _fire_persona_evolution_check(session, request.app)
+                    except Exception as evo_err:
+                        logger.warning("[chat] _fire_persona_evolution_check 失败: %s", evo_err)
+
                     # Broadcast completed assistant reply（带 sender）
                     await broadcast.push(session.id, {
                         "type": "new_message",
+                        "message_id": assistant_message_id,
                         "role": "assistant",
                         "content": full_response,
                         "timestamp": time.time(),
@@ -286,7 +305,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         model=preset.get("model", ""),
                     )
 
-                    yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
+                    yield f"data: {json.dumps({'token': '', 'done': True, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
 
             except (GeneratorExit, asyncio.CancelledError):
                 logger.info("[chat] 流被客户端中断，停止生成")
@@ -422,9 +441,10 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                     actual_error,
                     {"session_id": session.id, "response_preview": (full_response or "(empty)")[:500], "reason": reason},
                 )
-                store.append("assistant", "", sender=session.display_name or "")
+                assistant_message_id = store.append("assistant", "", sender=session.display_name or "")
                 await broadcast.push(session.id, {
                     "type": "new_message",
+                    "message_id": assistant_message_id,
                     "role": "assistant",
                     "content": "回复生成失败，请重试。",
                     "timestamp": time.time(),
@@ -432,9 +452,9 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                     "sender": session.display_name or "",
                 })
                 log_llm_response(session_id=session.id, response=full_response or "(empty)", model=preset.get("model", ""))
-                yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response'})}\n\n"
+                yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response', 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
             else:
-                store.append("assistant", full_response, sender=session.display_name or "")
+                assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
                 emotion_engine = getattr(request.app.state, "emotion_engine", None)
                 if emotion_engine:
                     from src.config.effective_config import get_effective_engine_config
@@ -453,6 +473,7 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                     ))
                 await broadcast.push(session.id, {
                     "type": "new_message",
+                    "message_id": assistant_message_id,
                     "role": "assistant",
                     "content": full_response,
                     "timestamp": time.time(),
@@ -461,7 +482,7 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                 })
                 log_llm_response(session_id=session.id, response=full_response,
                              model=preset.get("model", ""))
-                yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
+                yield f"data: {json.dumps({'token': '', 'done': True, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
 
         except Exception as e:
             logger.error("[system_trigger] generation error: %s", e)
@@ -565,11 +586,10 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
                 yesterday_msgs = get_merged_messages_for_date(session, app, profile, yesterday)
                 has_yesterday = bool(yesterday_msgs)
             else:
-                all_msgs = store.get_all() if hasattr(store, "get_all") else []
-                has_yesterday = any(
-                    _msg_date(m) == yesterday
-                    for m in all_msgs
-                    if getattr(m, "role", None) in ("user", "assistant")
+                from datetime import datetime as _dt
+                _y0 = _dt.strptime(yesterday, "%Y-%m-%d")
+                has_yesterday = store.has_messages_between(
+                    _y0.timestamp(), (_y0 + timedelta(days=1)).timestamp()
                 )
             if has_yesterday:
                 _d, _s, _p, _a = yesterday, store, profile, app
@@ -590,12 +610,96 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
                     ))
 
 
-def _msg_date(msg) -> str:
-    ts = msg.get("timestamp") if isinstance(msg, dict) else getattr(msg, "timestamp", None)
-    if ts:
+def _fire_portrait_burst_check(session, app):
+    """user_portrait 对话量兜底刷新：累计 ≥ min_turns_for_burst_refresh 条新对话
+    且距上次刷新 ≥ min_hours_between_refresh 小时时，异步触发一次画像刷新。
+    完全独立于 memory 总开关，只看 user_portrait_config。"""
+    try:
+        from src.config.profile_loader import ProfileLoader
+        card = ProfileLoader().load(session.profile_id)
+    except Exception:
+        return
+    cfg = card.get("user_portrait_config") or {}
+    if not cfg.get("enabled", True):
+        return
+    min_turns = int(cfg.get("min_turns_for_burst_refresh") or 0)
+    if min_turns <= 0:
+        return  # 兜底关闭
+    min_hours = float(cfg.get("min_hours_between_refresh", 6))
+    portrait = card.get("user_portrait") or {}
+    last_ts = float(portrait.get("updated_at") or 0)
+
+    if min_hours > 0 and last_ts > 0:
+        if (time.time() - last_ts) / 3600 < min_hours:
+            return
+
+    try:
+        recent_count = session.conversation_store.count_since(last_ts, cap=min_turns)
+    except Exception:
+        return
+    if recent_count < min_turns:
+        return
+
+    _profile_id = session.profile_id
+    _storage_root = session.storage_root
+    _app = app
+
+    async def _run():
+        from src.core.user_portrait import trigger_portrait_refresh
+        await trigger_portrait_refresh(_profile_id, _storage_root, _app, triggered_by="burst")
+
+    asyncio.create_task(_fire_task(_run, "portrait_burst_refresh", retries=1, retry_delay=5.0))
+
+
+# 正在演化中的 profile_id 集合 —— 防止快速连发消息导致同一人格并发触发多次演化
+_evolution_inflight: set = set()
+
+
+def _fire_persona_evolution_check(session, app):
+    """人格演化兜底触发：自上次演化以来累计 ≥ min_interval_turns 条用户消息时，
+    异步触发一次演化。
+
+    要点（修复旧实现的两个缺陷）：
+      - 完全独立于 memory 总开关：旧实现挂在记忆提取 auto_extract 末尾，
+        关掉记忆提取就等于关掉了演化。
+      - 用「自 evolved_at 以来的用户消息计数 ≥ interval」判定，而非
+        turn_counter % interval == 0：后者在 extraction_frequency 不整除
+        interval 时会永远命不中。只数用户消息，不被 ASE 主动发言灌水。
+    """
+    profile_id = session.profile_id
+    if profile_id in _evolution_inflight:
+        return  # 已有一次演化在跑，避免并发重复
+
+    try:
+        from src.config.effective_config import _load_profile_card
+        card = _load_profile_card(profile_id)
+    except Exception:
+        return
+    evolved = card.get("persona_evolved") or {}
+    if not evolved.get("enabled", True):
+        return
+    interval = int(evolved.get("min_interval_turns", 200) or 0)
+    if interval <= 0:
+        return  # 兜底关闭
+
+    # evolved_at 为上次演化时间戳（首次演化前为 0 → 统计全部用户消息）
+    last_ts = float(evolved.get("evolved_at") or 0)
+    try:
+        recent_count = session.conversation_store.count_user_messages_since(last_ts)
+    except Exception:
+        return
+    if recent_count < interval:
+        return
+
+    _evolution_inflight.add(profile_id)   # 同步占位，关闭与 create_task 之间的竞态窗口
+    _storage_root = session.storage_root
+    _app = app
+
+    async def _run():
         try:
-            from datetime import datetime
-            return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d")
-        except Exception:
-            pass
-    return ""
+            from src.core.persona_evolution import trigger_evolution
+            await trigger_evolution(profile_id, _storage_root, _app)
+        finally:
+            _evolution_inflight.discard(profile_id)
+
+    asyncio.create_task(_fire_task(_run, "persona_evolution", retries=1, retry_delay=5.0))

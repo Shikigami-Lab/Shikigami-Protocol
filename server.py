@@ -132,7 +132,7 @@ try:
     from src.api.debug import router as debug_router
     _debug_router_loaded = True
 except ImportError:
-    _debug_router_loaded = False  # not present in public tree — silently skip
+    _debug_router_loaded = False  # optional module; skip when absent
 from src.api.groups import router as groups_router
 from src.api.profiles_import import router as profiles_import_router
 from src.api.lorebooks import router as lorebooks_router
@@ -174,11 +174,13 @@ def _load_version_from_package_json() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from src.utils.asyncio_compat import install_windows_transport_fix
+    install_windows_transport_fix()
+
     _write_startup_progress(35, "Loading configuration...")
     config = AppConfig.load()
     app.state.config = config
     app.state.version = _load_version_from_package_json()
-    app.state.public_mode = os.getenv("PUBLIC_MODE", "false").lower() == "true"
 
     from src.utils.logging_config import setup_app_logging
     setup_app_logging(config)
@@ -351,7 +353,7 @@ def get_version(request: Request):
     return {"version": getattr(request.app.state, "version", "0.0.0")}
 
 
-# 与仓库根 server.py、sync_public PUBLIC_SYNC_DOC_PATHS 一致；须在 StaticFiles(/) 之前注册，否则会被静态路由吞掉 404。
+# Must be registered before StaticFiles("/"); otherwise the static mount swallows these routes with a 404.
 _USER_DOCS_STEMS = frozenset(
     {
         "GETTING_STARTED",
@@ -393,9 +395,13 @@ def serve_user_doc(doc_name: str):
     return PlainTextResponse(text, media_type="text/markdown; charset=utf-8")
 
 
+# The app window and phones/tablets on the same network load the UI from this server, so their
+# requests carry a localhost or private-IP origin. A page on the public internet does not, so it can
+# no longer call this API from the user's browser. The Electron launcher talks over IPC, not HTTP,
+# so file:// pages need no exception here.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\]|(\d{1,3}\.){3}\d{1,3})(:\d+)?$",
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -9,13 +9,14 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='25' x='16' text-anchor='middle' font-size='22' font-family='KaiTi, STKaiti, Kaiti SC, 楷体, serif'>式</text></svg>" type="image/svg+xml" />
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
-  <link rel="stylesheet" href="css/styles.css" />
-  <link rel="stylesheet" href="css/settings.css" />
+
+  <link rel="stylesheet" href="css/styles.css?v=20260916a" />
+  <link rel="stylesheet" href="css/settings.css?v=20261009a" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js"></script>
+  <script src="js/i18n.js?v=20261009a"></script>
 </head>
 <body>
 
@@ -477,9 +478,11 @@
                       {{ t('aseReflectionNextIn').replace('{n}', aseStatus.reflection.next_in) }}
                     </span>
                   </div>
-                  <div v-if="aseStatus.reflection && aseStatus.reflection.topic_hint"
+                  <div v-if="aseStatus.reflection && aseStatus.reflection.topic_anchor"
                        style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">
-                    {{ t('aseReflectionTopic') }}{{ aseStatus.reflection.topic_hint }}
+                    {{ t('aseReflectionTopic') }}{{ aseStatus.reflection.topic_anchor }}
+                    <span v-if="aseStatus.reflection.chosen_topic_source">
+                      · {{ t('topicSrc_' + aseStatus.reflection.chosen_topic_source) }}</span>
                   </div>
                   <div v-if="aseStatus.reflection && aseStatus.reflection.thought"
                        class="ase-thought-box">
@@ -614,7 +617,7 @@
 
     <!-- Status bar -->
     <div class="status-bar">
-      <span v-if="engineWarning && statusText === t('statusReady')" style="color:#e8a020">⚠ {{ engineWarning }}</span>
+      <span v-if="engineWarning && statusText === t('statusReady')" style="color:var(--warning)">⚠ {{ engineWarning }}</span>
       <span v-else>{{ statusText }}</span>
     </div>
 
@@ -734,71 +737,37 @@
           <div class="tp-cmd-list">
             <p v-if="currentGroupId" class="tp-cmd-hint">{{ t('commandsGroupOnly') }}</p>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupMemory') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/fact list')">
-              <span class="tp-cmd-name">/fact list</span>
-              <span class="tp-cmd-desc">{{ t('cmdFactListDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/fact add ')">
-              <span class="tp-cmd-name">/fact add {{ t('cmdFactAddArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdFactAddDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/fact delete ')">
-              <span class="tp-cmd-name">/fact delete {{ t('cmdFactDeleteArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdFactDeleteDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/recall ')">
-              <span class="tp-cmd-name">/recall {{ t('cmdRecallArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdRecallDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/memory status')">
-              <span class="tp-cmd-name">/memory status</span>
-              <span class="tp-cmd-desc">{{ t('cmdMemoryStatusDesc') }}</span>
+            <div class="tp-cmd-search">
+              <input class="form-input" v-model="cmdPanelQuery" :placeholder="t('cmdPanelSearchPh')" />
             </div>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupTodo') }} <span class="tp-cmd-badge single-only">{{ t('commandsGroupTodoSingleOnly') }}</span></div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo list')">
-              <span class="tp-cmd-name">/todo list</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoListDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo add ')">
-              <span class="tp-cmd-name">/todo add {{ t('cmdTodoAddArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoAddDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo complete ')">
-              <span class="tp-cmd-name">/todo complete {{ t('cmdTodoCompleteArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoCompleteDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/todo delete ')">
-              <span class="tp-cmd-name">/todo delete {{ t('cmdTodoDeleteArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTodoDeleteDesc') }}</span>
-            </div>
+            <template v-if="!cmdPanelQuery && recentCommandItems.length">
+              <div class="tp-cmd-group">{{ t('cmdRecentGroup') }}</div>
+              <div v-for="c in recentCommandItems" :key="'recent-' + c.insert" class="tp-cmd-item"
+                   @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
+                <span class="tp-cmd-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+                <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
+                <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
+              </div>
+            </template>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupTimer') }} <span class="tp-cmd-badge group-ok">{{ t('commandsGroupTimerGroupOk') }}</span></div>
-            <span class="tp-cmd-desc tp-cmd-desc-block">{{ t('commandsGroupTimerNote') }}</span>
-            <div class="tp-cmd-item" @click="insertCommand('/timer ')">
-              <span class="tp-cmd-name">/timer {{ t('cmdTimerArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTimerDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/timer list')">
-              <span class="tp-cmd-name">/timer list</span>
-              <span class="tp-cmd-desc">{{ t('cmdTimerListDesc') }}</span>
-            </div>
-            <div class="tp-cmd-item" @click="insertCommand('/timer stop')">
-              <span class="tp-cmd-name">/timer stop {{ t('cmdTimerStopArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdTimerStopDesc') }}</span>
-            </div>
+            <template v-for="g in cmdPanelGroups" :key="g.key">
+              <div class="tp-cmd-group">{{ t(g.key) }}
+                <span v-if="g.key === 'commandsGroupTodo'" class="tp-cmd-badge single-only">{{ t('commandsGroupTodoSingleOnly') }}</span>
+                <span v-if="g.key === 'commandsGroupTimer'" class="tp-cmd-badge group-ok">{{ t('commandsGroupTimerGroupOk') }}</span>
+              </div>
+              <span v-if="g.key === 'commandsGroupTimer'" class="tp-cmd-desc tp-cmd-desc-block">{{ t('commandsGroupTimerNote') }}</span>
+              <div v-for="c in g.items" :key="c.insert" class="tp-cmd-item"
+                   @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
+                <span class="tp-cmd-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+                <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
+                <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
+              </div>
+            </template>
 
-            <div class="tp-cmd-group">{{ t('commandsGroupSearch') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/search ')">
-              <span class="tp-cmd-name">/search {{ t('cmdSearchArg') }}</span>
-              <span class="tp-cmd-desc">{{ t('cmdSearchDesc') }}</span>
-            </div>
-
-            <div class="tp-cmd-group">{{ t('commandsGroupOther') }}</div>
-            <div class="tp-cmd-item" @click="insertCommand('/help')">
-              <span class="tp-cmd-name">/help</span>
-              <span class="tp-cmd-desc">{{ t('cmdHelpDesc') }}</span>
+            <div class="tp-cmd-nl-hint">
+              <div class="tp-cmd-group">{{ t('cmdNlHintTitle') }}</div>
+              <span class="tp-cmd-desc tp-cmd-desc-block">{{ t('cmdNlHintBody') }}</span>
             </div>
 
           </div>
@@ -829,6 +798,16 @@
 
     <!-- Input area -->
     <div class="input-area">
+      <div v-if="slashMatches.length" class="slash-suggest">
+        <div v-for="(c, i) in slashMatches" :key="c.insert"
+             :class="['slash-item', { active: i === slashSelIdx }]"
+             @mousedown.prevent="completeSlash(c)"
+             @mouseenter="slashSelIdx = i">
+          <span class="slash-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+          <span class="slash-desc">{{ t(c.descKey) }}</span>
+        </div>
+        <div class="slash-foot">{{ slashSuggest.mode === 'token' ? t('slashSuggestHint') : t('slashSuggestHintSend') }}</div>
+      </div>
       <div v-if="pendingScreenshot" class="pending-image-bar">
         <span class="pending-image-label">{{ t('pendingImageLabel') }}</span>
         <button type="button" class="pending-image-remove s-btn s-btn-secondary" @click="clearPendingImage()" :title="t('pendingImageRemove')">{{ t('pendingImageRemove') }}</button>
@@ -840,6 +819,7 @@
           rows="2"
           :placeholder="isGroupChat ? t('inputPlaceholderGroup') : t('inputPlaceholderSingle')"
           @keydown="handleKeydown"
+          @paste="onChatPaste"
           @focus="$event.target.scrollIntoView({ block: 'nearest', behavior: 'smooth' })"
           :disabled="isStreaming"
         ></textarea>
@@ -1271,7 +1251,7 @@
 
                 <div class="form-field">
                   <div class="form-label">{{ t('llmTypeLabel') }}</div>
-                  <select class="form-select" v-model="presetForm.type">
+                  <select class="form-select" v-model="presetForm.type" @change="clearLLMModels">
                     <option value="openai_compat">OpenAI / Compat</option>
                     <option value="gemini">Google Gemini</option>
                     <option value="ollama">{{ t('llmTypeOllama') }}</option>
@@ -1287,6 +1267,7 @@
                       class="form-input"
                       :type="llmShowKey ? 'text' : 'password'"
                       v-model="presetForm.api_key"
+                      @input="clearLLMModels"
                       :placeholder="presetForm.has_key ? t('llmApiKeyExisting') : t('llmApiKeyPlaceholder')"
                     />
                     <button class="key-toggle" @click="llmShowKey = !llmShowKey">{{ llmShowKey ? '🙈' : '👁' }}</button>
@@ -1295,12 +1276,41 @@
 
                 <div class="form-field">
                   <div class="form-label">Base URL</div>
-                  <input class="form-input" v-model="presetForm.base_url" :placeholder="t('llmBaseUrlPlaceholderZh')" />
+                  <input class="form-input" v-model="presetForm.base_url" @input="clearLLMModels" :placeholder="t('llmBaseUrlPlaceholderZh')" />
                 </div>
 
                 <div class="form-field">
                   <div class="form-label">{{ t('llmModelNameLabel') }}</div>
-                  <input class="form-input" v-model="presetForm.model" placeholder="gpt-4o / gemini-2.5-flash / …" />
+                  <div class="llm-model-picker-row">
+                    <div class="llm-model-input-wrap">
+                      <input class="form-input" v-model="presetForm.model" autocomplete="off"
+                        role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+                        :aria-expanded="llmModelDropdownOpen" aria-controls="llm-model-options"
+                        @focus="openLLMModelDropdown" @blur="closeLLMModelDropdown"
+                        @input="filterLLMModelDropdown" @keydown="handleLLMModelKeydown"
+                        placeholder="gpt-4o / gemini-2.5-flash / …" />
+                      <div v-if="llmModelDropdownOpen" id="llm-model-options" class="llm-model-options" role="listbox" @mousedown.prevent>
+                        <button v-for="(model, index) in filteredLLMModels" :key="model" type="button"
+                          class="llm-model-option" role="option"
+                          :class="{ 'is-active': index === llmModelActiveIndex, 'is-selected': model === presetForm.model }"
+                          :aria-selected="model === presetForm.model"
+                          @mouseenter="llmModelActiveIndex = index" @click="selectLLMModel(model)">
+                          {{ model }}
+                        </button>
+                        <div v-if="!filteredLLMModels.length" class="llm-model-options-empty">{{ t('llmModelsNoMatches') }}</div>
+                      </div>
+                    </div>
+                    <button type="button" class="s-btn s-btn-secondary llm-model-fetch-btn"
+                      :disabled="llmModelsLoading || llmModelConnectionDirty"
+                      :title="llmModelConnectionDirty ? t('llmModelsSaveFirst') : ''"
+                      @click="fetchLLMModels">
+                      {{ llmModelsLoading ? t('llmModelsLoading') : (llmModels.length ? t('llmModelsRefresh') : t('llmModelsFetch')) }}
+                    </button>
+                  </div>
+                  <div class="form-hint">{{ t('llmModelsHint') }}</div>
+                  <div v-if="llmModelsStatus" class="form-hint llm-model-status" :class="`is-${llmModelsStatusType}`">
+                    {{ llmModelsStatus }}
+                  </div>
                 </div>
               </div><!-- end 连接配置 s-card -->
 
@@ -1385,21 +1395,9 @@
         </div>
 
         <!-- Analysis model (collapsible) — 情绪/好感度辅助模型 -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showAnalysisModel = !showAnalysisModel">
-            {{ t('llmAnalysisSectionTitle') }}
-            <span>{{ showAnalysisModel ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showAnalysisModel" class="section-collapsible-body">
+        <collapsible-section :title="t('llmAnalysisSectionTitle')">
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintAnalysisModelIntro') }}</p>
-            <div class="param-row" style="margin-bottom:0;">
-              <span class="param-label">{{ t('lblEnableAnalysis') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="analysisModelEnabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row style="margin-bottom:0;" :label="t('lblEnableAnalysis')" v-model="analysisModelEnabled"></toggle-row>
             <div class="form-field">
               <div class="form-label">{{ t('lblUsePreset') }}</div>
               <select class="form-select" v-model="analysisModelPreset">
@@ -1445,26 +1443,12 @@
                 v-model.number="analysisOverride.max_tokens" :disabled="!analysisOverride.max_tokens_enabled" style="width:80px;" />
               <span class="param-val" style="font-size:11px;color:var(--text-secondary);">{{ analysisOverride.max_tokens_enabled ? '' : t('lblInheritParen') }}</span>
             </div>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- Reflection model (collapsible) — 自省模型（从「自省」页迁入） -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showReflectionModelSection = !showReflectionModelSection">
-            {{ t('secReflectionModel') }}
-            <span>{{ showReflectionModelSection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showReflectionModelSection" class="section-collapsible-body" :class="{ disabled: !reflectionForm.reflection_enabled }">
+        <collapsible-section :title="t('secReflectionModel')" :body-class="{ disabled: !reflectionForm.reflection_enabled }">
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintReflectionLlmCollapsibleBody') }}</p>
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableDedicatedModel') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.reflection_model_enabled"
-                  :disabled="!reflectionForm.reflection_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableDedicatedModel')" v-model="reflectionForm.reflection_model_enabled" :disabled="!reflectionForm.reflection_enabled"></toggle-row>
             <div class="form-field" style="margin-top:8px;">
               <div class="form-label" :title="t('titlePrimaryModel')">{{ t('lblPrimaryModel') }}</div>
               <select class="form-select" style="font-size:12px;padding:3px 6px;"
@@ -1534,24 +1518,11 @@
                 v-model.number="reflectionForm.reflection_max_tokens" :disabled="!reflectionForm.reflection_enabled || !reflectionForm.reflection_max_tokens_enabled" style="width:80px;" />
               <span class="param-val" style="font-size:11px;color:var(--text-secondary);">{{ reflectionForm.reflection_max_tokens_enabled ? '' : t('lblInheritParen') }}</span>
             </div>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- VLM model (collapsible) — 图像识别 -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showVlmModelSection = !showVlmModelSection">
-            {{ t('secVlm') }}
-            <span>{{ showVlmModelSection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showVlmModelSection" class="section-collapsible-body">
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableVlm') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.vlm_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+        <collapsible-section :title="t('secVlm')">
+            <toggle-row :label="t('lblEnableVlm')" v-model="reflectionForm.vlm_enabled"></toggle-row>
 
             <div class="form-field" style="margin-top:8px;">
               <div class="form-label" :title="t('titleVlmModel')">{{ t('lblVlmModel') }}</div>
@@ -1574,22 +1545,10 @@
             </div>
 
             <div class="section-divider" style="margin:10px 0 8px;font-size:11px;">{{ t('secVlmUsage') }}</div>
-            <div class="param-row">
-              <span class="param-label" :title="t('titleVlmForChat')">{{ t('lblVlmForChat') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.vlm_for_chat"
-                       :disabled="!reflectionForm.vlm_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="param-row">
-              <span class="param-label" :title="t('titleVlmForAse')">{{ t('lblVlmForAse') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.vlm_for_ase"
-                       :disabled="!reflectionForm.vlm_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblVlmForChat')" :title="t('titleVlmForChat')"
+                        v-model="reflectionForm.vlm_for_chat" :disabled="!reflectionForm.vlm_enabled"></toggle-row>
+            <toggle-row :label="t('lblVlmForAse')" :title="t('titleVlmForAse')"
+                        v-model="reflectionForm.vlm_for_ase" :disabled="!reflectionForm.vlm_enabled"></toggle-row>
             <div class="param-row">
               <span class="param-label" :title="t('titleVlmWaitSeconds')">{{ t('lblVlmWaitSeconds') }}</span>
               <input type="number" class="seg-num-input" min="1" max="10"
@@ -1599,17 +1558,83 @@
             </div>
             <div class="hint-block" style="margin-top:10px;font-size:11px;" v-html="t('hintVlmScreenSource')"></div>
 
-          </div>
-        </div>
+        </collapsible-section>
+
+        <!-- 主动话题（collapsible）— ASE 沉默后主动开口时从多来源选定话题 -->
+        <collapsible-section :title="t('secTopicDiscovery')">
+            <toggle-row :label="t('lblTopicDiscoveryEnabled')" :title="t('titleTopicDiscovery')"
+                        v-model="reflectionForm.topic_discovery.enabled"></toggle-row>
+
+            <div class="section-divider" style="margin:10px 0 8px;font-size:11px;">{{ t('lblTopicSources') }}</div>
+            <toggle-row v-for="sid in ['trend','conversation_recall','user_life','ai_self']" :key="sid"
+                        :label="t('topicSrc_' + sid)"
+                        v-model="reflectionForm.topic_discovery.sources[sid].enabled"
+                        :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
+            <toggle-row :label="t('topicSrc_random_api')"
+                        v-model="reflectionForm.topic_discovery.sources.random_api.enabled"
+                        :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
+            <div v-if="reflectionForm.topic_discovery.sources.random_api.enabled"
+                 style="padding-left:12px;border-left:2px solid var(--border);margin:4px 0 4px 4px;">
+              <div class="form-field" style="margin-top:6px;">
+                <div class="form-label">{{ t('lblRandomApiMode') }}</div>
+                <select class="form-select" style="font-size:12px;padding:3px 6px;"
+                        v-model="reflectionForm.topic_discovery.sources.random_api.mode">
+                  <option value="builtin">{{ t('optRandomApiBuiltin') }}</option>
+                  <option value="http">{{ t('optRandomApiHttp') }}</option>
+                </select>
+              </div>
+              <div v-if="reflectionForm.topic_discovery.sources.random_api.mode === 'builtin'"
+                   class="form-field" style="margin-top:6px;">
+                <div class="form-label">{{ t('lblRandomApiPool') }}</div>
+                <select class="form-select" style="font-size:12px;padding:3px 6px;"
+                        v-model="reflectionForm.topic_discovery.sources.random_api.builtin_pool">
+                  <option value="icebreaker">{{ t('optPoolIcebreaker') }}</option>
+                  <option value="trivia">{{ t('optPoolTrivia') }}</option>
+                  <option value="would_you_rather">{{ t('optPoolWyr') }}</option>
+                </select>
+              </div>
+              <template v-else>
+                <div class="form-field" style="margin-top:6px;">
+                  <div class="form-label">{{ t('lblRandomApiUrl') }}</div>
+                  <input type="text" class="form-input"
+                         v-model="reflectionForm.topic_discovery.sources.random_api.http_url"
+                         placeholder="https://api.example.com/random" />
+                </div>
+                <div class="form-field" style="margin-top:6px;">
+                  <div class="form-label">{{ t('lblRandomApiJsonPath') }}</div>
+                  <input type="text" class="form-input"
+                         v-model="reflectionForm.topic_discovery.sources.random_api.http_json_path"
+                         placeholder="slip.advice" />
+                </div>
+              </template>
+            </div>
+
+            <div class="section-divider" style="margin:10px 0 4px;font-size:11px;cursor:pointer;"
+                 @click="topicDiscoveryAdvancedOpen = !topicDiscoveryAdvancedOpen">
+              {{ topicDiscoveryAdvancedOpen ? '▲' : '▼' }} {{ t('lblTopicAdvanced') }}
+            </div>
+            <template v-if="topicDiscoveryAdvancedOpen">
+              <div class="param-row">
+                <span class="param-label">{{ t('lblCandidateCap') }}</span>
+                <input type="number" class="seg-num-input" min="1" max="20"
+                       v-model.number="reflectionForm.topic_discovery.candidate_cap" style="width:60px;" />
+              </div>
+              <div class="param-row">
+                <span class="param-label">{{ t('lblRecentUsedWindow') }}</span>
+                <input type="number" class="seg-num-input" min="0" max="50"
+                       v-model.number="reflectionForm.topic_discovery.recent_used_window" style="width:60px;" />
+              </div>
+              <div class="param-row">
+                <span class="param-label">{{ t('lblChosenTopicTtl') }}</span>
+                <input type="number" class="seg-num-input" min="60" max="86400"
+                       v-model.number="reflectionForm.topic_discovery.chosen_topic_ttl" style="width:80px;" />
+              </div>
+            </template>
+            <div class="hint-block" style="margin-top:10px;font-size:11px;">{{ t('hintTopicDiscovery') }}</div>
+        </collapsible-section>
 
         <!-- Memory extraction model (collapsible) — per-profile -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showExtractionModel = !showExtractionModel">
-            {{ t('llmExtractionSectionTitle') }}
-            <span>{{ showExtractionModel ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showExtractionModel" class="section-collapsible-body">
+        <collapsible-section :title="t('llmExtractionSectionTitle')">
             <p class="form-hint" style="margin-bottom:10px;">{{ t('hintExtractionModelIntro') }}</p>
             <div class="form-field">
               <div class="form-label">{{ t('lblMemoryProfile') }}</div>
@@ -1631,17 +1656,10 @@
               </select>
             </div>
             <p class="form-hint" style="margin-top:2px;">{{ t('hintExtractionModel') }}</p>
-          </div>
-        </div>
+        </collapsible-section>
 
         <!-- Embedding model (collapsible) -->
-        <div class="section-collapsible">
-          <div class="section-collapsible-header"
-               @click="showEmbeddingSection = !showEmbeddingSection">
-            {{ t('llmEmbeddingSectionTitle') }}
-            <span>{{ showEmbeddingSection ? '▲' : '▼' }}</span>
-          </div>
-          <div v-show="showEmbeddingSection" class="section-collapsible-body">
+        <collapsible-section :title="t('llmEmbeddingSectionTitle')">
             <p class="form-hint" style="margin-bottom:12px;">{{ t('tabEmbeddingDesc') }}</p>
 
             <div class="form-field">
@@ -1735,8 +1753,7 @@
                 <template v-else>✗ {{ embedTestResult.error }}</template>
               </span>
             </div>
-          </div>
-        </div>
+        </collapsible-section>
 
       </div><!-- end LLM tab -->
 
@@ -2317,6 +2334,17 @@
                   </label>
                   <span style="font-size:11px;color:var(--text-secondary);line-height:1.45;flex:1;min-width:200px;">{{ t('hintPromptAutofillToolbar') }}</span>
                   <button v-if="promptAutofillErrorRaw" type="button" class="s-btn s-btn-secondary" style="font-size:11px;padding:3px 8px;" @click="promptAutofillShowDebug = !promptAutofillShowDebug">{{ promptAutofillShowDebug ? t('lblSegCollapse') : t('lblSegExpand') }} {{ t('lblPromptAutofillDebug') }}</button>
+                  <!-- Names the model autofill runs on, using the backend's rule: the analysis model when it is
+                       enabled and assigned, otherwise the active chat model. Without this, users switch the
+                       chat model after a content-filter refusal and nothing changes. -->
+                  <p class="form-hint" style="flex-basis:100%;margin:0;">
+                    <template v-if="autofillUsesAnalysisModel()">
+                      {{ locale === 'en' ? 'Runs on the auxiliary (analysis) model: ' : '使用辅助模型（analysis）：' }}<b>{{ analysisModelPreset }}</b>{{ locale === 'en' ? '. ' : '。' }}{{ t('hintAutofillAnalysisModel') }}
+                    </template>
+                    <template v-else>
+                      {{ locale === 'en' ? 'Runs on the active chat model' : '使用激活的聊天模型' }}<template v-if="llmActivePreset">{{ locale === 'en' ? ': ' : '：' }}<b>{{ llmActivePreset }}</b></template>{{ locale === 'en' ? '. ' : '。' }}{{ t('hintAutofillActiveModel') }}
+                    </template>
+                  </p>
                 </div>
                 <div v-if="promptAutofillShowDebug && promptAutofillErrorRaw" class="form-field" style="margin-top:-6px;margin-bottom:14px;">
                   <textarea class="form-input" readonly rows="6" style="font-size:11px;font-family:monospace;line-height:1.4;resize:vertical;">{{ promptAutofillErrorRaw }}</textarea>
@@ -2335,28 +2363,34 @@
                 </div>
 
                 <!-- 人格演化 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="personaEvolutionOpen = !personaEvolutionOpen">
-                    {{ t('secPersonaEvolution') }}
-                    <span>{{ personaEvolutionOpen ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="personaEvolutionOpen" class="section-collapsible-body">
+                <collapsible-section :title="t('secPersonaEvolution')">
                     <p class="form-hint" style="margin-bottom:12px;">{{ t('hintPersonaEvolution') }}</p>
 
                     <!-- 开关 + 频率 -->
-                    <div class="param-row">
-                      <span class="param-label">{{ t('lblEvolutionEnabled') }}</span>
-                      <label class="toggle-switch">
-                        <input type="checkbox" v-model="personaEvolutionForm.enabled" />
-                        <span class="toggle-slider"></span>
-                      </label>
-                    </div>
+                    <toggle-row :label="t('lblEvolutionEnabled')" v-model="personaEvolutionForm.enabled"></toggle-row>
                     <div class="param-row" style="margin-top:8px;" v-show="personaEvolutionForm.enabled">
                       <span class="param-label">{{ t('lblEvolutionInterval') }}</span>
                       <input type="number" class="seg-num-input" min="10" max="1000" step="10" style="width:72px;"
                              v-model.number="personaEvolutionForm.min_interval_turns" />
                     </div>
-                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintEvolutionInterval') }}</p>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:8px;">{{ t('hintEvolutionInterval') }}</p>
+                    <div class="param-row" style="margin-top:4px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblMaxEvolutionFacts') }}</span>
+                      <input type="number" class="seg-num-input" min="5" max="500" step="5" style="width:72px;"
+                             v-model.number="personaEvolutionForm.max_evolution_facts" />
+                    </div>
+                    <div class="param-row" style="margin-top:4px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblMaxEvolutionConvTurns') }}</span>
+                      <input type="number" class="seg-num-input" min="0" max="200" step="5" style="width:72px;"
+                             v-model.number="personaEvolutionForm.max_evolution_conv_turns" />
+                    </div>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintEvolutionContext') }}</p>
+                    <div class="param-row" style="margin-top:4px;" v-show="personaEvolutionForm.enabled">
+                      <span class="param-label">{{ t('lblBaselineReviewInterval') }}</span>
+                      <input type="number" class="seg-num-input" min="0" max="50" step="1" style="width:72px;"
+                             v-model.number="personaEvolutionForm.baseline_review_interval" />
+                    </div>
+                    <p class="form-hint" v-show="personaEvolutionForm.enabled" style="margin-bottom:12px;">{{ t('hintBaselineReviewInterval') }}</p>
 
                     <!-- 核心锚点 -->
                     <div class="section-divider">{{ t('lblCoreAnchor') }}</div>
@@ -2392,6 +2426,16 @@
                         · {{ t('lblEvolutionLastAt').replace('$date', fmtEvolutionDate(personaEvolutionForm.evolved_at)) }}
                       </span>
                     </div>
+                    <div v-if="personaEvolutionForm.enabled && personaEvolutionForm.turns_until_next != null"
+                         style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
+                      {{ t('lblTurnsUntilNext').replace('$n', personaEvolutionForm.turns_until_next) }}
+                    </div>
+                    <button class="s-btn s-btn-secondary" style="font-size:12px;margin-bottom:10px;"
+                            v-if="personaEvolutionForm.enabled"
+                            @click="triggerPersonaEvolution"
+                            :disabled="personaEvolutionTriggering">
+                      {{ personaEvolutionTriggering ? t('btnTriggeringEvolution') : t('btnTriggerEvolution') }}
+                    </button>
                     <textarea class="form-input" rows="5" v-model="personaEvolutionForm.base_prompt_evolved"
                               style="font-size:12px;resize:vertical;"></textarea>
                     <textarea class="form-input" rows="3" v-model="personaEvolutionForm.style_constraint_evolved"
@@ -2412,16 +2456,10 @@
                         <div v-if="entry.reason" style="color:var(--text-secondary);">{{ entry.reason }}</div>
                       </div>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- 情绪 Prompt 覆盖 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="emotionPromptsExpanded = !emotionPromptsExpanded">
-                    {{ t('secEmotionPromptsOverride') }}
-                    <span>{{ emotionPromptsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="emotionPromptsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secEmotionPromptsOverride')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">{{ t('hintEmotionPromptsOverride') }}</p>
                     <div v-for="key in emotionKeyList" :key="key" class="emotion-prompt-card">
                       <div class="emotion-prompt-header">
@@ -2436,16 +2474,10 @@
                         style="resize:vertical;font-size:12px;line-height:1.55;margin-top:5px;"
                         :placeholder="t('phEmotionPromptText')"></textarea>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- 能量 Prompt 覆盖 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="energyPromptsExpanded = !energyPromptsExpanded">
-                    {{ t('secEnergyPromptsOverride') }}
-                    <span>{{ energyPromptsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="energyPromptsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secEnergyPromptsOverride')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">{{ t('hintEnergyPromptsOverride') }}</p>
                     <div v-for="(lvl, key) in energyLevelsI18n" :key="key" class="form-field" style="margin-bottom:12px;">
                       <div class="form-label" style="font-size:12px;font-weight:600;">{{ lvl }}</div>
@@ -2455,16 +2487,10 @@
                         style="resize:vertical;font-size:12px;line-height:1.55;"
                         :placeholder="lvl"></textarea>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- 好感度 Prompt 覆盖 -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="affinityPromptsExpanded = !affinityPromptsExpanded">
-                    {{ t('secAffinityPromptsOverride') }}
-                    <span>{{ affinityPromptsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="affinityPromptsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secAffinityPromptsOverride')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">{{ t('hintAffinityPromptsOverride') }}</p>
                     <div v-for="(lbl, key) in affinityLevelsI18n" :key="key" class="form-field" style="margin-bottom:12px;">
                       <div class="form-label" style="font-size:12px;font-weight:600;">{{ lbl }}</div>
@@ -2474,16 +2500,10 @@
                         style="resize:vertical;font-size:12px;line-height:1.55;"
                         :placeholder="lbl"></textarea>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
                 <!-- Prompt 增强 (segment config) -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="segmentsExpanded = !segmentsExpanded">
-                    {{ t('secPromptSegments') }}
-                    <span>{{ segmentsExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="segmentsExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secPromptSegments')" v-model:open="segmentsExpanded">
                   <!-- 去助手化：persona 层注入，与 segment 列表并列展示 -->
                   <div class="seg-row">
                     <div class="seg-row-top">
@@ -2629,16 +2649,10 @@
                   <div class="btn-row" style="margin-top:8px;gap:6px;">
                     <button class="s-btn s-btn-secondary" style="font-size:12px;" @click="beginAddCustomSeg" :disabled="!!newCustomSeg">{{ t('btnAddCustomSeg') }}</button>
                   </div>
-                </div><!-- end segmentsExpanded body -->
-                </div><!-- end Prompt增强 section-collapsible -->
+                </collapsible-section>
 
                 <!-- 记忆提取 Prompt（从记忆设置移入） -->
-                <div class="section-collapsible">
-                  <div class="section-collapsible-header" @click="memPromptExpanded = !memPromptExpanded">
-                    {{ t('secMemoryExtractPrompts') }}
-                    <span>{{ memPromptExpanded ? '▲' : '▼' }}</span>
-                  </div>
-                  <div v-show="memPromptExpanded" class="section-collapsible-body">
+                <collapsible-section :title="t('secMemoryExtractPrompts')" v-model:open="memPromptExpanded">
                     <div class="mem-cfg-item">
                       <div class="param-row" style="align-items:flex-start;">
                         <span class="param-label">{{ t('lblCustomExtractionPrompt') }}</span>
@@ -2657,8 +2671,7 @@
                       </div>
                       <p class="mem-cfg-hint">{{ t('hintDaySummaryPrompt') }}</p>
                     </div>
-                  </div>
-                </div>
+                </collapsible-section>
 
               </div><!-- end Prompt 编辑 -->
 
@@ -2666,28 +2679,157 @@
               <!-- ─── 行为配置 ─── -->
               <div v-if="profileSubTab === 'behavior'" class="profile-subtab-panel">
 
-                <!-- 主角设定覆盖 -->
+                <!-- 主角设定覆盖（手填） -->
                 <div class="s-card">
-                  <div class="s-card-title">{{ locale === 'en' ? 'Protagonist Override' : '主角设定覆盖' }}</div>
-                  <p class="form-hint" style="margin-bottom:12px;">{{ locale === 'en' ? 'Leave blank to inherit the global value from Behavior → Protagonist.' : '留空则继承「行为→主角」标签页的全局设定。' }}</p>
+                  <div class="s-card-title">{{ locale === 'en' ? 'Protagonist Override (manual)' : '主角设定覆盖（手填）' }}</div>
+                  <p class="form-hint" style="margin-bottom:12px;">{{ locale === 'en' ? 'Leave blank to inherit the global value from Behavior → Protagonist. Use this to give this AI a different name/introduction than the global default.' : '留空则继承「行为→主角」标签页的全局设定。可以给这个 AI 看到的"你"设置不同的称呼/介绍。' }}</p>
                   <div class="form-field">
-                    <div class="form-label">{{ locale === 'en' ? 'Name' : '称呼' }}</div>
-                    <input class="form-input" v-model="profileForm.user_persona.name" :placeholder="locale === 'en' ? 'Leave blank to inherit global' : '留空继承全局'" style="max-width:200px;" />
-                  </div>
-                  <div class="form-field">
-                    <div class="form-label">{{ locale === 'en' ? 'Appearance / background' : '外貌 / 背景' }}</div>
-                    <textarea class="form-input" v-model="profileForm.user_persona.description" rows="2" style="resize:vertical;"
-                      :placeholder="locale === 'en' ? 'Leave blank to inherit global' : '留空继承全局'"></textarea>
-                  </div>
-                  <div class="form-field">
-                    <div class="form-label">{{ locale === 'en' ? 'Personality traits' : '性格特质' }}</div>
-                    <textarea class="form-input" v-model="profileForm.user_persona.personality" rows="2" style="resize:vertical;"
-                      :placeholder="locale === 'en' ? 'Leave blank to inherit global' : '留空继承全局'"></textarea>
+                    <div class="form-label">{{ locale === 'en' ? 'Name override' : '称呼覆盖' }}</div>
+                    <input class="form-input" v-model="profileForm.user_persona.name" :placeholder="locale === 'en' ? 'Leave blank to inherit global' : '留空继承全局'" style="max-width:240px;" />
                   </div>
                   <div class="form-field" style="margin-bottom:0;">
-                    <div class="form-label">{{ locale === 'en' ? 'Role in this story' : '在本人格中的角色定位' }}</div>
-                    <textarea class="form-input" v-model="profileForm.user_persona.role_in_story" rows="2" style="resize:vertical;"
-                      :placeholder="locale === 'en' ? 'e.g. Luna\'s childhood friend, gentle and a bit distant…' : '例：Luna 的青梅竹马，温柔但有点疏离…'"></textarea>
+                    <div class="form-label">{{ locale === 'en' ? 'Self-introduction override' : '自我介绍覆盖' }}</div>
+                    <textarea class="form-input" v-model="profileForm.user_persona.introduction" rows="5" style="resize:vertical;"
+                      :placeholder="locale === 'en' ? 'Leave blank to inherit global self-introduction. Markdown supported.' : '留空继承全局自我介绍；支持 markdown。'"></textarea>
+                  </div>
+                </div>
+
+                <!-- AI 对你的画像（自动维护） -->
+                <div class="s-card">
+                  <div class="s-card-title">{{ locale === 'en' ? 'AI portrait of you (auto-maintained)' : 'AI 对你的画像（自动维护）' }}</div>
+                  <p class="form-hint" style="margin-bottom:12px;">{{ locale === 'en' ? 'A long-running portrait this AI maintains based on your conversations, day summaries, and memory facts. Independent of memory settings.' : '此 AI 基于对话、日记和记忆事实滚动维护的整体画像。独立于记忆系统设置。' }}</p>
+
+                  <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="userPortraitForm.enabled"></toggle-row>
+
+                  <div v-show="userPortraitForm.enabled" style="margin-top:12px;">
+                    <!-- Detected forms of address: kept apart from the portrait text; they only accumulate and are never forgotten -->
+                    <div v-show="userPortraitForm.address_forms_enabled" style="margin-bottom:14px;">
+                      <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'How they address you' : '他这样称呼你' }}</div>
+                      <p class="form-hint" style="margin:0 0 8px 0;">
+                        {{ locale === 'en'
+                          ? 'Learned automatically from conversation. Only accumulates — never forgotten, even after long gaps. Remove any that were picked up by mistake.'
+                          : '从对话中自动识别，只累加、不会因为久未使用而遗忘。识别错的可以删掉。' }}
+                      </p>
+                      <div v-if="userPortraitAddressForms.length" style="display:flex;flex-wrap:wrap;gap:6px;">
+                        <span v-for="f in userPortraitAddressForms" :key="f.form" class="portrait-address-chip"
+                              :title="f.evidence || ''">
+                          {{ f.form }}<span class="portrait-address-count"
+                                :title="locale === 'en' ? 'times used' : '使用次数'">×{{ f.count }}</span>
+                          <button class="portrait-address-del"
+                                  :title="locale === 'en' ? 'Remove' : '删除'"
+                                  @click="deleteUserPortraitAddressForm(f.form)">✕</button>
+                        </span>
+                      </div>
+                      <p v-else class="form-hint" style="margin:0;">
+                        {{ locale === 'en' ? 'Nothing recognized yet.' : '尚未识别到称呼。' }}
+                      </p>
+                    </div>
+
+                    <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Portrait content' : '画像内容' }}</div>
+                    <textarea class="form-input" v-model="userPortraitForm.content" rows="12" style="resize:vertical;"
+                      :placeholder="locale === 'en' ? 'Empty for now — will be generated on next refresh.' : '当前为空——下次刷新时会生成。'"></textarea>
+
+                    <p class="form-hint" style="margin:8px 0 12px 0;">
+                      {{ locale === 'en' ? 'Last refresh' : '上次刷新' }}: {{ formatPortraitTime(userPortraitForm.updated_at) }}
+                      &nbsp;·&nbsp; {{ locale === 'en' ? 'Refreshes' : '累计' }}: {{ userPortraitForm.refresh_count }}
+                      &nbsp;·&nbsp; {{ locale === 'en' ? 'History' : '历史' }}: {{ userPortraitForm.changelog_count }}
+                    </p>
+
+                    <!-- Recent context: short-lived layer sent with every chat until it expires. Read-only here, but can be cleared. -->
+                    <div style="margin-bottom:14px;">
+                      <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Recent context' : '近期状态' }}</div>
+                      <p class="form-hint" style="margin:0 0 8px 0;">{{ t('hintPortraitRecentContext') }}</p>
+                      <template v-if="userPortraitRecentContext.content">
+                        <div class="portrait-layer-text" :class="{ 'is-expired': userPortraitRecentContext.expired }">{{ userPortraitRecentContext.content }}</div>
+                        <div class="portrait-layer-meta">
+                          <span>
+                            <template v-if="userPortraitRecentContext.updated_at">{{ locale === 'en' ? 'Updated' : '更新于' }}: {{ formatPortraitTime(userPortraitRecentContext.updated_at) }} &nbsp;·&nbsp; </template>
+                            <template v-if="userPortraitRecentContext.expired">{{ locale === 'en' ? 'Expired, no longer sent to the model' : '已过期，不再发送给模型' }}</template>
+                            <template v-else-if="userPortraitRecentContext.expires_at">{{ locale === 'en' ? 'Expires' : '过期时间' }}: {{ formatPortraitTime(userPortraitRecentContext.expires_at) }}</template>
+                            <template v-else>{{ locale === 'en' ? 'Does not expire' : '不会过期' }}</template>
+                          </span>
+                          <button class="s-btn s-btn-secondary" @click="clearUserPortraitRecentContext()">{{ locale === 'en' ? 'Clear' : '清除' }}</button>
+                        </div>
+                      </template>
+                      <p v-else class="form-hint" style="margin:0;">{{ locale === 'en' ? 'No recent context.' : '暂无近期状态。' }}</p>
+                    </div>
+
+                    <!-- Topic details: each one is sent only when the conversation mentions one of its keywords. -->
+                    <div style="margin-bottom:14px;">
+                      <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Topic details' : '按需细节' }}</div>
+                      <p class="form-hint" style="margin:0 0 8px 0;">{{ t('hintPortraitContextualDetails') }}</p>
+                      <div v-if="userPortraitContextualDetails.length" class="portrait-detail-list">
+                        <div v-for="(d, i) in userPortraitContextualDetails" :key="i + ':' + d.summary" class="portrait-detail-item">
+                          <div class="portrait-detail-body">
+                            <div class="portrait-detail-summary">{{ d.summary }}</div>
+                            <div v-if="d.keywords.length" class="portrait-detail-keywords">{{ d.keywords.join(' · ') }}</div>
+                          </div>
+                          <button class="portrait-detail-del" :title="locale === 'en' ? 'Remove' : '删除'"
+                                  @click="deleteUserPortraitContextualDetail(d.summary)">✕</button>
+                        </div>
+                      </div>
+                      <p v-else class="form-hint" style="margin:0;">{{ locale === 'en' ? 'No topic details yet.' : '暂无按需细节。' }}</p>
+                    </div>
+
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                      <button class="s-btn" :disabled="userPortraitRefreshing" @click="refreshUserPortrait()">
+                        {{ userPortraitRefreshing ? (locale === 'en' ? 'Refreshing…' : '刷新中…') : (locale === 'en' ? 'Refresh now' : '立即刷新') }}
+                      </button>
+                      <button class="s-btn" :disabled="userPortraitResetting" @click="resetUserPortrait()">
+                        {{ locale === 'en' ? 'Reset' : '重置' }}
+                      </button>
+                      <button class="s-btn" @click="toggleUserPortraitChangelog()">
+                        {{ userPortraitShowChangelog ? (locale === 'en' ? 'Hide history' : '隐藏历史') : (locale === 'en' ? 'View history' : '查看历史') }}
+                      </button>
+                      <button class="s-btn" @click="userPortraitShowAdvanced = !userPortraitShowAdvanced">
+                        {{ userPortraitShowAdvanced ? (locale === 'en' ? 'Hide advanced' : '收起高级') : (locale === 'en' ? 'Advanced' : '高级设置') }}
+                      </button>
+                    </div>
+
+                    <!-- 历史 changelog -->
+                    <div v-if="userPortraitShowChangelog" class="mem-diary-preview" style="margin-bottom:12px;max-height:300px;overflow:auto;">
+                      <div v-if="userPortraitChangelog.length === 0" class="form-hint" style="padding:8px;">
+                        {{ locale === 'en' ? 'No history yet.' : '暂无历史记录。' }}
+                      </div>
+                      <div v-for="entry in userPortraitChangelog" :key="entry.version" style="padding:8px;border-bottom:1px solid var(--border);">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                          <div style="font-size:12px;">
+                            <strong>v{{ entry.version }}</strong>
+                            &nbsp;·&nbsp; {{ formatPortraitTime(entry.updated_at) }}
+                            &nbsp;·&nbsp; <span style="color:var(--text-secondary);">{{ entry.triggered_by }}</span>
+                          </div>
+                          <button class="s-btn" style="font-size:11px;" @click="rollbackUserPortrait(entry.version)">
+                            {{ locale === 'en' ? 'Rollback' : '回滚' }}
+                          </button>
+                        </div>
+                        <div v-if="entry.content_after" style="margin-top:6px;font-size:11px;color:var(--text-secondary);max-height:60px;overflow:hidden;">
+                          {{ entry.content_after.slice(0, 200) }}{{ entry.content_after.length > 200 ? '…' : '' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 高级设置（折叠）-->
+                    <div v-show="userPortraitShowAdvanced" style="padding-top:8px;border-top:1px solid var(--border);">
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Daily batch refresh' : '日批刷新'" v-model="userPortraitForm.auto_refresh_in_daily_job"></toggle-row>
+                      <div class="param-row" style="margin-top:8px;">
+                        <span class="param-label">{{ locale === 'en' ? 'Burst trigger turns (0=off)' : '对话量兜底（0=关闭）' }}</span>
+                        <input type="number" class="seg-num-input" min="0" max="10000" step="10" style="width:80px;"
+                               v-model.number="userPortraitForm.min_turns_for_burst_refresh" />
+                      </div>
+                      <div class="param-row" style="margin-top:8px;">
+                        <span class="param-label">{{ locale === 'en' ? 'Cooldown (hours)' : '冷却（小时）' }}</span>
+                        <input type="number" class="seg-num-input" min="0" max="168" step="1" style="width:80px;"
+                               v-model.number="userPortraitForm.min_hours_between_refresh" />
+                      </div>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Recognize forms of address' : '识别称呼'" v-model="userPortraitForm.address_forms_enabled"></toggle-row>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Use day summaries' : '使用日记摘要'" v-model="userPortraitForm.use_day_summary_as_input"></toggle-row>
+                      <toggle-row style="margin-top:8px;" :label="locale === 'en' ? 'Use memory facts' : '使用记忆事实'" v-model="userPortraitForm.use_facts_as_input"></toggle-row>
+                      <div class="param-row" style="margin-top:8px;">
+                        <span class="param-label">{{ locale === 'en' ? 'Max conv turns' : '最大对话轮数' }}</span>
+                        <input type="number" class="seg-num-input" min="10" max="500" step="10" style="width:80px;"
+                               v-model.number="userPortraitForm.max_input_conv_turns" />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -2700,32 +2842,23 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('reflection') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.reflection_enabled === null }]" @click="profileEnginesForm.reflection_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.reflection_enabled === true }]" @click="profileEnginesForm.reflection_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.reflection_enabled === false }]" @click="profileEnginesForm.reflection_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.reflection_enabled"></tri-toggle>
                     <div class="engine-override-label" style="margin-top:4px;">{{ t('lblAseEngine') }}</div>
                     <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('ase') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === null }]" @click="profileEnginesForm.ase_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === true }]" @click="profileEnginesForm.ase_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.ase_enabled === false }]" @click="profileEnginesForm.ase_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.ase_enabled"></tri-toggle>
+                    <div class="engine-override-label" style="margin-top:4px;">{{ t('secTopicDiscovery') }}</div>
+                    <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
+                      <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('topic_discovery') }}</span>
+                    </p>
+                    <tri-toggle v-model="profileEnginesForm.topic_discovery_enabled"></tri-toggle>
                   </div>
 
                   <template v-if="reflectionFormProfileId">
                     <div class="section-divider">{{ t('secReflectionBehavior') }}</div>
 
-                    <div class="param-row">
-                      <span class="param-label">{{ t('lblChatInjectTopicHint') }}</span>
-                      <label class="toggle-switch">
-                        <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_hint" />
-                        <span class="toggle-slider"></span>
-                      </label>
-                    </div>
+                    <toggle-row :label="t('lblChatInjectTopicHint')" v-model="reflectionProfileForm.chat_inject_topic_anchor"></toggle-row>
                     <p class="form-hint">{{ t('hintChatInjectTopicHint') }}</p>
 
                     <div class="param-row" style="margin-top:10px;">
@@ -2736,27 +2869,16 @@
                     <p class="form-hint">{{ t('hintLongAbsenceHours') }}</p>
 
                     <!-- 自省自定义 Prompt -->
-                    <div class="section-collapsible">
-                      <div class="section-collapsible-header" @click="reflPromptExpanded = !reflPromptExpanded">
-                        {{ t('secReflectionCustomPrompt') }}
-                        <span>{{ reflPromptExpanded ? '▲' : '▼' }}</span>
-                      </div>
-                      <div v-show="reflPromptExpanded" class="section-collapsible-body">
+                    <collapsible-section :title="t('secReflectionCustomPrompt')">
                         <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">{{ t('hintReflectionCustomPrompt') }}</p>
                         <div v-if="reflectionProfileForm.source === 'base_prompt'" style="font-size:11px;color:var(--accent);margin-bottom:6px;">{{ t('hintReflectionBasePromptShown') }}</div>
                         <textarea class="form-input" rows="8" v-model="reflectionProfileForm.custom_prompt"
                                   :placeholder="t('phReflectionCustomPrompt')"
                                   style="font-size:12px;resize:vertical;"></textarea>
-                      </div>
-                    </div>
+                    </collapsible-section>
 
                     <!-- 自省 & ASE 片段 -->
-                    <div class="section-collapsible">
-                      <div class="section-collapsible-header" @click="refaseExpanded = !refaseExpanded">
-                        {{ t('secRefaseSegments') }}
-                        <span>{{ refaseExpanded ? '▲' : '▼' }}</span>
-                      </div>
-                      <div v-show="refaseExpanded" class="section-collapsible-body">
+                    <collapsible-section :title="t('secRefaseSegments')">
                       <p style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.55;">
                         {{ t('hintRefaseSegments') }}
                       </p>
@@ -2775,7 +2897,7 @@
 
                       <!-- 自省 sub-tab -->
                       <div v-show="activeReflectionSegTab === 'reflection'">
-                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase','chat_reflection','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
                             <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                             <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;">🔒</span>
@@ -2834,9 +2956,6 @@
                                 <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                                 <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                                 <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                                <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                                <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                                <option value="all">{{ t('optInjectAll') }}</option>
                               </select>
                             </template>
                           </div>
@@ -2886,9 +3005,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                             <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                             <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -2902,7 +3018,7 @@
 
                       <!-- ASE sub-tab -->
                       <div v-show="activeReflectionSegTab === 'ase'">
-                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase','chat_ase','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                        <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
                             <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                             <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
@@ -2960,9 +3076,6 @@
                                 <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                                 <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                                 <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                                <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                                <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                                <option value="all">{{ t('optInjectAll') }}</option>
                               </select>
                             </template>
                           </div>
@@ -3015,9 +3128,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                             <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                             <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -3029,8 +3139,7 @@
                         </div>
                       </div><!-- end ASE sub-tab -->
 
-                      </div><!-- end refaseExpanded body -->
-                    </div><!-- end 自省&ASE片段 section-collapsible -->
+                    </collapsible-section>
 
                   </template>
 
@@ -3047,14 +3156,10 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('emotion') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.emotion_enabled === null }]" @click="profileEnginesForm.emotion_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.emotion_enabled === true }]" @click="profileEnginesForm.emotion_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.emotion_enabled === false }]" @click="profileEnginesForm.emotion_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.emotion_enabled"></tri-toggle>
                     <div v-if="profileEnginesForm.emotion_enabled !== false" class="engine-freq-row" style="margin-bottom:0;">
                       <span class="engine-freq-label">{{ t('lblFreqEveryN') }}</span>
-                      <input type="number" class="seg-num-input" min="1" max="100" v-model="profileEnginesForm.emotion_freq" style="width:52px;" :placeholder="t('phFreqN')" />
+                      <input type="number" class="seg-num-input" min="1" max="100" v-model="profileEnginesForm.emotion_freq" style="width:52px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.emotion_freq) ?? 5" />
                       <span class="engine-freq-unit">{{ t('lblFreqMsgs') }}</span>
                     </div>
                   </div>
@@ -3068,17 +3173,13 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('affinity') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.affinity_enabled === null }]" @click="profileEnginesForm.affinity_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.affinity_enabled === true }]" @click="profileEnginesForm.affinity_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.affinity_enabled === false }]" @click="profileEnginesForm.affinity_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.affinity_enabled"></tri-toggle>
                     <div v-if="profileEnginesForm.affinity_enabled !== false" class="engine-freq-row" style="margin-bottom:0;">
                       <span class="engine-freq-label">{{ t('lblFreqEveryN') }}</span>
-                      <input type="number" class="seg-num-input" min="1" max="100" v-model="profileEnginesForm.affinity_freq" style="width:52px;" :placeholder="t('phFreqN')" />
+                      <input type="number" class="seg-num-input" min="1" max="100" v-model="profileEnginesForm.affinity_freq" style="width:52px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.affinity_freq) ?? 5" />
                       <span class="engine-freq-unit">{{ t('lblFreqMsgs') }}</span>
                       <span class="engine-freq-label" style="margin-left:12px;">{{ t('lblAffinityMaxDelta') }}</span>
-                      <input type="number" class="seg-num-input" min="0.5" max="100" step="0.5" v-model="profileEnginesForm.affinity_delta_clamp" style="width:52px;" placeholder="15" />
+                      <input type="number" class="seg-num-input" min="0.5" max="100" step="0.5" v-model="profileEnginesForm.affinity_delta_clamp" style="width:52px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.affinity_delta_clamp) ?? 15" />
                     </div>
                   </div>
                 </div>
@@ -3091,13 +3192,9 @@
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('energy') }}</span>
                     </p>
-                    <div class="engine-tri-toggle">
-                      <button :class="['tri-btn', { active: profileEnginesForm.energy_enabled === null }]" @click="profileEnginesForm.energy_enabled = null">{{ t('optInherit') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.energy_enabled === true }]" @click="profileEnginesForm.energy_enabled = true">{{ t('optOn') }}</button>
-                      <button :class="['tri-btn', { active: profileEnginesForm.energy_enabled === false }]" @click="profileEnginesForm.energy_enabled = false">{{ t('optOff') }}</button>
-                    </div>
+                    <tri-toggle v-model="profileEnginesForm.energy_enabled"></tri-toggle>
                     <div v-if="profileEnginesForm.energy_enabled !== false" class="engine-freq-row" style="margin-bottom:0;">
-                      <input type="number" class="seg-num-input" min="60" max="3600" v-model="profileEnginesForm.energy_interval" style="width:70px;" :placeholder="t('phInheritGlobal')" />
+                      <input type="number" class="seg-num-input" min="60" max="3600" v-model="profileEnginesForm.energy_interval" style="width:70px;" :placeholder="(profileEngineGlobalDefaults && profileEngineGlobalDefaults.energy_interval) ?? 300" />
                       <span class="engine-freq-unit">{{ t('lblEnergyIntervalUnit') }}</span>
                     </div>
                   </div>
@@ -3304,7 +3401,7 @@
               <!-- ─── 世界书（lorebooks/ 文件库 + 人格绑定）─── -->
               <div v-if="profileSubTab === 'lorebook'" class="profile-subtab-panel">
                 <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;line-height:1.55;">{{ t('hintLorebookTabIntro') }}</p>
-                <p v-if="!isLorebookSegmentEnabled()" style="font-size:12px;color:#e8a040;margin:0 0 12px;padding:6px 10px;background:rgba(232,160,64,0.08);border-radius:6px;border:1px solid rgba(232,160,64,0.25);">
+                <p v-if="!isLorebookSegmentEnabled()" style="font-size:var(--fs-sm);color:var(--warning);margin:0 0 12px;padding:6px 10px;background:var(--warning-bg);border-radius:var(--radius-md);border:1px solid var(--warning-border);">
                   ⚠ {{ t('hintLorebookSegmentOff') }}
                 </p>
 
@@ -3414,13 +3511,7 @@
 
                   <div class="s-card">
                   <div class="s-card-title">{{ t('secReflectionBehavior') }}</div>
-                  <div class="param-row">
-                    <span class="param-label">{{ t('lblChatInjectTopicHint') }}</span>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="reflectionProfileForm.chat_inject_topic_hint" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
+                  <toggle-row :label="t('lblChatInjectTopicHint')" v-model="reflectionProfileForm.chat_inject_topic_anchor"></toggle-row>
                   <p class="form-hint">{{ t('hintChatInjectTopicHint') }}</p>
 
                   <div class="param-row" style="margin-top:10px;">
@@ -3431,27 +3522,16 @@
                   <p class="form-hint">{{ t('hintLongAbsenceHours') }}</p>
 
                   <!-- 自省自定义 Prompt -->
-                  <div class="section-collapsible">
-                    <div class="section-collapsible-header" @click="reflPromptExpanded = !reflPromptExpanded">
-                      {{ t('secReflectionCustomPrompt') }}
-                      <span>{{ reflPromptExpanded ? '▲' : '▼' }}</span>
-                    </div>
-                    <div v-show="reflPromptExpanded" class="section-collapsible-body">
+                  <collapsible-section :title="t('secReflectionCustomPrompt')">
                       <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">{{ t('hintReflectionCustomPrompt') }}</p>
                       <div v-if="reflectionProfileForm.source === 'base_prompt'" style="font-size:11px;color:var(--accent);margin-bottom:6px;">{{ t('hintReflectionBasePromptShown') }}</div>
                       <textarea class="form-input" rows="8" v-model="reflectionProfileForm.custom_prompt"
                                 :placeholder="t('phReflectionCustomPrompt')"
                                 style="font-size:12px;resize:vertical;"></textarea>
-                    </div>
-                  </div>
+                  </collapsible-section>
 
                   <!-- 自省 & ASE 片段 -->
-                  <div class="section-collapsible">
-                    <div class="section-collapsible-header" @click="refaseExpanded = !refaseExpanded">
-                      {{ t('secRefaseSegments') }}
-                      <span>{{ refaseExpanded ? '▲' : '▼' }}</span>
-                    </div>
-                    <div v-show="refaseExpanded" class="section-collapsible-body">
+                  <collapsible-section :title="t('secRefaseSegments')">
                     <p style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.55;">
                       {{ t('hintRefaseSegments') }}
                     </p>
@@ -3470,7 +3550,7 @@
 
                     <!-- 自省 sub-tab -->
                     <div v-show="activeReflectionSegTab === 'reflection'">
-                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase','chat_reflection','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
                           <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                           <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;">🔒</span>
@@ -3529,9 +3609,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                           </template>
                         </div>
@@ -3581,9 +3658,6 @@
                             <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                             <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                             <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                            <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                            <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                            <option value="all">{{ t('optInjectAll') }}</option>
                           </select>
                           <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                           <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -3597,7 +3671,7 @@
 
                     <!-- ASE sub-tab -->
                     <div v-show="activeReflectionSegTab === 'ase'">
-                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase','chat_ase','all'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
+                      <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
                           <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
                           <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
@@ -3655,9 +3729,6 @@
                               <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                               <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                               <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                              <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                              <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                              <option value="all">{{ t('optInjectAll') }}</option>
                             </select>
                           </template>
                         </div>
@@ -3710,9 +3781,6 @@
                             <option value="reflection_ase">{{ t('optInjectReflectionAse') }}</option>
                             <option value="reflection">{{ t('optInjectOnlyReflection') }}</option>
                             <option value="ase">{{ t('optInjectOnlyAse') }}</option>
-                            <option value="chat_reflection">{{ t('optInjectChatReflection') }}</option>
-                            <option value="chat_ase">{{ t('optInjectChatAse') }}</option>
-                            <option value="all">{{ t('optInjectAll') }}</option>
                           </select>
                           <button class="s-btn s-btn-primary" style="margin-left:auto;font-size:12px;padding:3px 10px;" @click="confirmAddCustomRefaseSeg">{{ t('btnConfirmAddSeg') }}</button>
                           <button class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 8px;" @click="cancelAddCustomRefaseSeg">{{ t('btnCancelAddSeg') }}</button>
@@ -3724,8 +3792,7 @@
                       </div>
                     </div><!-- end ASE sub-tab -->
 
-                    </div><!-- end refaseExpanded body -->
-                  </div><!-- end 自省&ASE片段 section-collapsible -->
+                  </collapsible-section>
                   </div><!-- end s-card -->
 
                   <div class="btn-row" style="margin-top:16px;">
@@ -4032,18 +4099,15 @@
         <div v-if="behaviorSubTab === 'protagonist'">
           <div class="s-card">
             <div class="s-card-title">{{ locale === 'en' ? 'Protagonist (You)' : '主角设定（你）' }}</div>
-            <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'Global info about you. Injected into all profiles. Each profile can add a role override in Profile → Behavior.' : '关于你的全局信息，注入所有人格。各人格可在人格→行为里添加角色定位覆盖。' }}</p>
+            <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'Global info about you. Used as a seed for each persona. Each profile can override these and grow its own AI-maintained portrait.' : '关于你的全局信息，作为每个人格画像的初始种子。各人格可在「人格→行为→主角设定覆盖」里单独覆盖并由 AI 自动维护画像。' }}</p>
             <div class="form-field">
               <div class="form-label">{{ locale === 'en' ? 'Name (how AI calls you)' : '称呼（AI 如何叫你）' }}</div>
               <input class="form-input" style="max-width:220px;" v-model="userPersonaForm.name" :placeholder="locale === 'en' ? 'e.g. Alex' : '例：Alex'" />
             </div>
-            <div class="form-field">
-              <div class="form-label">{{ locale === 'en' ? 'Appearance / background' : '外貌 / 背景' }}</div>
-              <textarea class="form-input" v-model="userPersonaForm.description" rows="3" style="resize:vertical;" :placeholder="locale === 'en' ? 'Brief appearance or background, 1–3 sentences.' : '简短外貌或背景，1~3 句即可。'"></textarea>
-            </div>
             <div class="form-field" style="margin-bottom:0;">
-              <div class="form-label">{{ locale === 'en' ? 'Personality traits' : '性格特质' }}</div>
-              <textarea class="form-input" v-model="userPersonaForm.personality" rows="2" style="resize:vertical;" :placeholder="locale === 'en' ? 'e.g. calm, curious, speaks little but thinks a lot.' : '例：沉稳好奇，话不多但很有主见。'"></textarea>
+              <div class="form-label">{{ locale === 'en' ? 'Self-introduction' : '自我介绍' }}</div>
+              <textarea class="form-input" v-model="userPersonaForm.introduction" rows="6" style="resize:vertical;"
+                :placeholder="locale === 'en' ? 'A few sentences about yourself: appearance, background, personality, hobbies — anything you want all AIs to know up front. Markdown supported.' : '关于你自己的几段话：外貌、背景、性格、兴趣……你希望所有 AI 一开始就知道的部分。支持 markdown。'"></textarea>
             </div>
           </div>
         </div>
@@ -4055,14 +4119,8 @@
             <div class="s-card-title">{{ t('secReflectionEngine') }}</div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'The AI periodically generates an internal monologue — reflecting on the conversation, mood, and whether it wants to say something. This state then subtly influences how it responds.' : 'AI 会定期进行一次内心独白——回顾对话、感受情绪、判断是否想主动开口。这个内心状态会轻微影响它的回应方式。' }}</p>
 
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableReflection') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.reflection_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="hint-block" style="border-left-color: var(--warn-color, #f59e0b); background: var(--warn-bg, rgba(245,158,11,0.07)); margin-top: 10px;">
+            <toggle-row :label="t('lblEnableReflection')" v-model="reflectionForm.reflection_enabled"></toggle-row>
+            <div class="hint-block" style="border-left-color: var(--warning); background: var(--warning-bg); margin-top: 10px;">
               {{ t('hintReflectionApiCost') }}
             </div>
 
@@ -4133,13 +4191,7 @@
             <div class="s-card-title">{{ t('secAseEngine') }}</div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'When the AI has something on its mind and you\'ve been quiet for a while, it can send a message on its own. Requires reflection to be enabled.' : '当 AI 内心有话想说，而你已经沉默一段时间时，它会主动发一条消息。需要先开启自省引擎。' }}</p>
 
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableAse') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="reflectionForm.ase_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableAse')" v-model="reflectionForm.ase_enabled"></toggle-row>
 
             <div class="settings-param-block" :class="{ disabled: !reflectionForm.ase_enabled }">
               <div class="param-row">
@@ -4200,13 +4252,7 @@
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'Global defaults. Each profile can override these in Profile → Behavior.' : '全局默认值，各人格可在人格→行为页单独覆盖。' }}</p>
 
             <div class="section-divider">{{ locale === 'en' ? 'Emotion Engine' : '情绪引擎' }}</div>
-            <div class="param-row">
-              <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="enginesForm.emotion_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="enginesForm.emotion_enabled"></toggle-row>
             <template v-if="enginesForm.emotion_enabled">
               <div class="param-row">
                 <span class="param-label">{{ locale === 'en' ? 'Classification frequency' : '情绪分类频率' }}</span>
@@ -4214,16 +4260,38 @@
                 <span style="font-size:12px;color:var(--text-secondary);">{{ locale === 'en' ? 'msgs' : '条/次' }}</span>
               </div>
               <p class="form-hint">{{ locale === 'en' ? 'Classify the emotional tone of each message. Run once every N messages to save API calls.' : '每 N 条消息对情绪基调做一次分类，可减少 API 消耗。' }}</p>
+
+              <toggle-row style="margin-top:14px;" :label="locale === 'en' ? 'Auto decay to neutral' : '情绪自动衰减'" v-model="enginesForm.emotion_decay_enabled"></toggle-row>
+              <p class="form-hint">{{ locale === 'en' ? 'After a long silence, reset the emotion back to a neutral state instead of keeping the last classified mood forever.' : '长时间未对话时，把情绪整体重置回中性状态，避免上次分类的情绪被永久保留。' }}</p>
+
+              <template v-if="enginesForm.emotion_decay_enabled">
+                <div class="param-row">
+                  <span class="param-label">{{ locale === 'en' ? 'Reset after silence' : '静默多久后重置' }}</span>
+                  <input type="number" class="seg-num-input" min="60" max="86400" step="300" v-model="enginesForm.emotion_decay_full_secs" style="width:80px;" />
+                  <span style="font-size:12px;color:var(--text-secondary);">{{ locale === 'en' ? 'sec' : '秒' }}</span>
+                  <span style="font-size:12px;color:var(--text-secondary);margin-left:8px;">≈ {{ ((enginesForm.emotion_decay_full_secs || 0) / 3600).toFixed(1) }} {{ locale === 'en' ? 'h' : '小时' }}</span>
+                </div>
+                <p class="form-hint">{{ locale === 'en' ? 'If no user message has arrived for this many seconds since the last emotion update, reset to the neutral emotion.' : '距上次情绪改写超过此秒数仍无用户消息时，重置为下方中性情绪。' }}</p>
+
+                <div class="param-row">
+                  <span class="param-label">{{ locale === 'en' ? 'Skip if active within' : '活跃期跳过' }}</span>
+                  <input type="number" class="seg-num-input" min="0" max="3600" step="30" v-model="enginesForm.emotion_decay_skip_if_active" style="width:72px;" />
+                  <span style="font-size:12px;color:var(--text-secondary);">{{ locale === 'en' ? 'sec' : '秒' }}</span>
+                </div>
+                <p class="form-hint">{{ locale === 'en' ? 'If the user has spoken within this window, skip decay this tick.' : '此窗口内有用户消息时，本轮 tick 不衰减。' }}</p>
+
+                <div class="param-row" style="margin-bottom:0;">
+                  <span class="param-label">{{ locale === 'en' ? 'Neutral emotion' : '中性情绪' }}</span>
+                  <select class="seg-num-input" v-model="enginesForm.emotion_neutral" style="width:140px;">
+                    <option v-for="k in (emotionStandardKeys && emotionStandardKeys.length ? emotionStandardKeys : ['calm','gentle','thoughtful'])" :key="k" :value="k">{{ k }}</option>
+                  </select>
+                </div>
+                <p class="form-hint" style="margin-bottom:0;">{{ locale === 'en' ? 'Which emotion to fall back to. Default: calm.' : '衰减后归位的中性情绪，默认 calm。' }}</p>
+              </template>
             </template>
 
             <div class="section-divider">{{ locale === 'en' ? 'Affinity Engine' : '好感度引擎' }}</div>
-            <div class="param-row">
-              <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="enginesForm.affinity_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="enginesForm.affinity_enabled"></toggle-row>
             <template v-if="enginesForm.affinity_enabled">
               <div class="param-row">
                 <span class="param-label">{{ locale === 'en' ? 'Adjust frequency' : '调整频率' }}</span>
@@ -4239,13 +4307,7 @@
             </template>
 
             <div class="section-divider">{{ locale === 'en' ? 'Energy System' : '能量系统' }}</div>
-            <div class="param-row">
-              <span class="param-label">{{ locale === 'en' ? 'Enable' : '启用' }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="enginesForm.energy_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="enginesForm.energy_enabled"></toggle-row>
             <template v-if="enginesForm.energy_enabled">
               <div class="param-row" style="margin-bottom:0;">
                 <span class="param-label">{{ locale === 'en' ? 'Recovery interval' : '恢复间隔' }}</span>
@@ -4420,13 +4482,7 @@
         <div class="s-card">
           <div class="s-card-title">{{ t('secProxyAndHf') }}</div>
           <p class="form-hint" style="margin-bottom:12px;">{{ t('hintProxyDesc') }}</p>
-          <div class="param-row" style="margin-bottom:8px;">
-            <span class="param-label">{{ t('lblUseProxy') }}</span>
-            <label class="toggle-switch">
-              <input type="checkbox" v-model="systemEnvForm.proxy_enabled" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
+          <toggle-row style="margin-bottom:8px;" :label="t('lblUseProxy')" v-model="systemEnvForm.proxy_enabled"></toggle-row>
           <div class="form-field" v-if="systemEnvForm.proxy_enabled">
             <div class="form-label">{{ t('lblProxyUrl') }}</div>
             <input class="form-input" v-model="systemEnvForm.proxy_url" :placeholder="t('phProxyUrl')" />
@@ -4569,6 +4625,13 @@
             <div v-if="forgettingPreview && forgettingPreview.skip" class="mem-forgetting-preview mem-diary-preview">
               <div class="mem-diary-preview-title">{{ t('memForgettingSkipTitle') }}</div>
               <p class="mem-cfg-hint">{{ forgettingPreview.reason }}</p>
+              <div v-if="forgettingPreview.portrait_refresh" class="mem-forgetting-preview-table" style="margin-top:8px;">
+                <div class="mem-diary-preview-row mem-diary-preview-header"><span>{{ t('memForgettingStepCol') }}</span><span>{{ t('memForgettingStatusCol') }}</span></div>
+                <div class="mem-diary-preview-row">
+                  <span>{{ locale === 'en' ? 'User portrait refresh' : '用户画像刷新' }}</span>
+                  <span>{{ forgettingPreview.portrait_refresh.enabled ? (forgettingPreview.portrait_refresh.would_run ? (locale === 'en' ? 'Will refresh' : '将刷新') : forgettingPreview.portrait_refresh.reason) : (locale === 'en' ? 'Not enabled' : '未启用') }}</span>
+                </div>
+              </div>
             </div>
             <div v-else-if="forgettingPreview && !forgettingPreview.skip" class="mem-forgetting-preview mem-diary-preview">
               <div class="mem-diary-preview-title">{{ t('memForgettingRunTitle') }} {{ forgettingPreview.yesterday }}）</div>
@@ -4594,6 +4657,10 @@
                   <span>{{ t('memForgettingStepConsolidation') }}</span>
                   <span>{{ forgettingPreview.consolidation.enabled ? (forgettingPreview.consolidation.would_run ? formatConsolidationForgettingLine(forgettingPreview.consolidation) : t('memForgettingNoConsolidation')) : t('memForgettingNotEnabled') }}</span>
                 </div>
+                <div v-if="forgettingPreview.portrait_refresh" class="mem-diary-preview-row">
+                  <span>{{ locale === 'en' ? 'User portrait refresh' : '用户画像刷新' }}</span>
+                  <span>{{ forgettingPreview.portrait_refresh.enabled ? (forgettingPreview.portrait_refresh.would_run ? (locale === 'en' ? 'Will refresh' : '将刷新') : forgettingPreview.portrait_refresh.reason) : (locale === 'en' ? 'Not enabled' : '未启用') }}</span>
+                </div>
               </div>
               <div v-if="forgettingPreview.consolidation.would_run && forgettingPreview.consolidation.preview_facts && forgettingPreview.consolidation.preview_facts.length" class="mem-forgetting-preview-facts">
                 <div class="mem-diary-preview-title" style="margin-top:8px;">{{ t('memForgettingMergePreviewTitle') }}</div>
@@ -4602,6 +4669,57 @@
                 </ul>
               </div>
             </div>
+
+            <!-- Memory change history: collapsed by default; when expanded it scrolls at a fixed height so the fact list below stays visible -->
+            <div class="mem-changelog">
+              <div class="mem-diary-preview-title mem-changelog-toggle"
+                   @click="memShowChangelog = !memShowChangelog">
+                <span>{{ t('memChangelogTitle') }}</span>
+                <span v-if="memoryChangelog.length" class="mem-changelog-count">{{ memoryChangelog.length }}</span>
+                <button class="s-btn s-btn-secondary" style="font-size:11px;margin-left:auto;"
+                        :disabled="memoryChangelogLoading || !(memoryContentProfileId || selectedProfileId)"
+                        @click.stop="loadMemoryChangelog(memoryContentProfileId || selectedProfileId)">
+                  {{ memoryChangelogLoading ? '…' : t('btnRefresh') }}
+                </button>
+                <span class="mem-changelog-caret">{{ memShowChangelog ? '▲' : '▼' }}</span>
+              </div>
+              <div v-show="memShowChangelog" class="mem-changelog-body">
+              <p v-if="!memoryChangelog.length" class="mem-cfg-hint">{{ t('memChangelogEmpty') }}</p>
+              <div v-for="run in memoryChangelog" :key="run.run_id"
+                   class="mem-changelog-entry" :class="{ 'is-rolled-back': run.rolled_back }">
+                <div class="mem-changelog-head"
+                     @click="memChangelogExpanded = (memChangelogExpanded === run.run_id ? '' : run.run_id)">
+                  <span>{{ run.date }} · {{ run.trigger === 'manual' ? t('memChangelogManual') : t('memChangelogAuto') }}</span>
+                  <span class="mem-changelog-brief">{{ memChangelogBrief(run) }}</span>
+                  <span v-if="run.rolled_back" class="mem-changelog-rbtag">{{ t('memChangelogRolledBack') }}</span>
+                  <span class="mem-changelog-caret">{{ memChangelogExpanded === run.run_id ? '▲' : '▼' }}</span>
+                </div>
+                <div v-show="memChangelogExpanded === run.run_id" class="mem-changelog-detail">
+                  <template v-if="run.summary.consolidation.added_contents && run.summary.consolidation.added_contents.length">
+                    <div class="mem-changelog-sub">{{ t('memChangelogAdded') }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.added_contents" :key="'a'+i" class="mem-changelog-fact added">+ {{ s }}</div>
+                  </template>
+                  <template v-if="run.summary.consolidation.vectors_removed_contents && run.summary.consolidation.vectors_removed_contents.length">
+                    <div class="mem-changelog-sub">{{ t('memChangelogMerged') }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.vectors_removed_contents" :key="'v'+i" class="mem-changelog-fact removed">− {{ s }}</div>
+                  </template>
+                  <template v-if="run.summary.decay_floored && run.summary.decay_floored.length">
+                    <div class="mem-changelog-sub">{{ t('memChangelogFloored') }}</div>
+                    <div v-for="(s, i) in run.summary.decay_floored" :key="'f'+i" class="mem-changelog-fact">↓ {{ s }}</div>
+                  </template>
+                  <div class="mem-changelog-stats">
+                    {{ t('memChangelogStatOrphan') }} {{ run.summary.orphan_vectors }}
+                  </div>
+                  <button v-if="!run.rolled_back" class="s-btn" style="font-size:11px;margin-top:6px;"
+                          :disabled="memoryRollbackLoading"
+                          @click="rollbackMemoryRun(memoryContentProfileId || selectedProfileId, run.run_id)">
+                    {{ t('btnRollback') }}
+                  </button>
+                </div>
+              </div>
+              </div>
+            </div>
+
             <div class="mem-list">
               <div v-if="memoryFacts.length === 0" class="mem-empty">{{ t('memEmptyFacts') }}</div>
               <div v-for="fact in displayedMemoryFacts" :key="fact.id" class="mem-fact-row">
@@ -4629,7 +4747,7 @@
                   <span :class="['mem-fact-content', fact.pinned ? 'pinned' : '']">{{ fact.content }}</span>
                   <span v-if="fact.emotional_note" class="mem-emotional-badge">{{ fact.emotional_note }}</span>
                   <span :class="['mem-source-badge', fact.source === 'manual' ? 'manual' : 'auto']">{{ fact.source }}</span>
-                  <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null && fact.weight !== undefined ? Number(fact.weight) : 1 }}</span>
+                  <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null ? Math.round(Number(fact.weight) * 100) / 100 : 1 }}</span>
                   <span style="font-size:11px;color:var(--text-secondary);" :title="new Date(fact.updated_at * 1000).toLocaleString()">{{ new Date(fact.updated_at * 1000).toLocaleDateString() }}</span>
                   <button :class="['icon-btn', fact.pinned ? 'pinned-active' : '']" :title="fact.pinned ? t('titlePinned') : t('titleNotPinned')" @click="toggleMemoryFactPin(fact)">📌</button>
                   <button class="icon-btn" :title="t('titleEditFact')" @click="startEditMemoryFact(fact)">✎</button>
@@ -4738,13 +4856,7 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectLtm') }}</div>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableLtm') }}</p>
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableLtm') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="memoryGlobalForm.enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableLtm')" v-model="memoryGlobalForm.enabled"></toggle-row>
 
             <div class="param-row" style="margin-top:10px;">
               <span class="param-label">{{ t('lblMaxHistoryTurns') }}</span>
@@ -4835,13 +4947,7 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectDaySummary') }}</div>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableDaySummary') }}</p>
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableDaySummary') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="memoryGlobalForm.day_summary_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
+            <toggle-row :label="t('lblEnableDaySummary')" v-model="memoryGlobalForm.day_summary_enabled"></toggle-row>
 
             <div class="settings-param-block" :class="{ disabled: !memoryGlobalForm.day_summary_enabled }">
               <div class="param-row" style="margin-top:8px;">
@@ -5039,19 +5145,19 @@
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblProfileExtractionFreq') }}</span>
                 <input type="number" class="seg-num-input" min="1" max="50"
-                       v-model="memoryProfileForm.extraction_frequency" placeholder="5" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
+                       v-model="memoryProfileForm.extraction_frequency" :placeholder="memoryGlobalForm.extraction_frequency ?? 5" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
               </div>
               <div class="form-hint">{{ t('hintProfileExtractionFreq') }}</div>
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblProfileMaxFacts') }}</span>
                 <input type="number" class="seg-num-input" min="1"
-                       v-model="memoryProfileForm.max_facts_in_prompt" placeholder="8" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
+                       v-model="memoryProfileForm.max_facts_in_prompt" :placeholder="memoryGlobalForm.max_facts_in_prompt ?? 8" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
               </div>
               <div class="form-hint">{{ t('hintProfileMaxFacts') }}</div>
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblProfileRecentDays') }}</span>
                 <input type="number" class="seg-num-input" min="1" max="30"
-                       v-model="memoryProfileForm.recent_days" placeholder="3" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
+                       v-model="memoryProfileForm.recent_days" :placeholder="memoryGlobalForm.recent_days ?? 3" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
               </div>
               <div class="form-hint">{{ t('hintProfileRecentDays') }}</div>
               <div class="param-row" style="margin-top:8px;">
@@ -5068,7 +5174,7 @@
                 <div class="param-row" style="margin-top:8px;">
                   <span class="param-label">{{ t('lblProfileExtractionWeightThreshold') }}</span>
                   <input type="number" class="seg-num-input" min="0" max="1" step="0.1"
-                         v-model="memoryProfileForm.extraction_weight_threshold" placeholder="0.5" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
+                         v-model="memoryProfileForm.extraction_weight_threshold" :placeholder="memoryGlobalForm.extraction_weight_threshold ?? 0.5" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
                 </div>
                 <div class="form-hint">{{ t('hintProfileExtractionWeightThreshold') }}</div>
 
@@ -5079,19 +5185,19 @@
                   <div class="param-row">
                     <span class="param-label">{{ t('lblProfileSemanticFactQuota') }}</span>
                     <input type="number" class="seg-num-input" min="0" max="20"
-                           v-model="memoryProfileForm.semantic_fact_quota" placeholder="2" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
+                           v-model="memoryProfileForm.semantic_fact_quota" :placeholder="memoryGlobalForm.semantic_fact_quota ?? 2" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
                   </div>
                   <div class="form-hint">{{ t('hintProfileSemanticFactQuota') }}</div>
                   <div class="param-row" style="margin-top:8px;">
                     <span class="param-label">{{ t('lblProfileSemanticDistance') }}</span>
                     <input type="number" class="seg-num-input" min="0" max="1" step="0.05"
-                           v-model="memoryProfileForm.semantic_distance" placeholder="0.45" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
+                           v-model="memoryProfileForm.semantic_distance" :placeholder="memoryGlobalForm.semantic_distance ?? 0.45" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
                   </div>
                   <div class="form-hint">{{ t('hintProfileSemanticDistance') }}</div>
                   <div class="param-row" style="margin-top:8px;">
                     <span class="param-label">{{ t('lblProfileVectorDedupThreshold') }}</span>
                     <input type="number" class="seg-num-input" min="0.01" max="0.5" step="0.01"
-                           v-model="memoryProfileForm.vector_dedup_distance_threshold" placeholder="0.1" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
+                           v-model="memoryProfileForm.vector_dedup_distance_threshold" :placeholder="memoryGlobalForm.vector_dedup_distance_threshold ?? 0.1" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
                   </div>
                   <div class="form-hint">{{ t('hintProfileVectorDedupThreshold') }}</div>
                 </div>
@@ -5238,8 +5344,9 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js"></script>
-<script src="js/settings.js"></script>
-<script src="js/app.js"></script>
+<script src="js/api-paths.js?v=20261009a"></script>
+<script src="js/components.js?v=20260518i"></script>
+<script src="js/settings.js?v=20261009a"></script>
+<script src="js/app.js?v=20260925a"></script>
 </body>
 </html>

@@ -23,8 +23,10 @@ _CHECK_INTERVAL = 60
 
 
 _RSS_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; FeedFetcher/1.0; +https://github.com/)",
-    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+    # Browser UA: Reddit and some other sites answer "compatible; bot" style UAs with 403
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
+    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, */*",
 }
 
 
@@ -78,6 +80,19 @@ async def _fetch_api(url: str, max_items: int = 10) -> List[Dict]:
         resp = await client.get(url, headers=_RSS_HEADERS)
         resp.raise_for_status()
         data = resp.json()
+
+    # Reddit Listing 格式：{kind: "Listing", data: {children: [{kind, data}]}}
+    if data.get("kind") == "Listing":
+        children = (data.get("data") or {}).get("children") or []
+        items = []
+        for child in children[:max_items]:
+            entry = child.get("data") or {}
+            title = (entry.get("title") or "").strip()
+            snippet = (entry.get("selftext") or "").strip()
+            link = (entry.get("url") or "").strip()
+            if title:
+                items.append({"title": title, "snippet": snippet[:400], "url": link})
+        return items
 
     # 尝试各种常见的列表字段
     raw = data.get("data") or data.get("items") or data.get("list") or []

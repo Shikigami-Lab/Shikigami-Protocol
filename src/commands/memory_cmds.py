@@ -12,6 +12,7 @@ _HELP_TEXT = """📌 可用命令（命令结果都会通过 AI 的语言表达�
 /fact delete <序号|词>  — 忘记某件事
 /recall <关键词>        — 查找与关键词相关的记忆
 /memory status         — 查看记忆系统状态
+/topic [trend|回忆|生活] — 让 AI 主动起一个新话题（默认优先新鲜事）
 /help                  — 显示本帮助
 
 分类：habit（习惯）/ preference（偏好）/ taboo（禁忌）/ relationship（关系）/ other

@@ -42,6 +42,7 @@ window.API_PATHS = {
   profilePersonaEvolution: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution`,
   profilePersonaEvolutionAnchor: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/extract_anchor`,
   profilePersonaEvolutionRollback: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/rollback`,
+  profilePersonaEvolutionTrigger: (id) => `/profiles/${encodeURIComponent(id)}/persona_evolution/trigger`,
   /** POST: AI 补全人格 Prompt 空白字段（与分析模型同通道） */
   profilePromptAutofill: () => '/profiles/prompt_autofill',
   lorebooks: () => '/lorebooks',
@@ -66,6 +67,8 @@ window.API_PATHS = {
   memorySummaryByDate: (pid, dateStr) => `/memory/${encodeURIComponent(pid)}/summaries/${encodeURIComponent(dateStr)}`,
   memoryForgettingPreview: (pid) => `/memory/${encodeURIComponent(pid)}/forgetting/preview`,
   memoryForgettingRun: (pid) => `/memory/${encodeURIComponent(pid)}/forgetting/run`,
+  memoryChangelog: (pid) => `/memory/${encodeURIComponent(pid)}/changelog`,
+  memoryChangelogRollback: (pid) => `/memory/${encodeURIComponent(pid)}/changelog/rollback`,
 
   timers: () => '/timers',
   timerById: (id) => `/timers/${encodeURIComponent(id)}`,
@@ -78,11 +81,13 @@ window.API_PATHS = {
   groupMessagesClear: (gid) => `/groups/${encodeURIComponent(gid)}/messages/clear`,
   groupHistoryExport: (gid, format) => `/groups/${encodeURIComponent(gid)}/history/export?format=${encodeURIComponent(format || 'json')}`,
   groupMessagesFrom: (gid, storeIdx) => `/groups/${encodeURIComponent(gid)}/messages/from/${storeIdx}`,
+  groupMessageById: (gid, msgId) => `/groups/${encodeURIComponent(gid)}/messages/by-id/${encodeURIComponent(msgId)}`,
   groupMessageByStoreIdx: (gid, storeIdx) => `/groups/${encodeURIComponent(gid)}/messages/${storeIdx}`,
 
   settingsEmotionKeys: () => '/settings/emotion_keys',
   settingsLlmPresets: () => '/settings/llm/presets',
   settingsLlmPreset: (name) => `/settings/llm/presets/${encodeURIComponent(name)}`,
+  settingsLlmPresetModels: (name) => `/settings/llm/presets/${encodeURIComponent(name)}/models`,
   settingsLlmPresetTest: (name) => `/settings/llm/presets/${encodeURIComponent(name)}/test`,
   settingsLlmActive: () => '/settings/llm/active',
   settingsTtsConfig: () => '/settings/tts/config',

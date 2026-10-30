@@ -40,7 +40,7 @@ async def _on_expire(app, timer_info: dict):
         return
 
     from src.prompt.pipeline import build_messages
-    from src.core.session_utils import get_effective_max_history_turns
+    from src.config.effective_config import get_effective_max_history_turns
     from src.llm.registry import get_provider
     from src.core.broadcast import broadcast
 
@@ -69,20 +69,32 @@ async def _on_expire(app, timer_info: dict):
     full_response = ""
     try:
         async for token in llm.stream_chat(messages, **gen_kwargs):
+            # The provider may yield its error sentinel after partial response text.
+            if token.lstrip().startswith("[LLM Error:"):
+                logger.warning("[timer_expire] LLM 生成失败 label=%s", label)
+                return
             full_response += token
-            await broadcast.push(session.id, {"type": "token", "token": token, "done": False})
 
         full_response = full_response.replace("**", "").strip()
         if not full_response or full_response.startswith("[LLM Error:"):
             logger.warning("[timer_expire] LLM 回复为空或出错 label=%s", label)
             return
 
-        store.append("assistant", full_response, sender=session.display_name or "")
+        assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
+        # Open the UI/TTS stream only after a complete, valid reply has been saved.
+        await broadcast.push(session.id, {"type": "token", "token": full_response, "done": False})
         await broadcast.push(session.id, {
             "type": "new_message",
+            "message_id": assistant_message_id,
             "role": "assistant",
             "content": full_response,
+            "client_id": "",
+            "sender": session.display_name or "",
             "done": True,
+        })
+        await broadcast.push(session.id, {
+            "type": "token", "token": "", "done": True,
+            "message_id": assistant_message_id, "message_role": "assistant",
         })
         logger.info("[timer_expire] 回复完成 label=%s chars=%d", label, len(full_response))
 

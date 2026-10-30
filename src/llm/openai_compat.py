@@ -1,46 +1,29 @@
 import logging
 import traceback
 from typing import AsyncGenerator, Dict, List, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from openai import AsyncOpenAI
 
 from src.llm.base import LLMProvider
+from src.llm.message_normalization import normalize_messages as _normalize_messages
+from src.llm.think_filter import ThinkTagFilter, strip_think_tags
 from src.utils.debug_logger import log_error, log_debug
 
 logger = logging.getLogger(__name__)
 
 
-def _normalize_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Normalize messages to satisfy strict user/assistant alternation required by
-    local model Jinja templates (Qwen3, Mistral, etc.).
-
-    Pass 1 — merge consecutive same-role messages (excluding system):
-        Handles ASE proactive turns that stack multiple assistant entries in a row.
-    Pass 2 — ensure first non-system message is user:
-        If the session opened with an ASE greeting before the user ever replied,
-        insert a minimal placeholder user turn so the template does not reject
-        the conversation while still preserving the assistant's opening content.
-    """
-    if not messages:
-        return messages
-
-    # Pass 1: merge consecutive same-role messages
-    merged: List[Dict[str, str]] = []
-    for msg in messages:
-        if (merged
-                and msg["role"] == merged[-1]["role"]
-                and msg["role"] != "system"):
-            merged[-1] = {**merged[-1], "content": merged[-1]["content"] + "\n\n" + (msg["content"] or "")}
-        else:
-            merged.append(dict(msg))
-
-    # Pass 2: ensure first non-system message is user
-    system_msgs = [m for m in merged if m["role"] == "system"]
-    conv_msgs   = [m for m in merged if m["role"] != "system"]
-    if conv_msgs and conv_msgs[0]["role"] != "user":
-        conv_msgs.insert(0, {"role": "user", "content": "（对话开始）"})
-
-    return system_msgs + conv_msgs
+def _normalize_base_url(base_url: str) -> str:
+    value = (base_url or "").strip()
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    path = parsed.path.rstrip("/")
+    suffix = "/chat/completions"
+    if path.lower().endswith(suffix):
+        path = path[:-len(suffix)] or "/"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+    return value
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -56,7 +39,7 @@ class OpenAICompatProvider(LLMProvider):
             timeout = 60.0
         self.client = AsyncOpenAI(
             api_key=api_key or "sk-placeholder",
-            base_url=base_url or None,
+            base_url=_normalize_base_url(base_url) or None,
             timeout=timeout,
         )
         unsupported = set(kwargs.get("unsupported_params", []))
@@ -72,6 +55,21 @@ class OpenAICompatProvider(LLMProvider):
         self._gen_kwargs = {k: v for k, v in all_gen_kwargs.items() if k not in unsupported}
         self._extra_body = kwargs.get("extra_body") or None
 
+    async def list_models(self) -> List[str]:
+        page = await self.client.models.list()
+        model_ids = set()
+        if hasattr(page, "__aiter__"):
+            async for model in page:
+                model_id = getattr(model, "id", None)
+                if model_id:
+                    model_ids.add(str(model_id))
+        else:
+            for model in getattr(page, "data", []):
+                model_id = getattr(model, "id", None)
+                if model_id:
+                    model_ids.add(str(model_id))
+        return sorted(model_ids, key=str.casefold)
+
     async def stream_chat(
         self, messages: List[Dict[str, str]], **kwargs
     ) -> AsyncGenerator[str, None]:
@@ -85,6 +83,7 @@ class OpenAICompatProvider(LLMProvider):
                 stream=True,
                 **merged,
             )
+            flt = ThinkTagFilter()
             async for chunk in stream:
                 if not getattr(chunk, "choices", None) or not chunk.choices:
                     continue
@@ -95,7 +94,12 @@ class OpenAICompatProvider(LLMProvider):
                 if delta is not None:
                     content = getattr(delta, "content", None)
                     if content:
-                        yield content
+                        visible = flt.feed(content)
+                        if visible:
+                            yield visible
+            tail = flt.flush()
+            if tail:
+                yield tail
         except Exception as e:
             err_msg = str(e)
             logger.error(f"[LLM] stream_chat error: {e}")
@@ -127,7 +131,7 @@ class OpenAICompatProvider(LLMProvider):
                 log_debug("llm_chat_error", model=self.model, error=err)
                 return f"[LLM Error: {err}]"
             content = getattr(message, "content", None)
-            return (content or "") if content is not None else ""
+            return strip_think_tags(content) if content else ""
         except Exception as e:
             err_msg = str(e)
             logger.error(f"[LLM] chat error: {e}")
