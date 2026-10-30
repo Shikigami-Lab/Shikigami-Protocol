@@ -26,10 +26,15 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.gitignore'
   workflow_dispatch: # 允许手动触发
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test-and-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
     - name: Checkout Code
@@ -53,6 +58,12 @@ jobs:
         # 安装依赖时如果失败可以尝试忽略一些本地特定的库，这里先正常安装核心库
         pip install -r requirements.txt
         pip install ruff
+
+    - name: Run Unit Tests
+      shell: bash
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+      run: python -m unittest discover -s tests -v
 
     - name: Run Python Linter (Ruff)
       shell: bash
