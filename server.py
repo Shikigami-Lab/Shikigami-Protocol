@@ -116,6 +116,7 @@ from fastapi.staticfiles import StaticFiles
 from src.config.app_config import AppConfig
 from src.core.session_manager import SessionManager
 from src.api.chat import router as chat_router
+from src.api.compose_assist import router as compose_assist_router
 from src.api.sessions import router as sessions_router
 from src.api.settings import router as settings_router
 from src.api.settings_ext import router as settings_ext_router
@@ -411,6 +412,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(compose_assist_router)
 from src.api.agent import router as agent_router
 app.include_router(agent_router)
 from src.api.workspace import router as workspace_router

@@ -40,6 +40,7 @@ window.API_PATHS = {
   agentRunApproval: (id) => `/api/agent/runs/${encodeURIComponent(id)}/approval`,
 
   chat: () => '/chat',
+  chatComposeAssist: () => '/api/chat/compose-assist',
   vlm: () => '/vlm',
   events: (sessionId) => `/events/messages?session_id=${encodeURIComponent(sessionId)}`,
 

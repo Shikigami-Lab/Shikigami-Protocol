@@ -1214,6 +1214,27 @@ html, body {
   overflow-y: auto;
   z-index: 210;
 }
+
+.compose-assist-panel {
+  position: absolute;
+  right: 20px;
+  bottom: calc(100% - 4px);
+  z-index: 220;
+  width: min(460px, calc(100% - 40px));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: 12px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.compose-assist-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.compose-assist-instruction { display:block; box-sizing:border-box; width:100%; min-height:42px; resize:vertical; padding:8px 10px; color:var(--text-primary); background:var(--bg-app); border:1px solid var(--border); border-radius:var(--radius-md); font:inherit; }
+.compose-assist-preview { margin-top:8px; padding:9px 10px; max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--bg-app); border:1px solid var(--border); border-radius:var(--radius-md); line-height:1.5; }
+.compose-assist-error { margin-top:7px; color:var(--danger, #e57373); font-size:var(--fs-sm); }
+.compose-assist-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:7px; margin-top:9px; }
 .slash-item {
   display: flex;
   align-items: baseline;

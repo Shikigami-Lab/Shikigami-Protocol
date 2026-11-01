@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261102tri1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261102tri1" />
+  <link rel="stylesheet" href="css/styles.css?v=20261102dev1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261102dev1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261102tri1"></script>
+  <script src="js/i18n.js?v=20261102dev1"></script>
 </head>
 <body>
 
@@ -749,7 +749,7 @@
               <div class="tp-cmd-group">{{ t('cmdRecentGroup') }}</div>
               <div v-for="c in recentCommandItems" :key="'recent-' + c.insert" class="tp-cmd-item"
                    @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
-                <span class="tp-cmd-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+                <span class="tp-cmd-name">{{ c.labelKey ? t(c.labelKey) : c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
                 <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
                 <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
               </div>
@@ -762,10 +762,11 @@
               </div>
               <span v-if="g.key === 'commandsGroupTimer'" class="tp-cmd-desc tp-cmd-desc-block">{{ t('commandsGroupTimerNote') }}</span>
               <div v-for="c in g.items" :key="c.insert" class="tp-cmd-item"
-                   @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
-                <span class="tp-cmd-name">{{ c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
+                   @click="c.composeAssistMode ? openComposeAssist(c.composeAssistMode) : (c.run ? runCommandNow(c) : insertCommand(c.insert))">
+                <span class="tp-cmd-name">{{ c.labelKey ? t(c.labelKey) : c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
                 <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
                 <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
+                <span v-else-if="c.composeAssistMode" class="tp-cmd-run">↗ {{ t('cmdOpenAction') }}</span>
               </div>
             </template>
 
@@ -811,6 +812,27 @@
 
     <!-- Input area -->
     <div class="input-area">
+      <div v-if="composeAssistOpen" class="compose-assist-panel" role="dialog"
+           :aria-label="composeAssistMode === 'continue' ? t('cmdAiContinueLabel') : t('cmdAiReplyLabel')"
+           @keydown.esc.stop.prevent="closeComposeAssist">
+        <div class="compose-assist-heading">
+          <strong>{{ composeAssistMode === 'continue' ? t('cmdAiContinueLabel') : t('cmdAiReplyLabel') }}</strong>
+          <button type="button" class="tp-close" :title="t('composeAssistClose')" @click="closeComposeAssist">✕</button>
+        </div>
+        <textarea v-if="composeAssistMode === 'reply'" ref="composeAssistInstruction" v-model="composeAssistInstruction" rows="2"
+                  class="compose-assist-instruction" :placeholder="t('composeAssistInstructionPlaceholder')"
+                  :disabled="composeAssistBusy"></textarea>
+        <div v-if="!composeAssistIsCurrent()" class="compose-assist-error" role="status">{{ t('composeAssistContextChanged') }}</div>
+        <div v-if="composeAssistError" class="compose-assist-error" role="alert">{{ composeAssistError }}</div>
+        <div v-if="composeAssistCandidate" class="compose-assist-preview" aria-live="polite">{{ composeAssistCandidate }}</div>
+        <div class="compose-assist-actions">
+          <button type="button" class="s-btn s-btn-secondary" @click="closeComposeAssist">{{ t('composeAssistCancel') }}</button>
+          <button v-if="composeAssistCandidate" type="button" class="s-btn s-btn-secondary"
+                  :disabled="!composeAssistIsCurrent()" @click="applyComposeAssist">{{ t('composeAssistUse') }}</button>
+          <button type="button" class="s-btn s-btn-primary" :disabled="composeAssistBusy || !composeAssistIsCurrent()"
+                  @click="generateComposeAssist">{{ composeAssistBusy ? t('composeAssistGenerating') : (composeAssistMode === 'continue' ? t('composeAssistContinue') : (composeAssistCandidate ? t('composeAssistRetry') : t('composeAssistGenerate'))) }}</button>
+        </div>
+      </div>
       <div v-if="slashMatches.length" class="slash-suggest">
         <div v-for="(c, i) in slashMatches" :key="c.insert"
              :class="['slash-item', { active: i === slashSelIdx }]"
@@ -5551,10 +5573,11 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261102tri1"></script>
-<script src="js/components.js?v=20261102tri1"></script>
-<script src="js/settings.js?v=20261102tri1"></script>
-<script src="js/agent-ui.js?v=20261102tri1"></script>
-<script src="js/app.js?v=20261102tri1"></script>
+<script src="js/api-paths.js?v=20261102dev1"></script>
+<script src="js/components.js?v=20261102dev1"></script>
+<script src="js/settings.js?v=20261102dev1"></script>
+<script src="js/agent-ui.js?v=20261102dev1"></script>
+<script src="js/compose-assist.js?v=20261102dev1"></script>
+<script src="js/app.js?v=20261102dev1"></script>
 </body>
 </html>

@@ -30,6 +30,8 @@ window.getWsUrl = getWsUrl;
 // ── Chat command registry: the single source for the ⌘ panel and inline "/" suggestions ──
 // Trailing space in insert = takes an argument; run: true = no argument, runs on click; kw = zh/en search words
 const CHAT_COMMANDS = [
+  { insert: 'AI 续写', labelKey: 'cmdAiContinueLabel', descKey: 'cmdAiContinueDesc', groupKey: 'commandsGroupWriting', composeAssistMode: 'continue', kw: 'ai continue writing 续写 草稿' },
+  { insert: 'AI 帮我写回复', labelKey: 'cmdAiReplyLabel', descKey: 'cmdAiReplyDesc', groupKey: 'commandsGroupWriting', composeAssistMode: 'reply', kw: 'ai reply response 回复 起草' },
   { insert: '/topic',          argKey: '',                   descKey: 'cmdTopicDesc',        groupKey: 'commandsGroupTopic',  run: true,  kw: 'topic new fresh 话题 新鲜 趋势' },
   { insert: '/fact list',      argKey: '',                   descKey: 'cmdFactListDesc',     groupKey: 'commandsGroupMemory', run: true,  kw: 'fact list 事实 列出 置顶' },
   { insert: '/fact add ',      argKey: 'cmdFactAddArg',      descKey: 'cmdFactAddDesc',      groupKey: 'commandsGroupMemory', run: false, kw: 'fact add 记住 添加 事实' },
@@ -79,7 +81,7 @@ function suggestSlashCommands(txt, t) {
   // "/search" is not completed to /recall (whose English description mentions "search").
   const byName = c => c.insert.toLowerCase().startsWith(head);
   const items = CHAT_COMMANDS
-    .filter(c => words.every(w => (c.insert + ' ' + c.kw + ' ' + t(c.descKey)).toLowerCase().includes(w)))
+    .filter(c => !c.composeAssistMode && words.every(w => (c.insert + ' ' + c.kw + ' ' + t(c.descKey)).toLowerCase().includes(w)))
     .sort((a, b) => byName(b) - byName(a));
   return { mode: rest ? 'keywords' : 'token', items: items.slice(0, 8) };
 }
@@ -182,7 +184,7 @@ function uiWarn(prefix, msg, data) {
 }
 
 const App = {
-  mixins: [SettingsMixin, AgentUIMixin],
+  mixins: [SettingsMixin, AgentUIMixin, ComposeAssistMixin],
   // 把 t() 注入给全局组件（components.js）。子组件 inject('gt') 即可调用；
   // 因 t() 内部读 this.locale（响应式），子组件渲染时建立依赖，切语言会重渲染。
   provide() {
@@ -3217,7 +3219,7 @@ const App = {
       const q = (this.cmdPanelQuery || '').trim().toLowerCase();
       const groups = [];
       for (const c of CHAT_COMMANDS) {
-        if (q && !(c.insert + ' ' + c.kw + ' ' + this.t(c.descKey)).toLowerCase().includes(q)) continue;
+        if (q && !(c.insert + ' ' + (c.labelKey ? this.t(c.labelKey) : '') + ' ' + c.kw + ' ' + this.t(c.descKey)).toLowerCase().includes(q)) continue;
         let g = groups.find(x => x.key === c.groupKey);
         if (!g) { g = { key: c.groupKey, items: [] }; groups.push(g); }
         g.items.push(c);
