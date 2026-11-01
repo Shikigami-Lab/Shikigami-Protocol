@@ -414,6 +414,15 @@ class WorkspaceStore:
                             stream.write(data)
                             stream.flush()
                             os.fsync(stream.fileno())
+                        # Copying must not make an old note look newly edited.
+                        if fd is None:
+                            # Windows cannot utime with follow_symlinks=False;
+                            # pin the validated file against replacement instead.
+                            with _open_file(destination):
+                                os.utime(destination, ns=(stamp[-2], stamp[-2]))
+                        else:
+                            os.utime(destination.name, ns=(stamp[-2], stamp[-2]),
+                                     follow_symlinks=False, dir_fd=fd)
             if self._migration_tree(stage)[0] != before or self._migration_tree(legacy) != (before, identities):
                 raise WorkspaceChangedError("Legacy workspace changed or copy verification failed during migration")
             prepared = {"version": 1, "profile_id": profile_id, "state": "prepared",

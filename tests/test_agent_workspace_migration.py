@@ -33,6 +33,16 @@ class WorkspaceMigrationTests(unittest.TestCase):
     def marker(self, profile="alpha"):
         return self.profiles / profile / ".workspace_migration.json"
 
+    def test_migration_preserves_original_file_modification_time(self):
+        old = self.legacy()
+        source = old / 'nested/report.txt'
+        historical = 1_700_000_000_000_000_000
+        os.utime(source, ns=(historical, historical))
+        expected = source.stat().st_mtime_ns
+        target = self.store().directory('alpha') / 'nested/report.txt'
+        self.assertEqual(target.stat().st_mtime_ns, expected)
+        self.assertEqual(source.stat().st_mtime_ns, expected)
+
     def test_new_and_legacy_profiles_are_isolated_and_host_files_stay_outside(self):
         old = self.legacy()
         host = self.profiles / "alpha"
