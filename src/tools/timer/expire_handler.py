@@ -28,11 +28,20 @@ async def _on_expire(app, timer_info: dict):
     config = app.state.config
 
     session = sm.get_by_id(session_id) if session_id else None
-    if session is None:
+    if session is None and not session_id:
         session = sm.get_current()
     if session is None:
-        logger.warning("[timer_expire] 无活跃 session，跳过 system_trigger label=%s", label)
+        logger.warning("[timer_expire] session 不存在，跳过 system_trigger session=%s label=%s", session_id, label)
         return
+
+    # Record the observation once for its original persona, even when the
+    # existing reminder cannot run (e.g. no model configured). No extra LLM.
+    runtime = getattr(app.state, "agent_runtime", None)
+    if runtime is not None:
+        try:
+            runtime.record_timer_expiry(timer_info, session.profile_id)
+        except Exception as exc:
+            logger.warning("[timer_expire] result recording failed id=%s: %s", timer_id, exc)
 
     preset = config.get_active_llm_preset()
     if not preset.get("api_key") and not preset.get("base_url"):
@@ -40,7 +49,7 @@ async def _on_expire(app, timer_info: dict):
         return
 
     from src.prompt.pipeline import build_messages
-    from src.core.session_utils import get_effective_max_history_turns
+    from src.config.effective_config import get_effective_max_history_turns
     from src.llm.registry import get_provider
     from src.core.broadcast import broadcast
 
@@ -69,20 +78,32 @@ async def _on_expire(app, timer_info: dict):
     full_response = ""
     try:
         async for token in llm.stream_chat(messages, **gen_kwargs):
+            # The provider may yield its error sentinel after partial response text.
+            if token.lstrip().startswith("[LLM Error:"):
+                logger.warning("[timer_expire] LLM 生成失败 label=%s", label)
+                return
             full_response += token
-            await broadcast.push(session.id, {"type": "token", "token": token, "done": False})
 
         full_response = full_response.replace("**", "").strip()
         if not full_response or full_response.startswith("[LLM Error:"):
             logger.warning("[timer_expire] LLM 回复为空或出错 label=%s", label)
             return
 
-        store.append("assistant", full_response, sender=session.display_name or "")
+        assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
+        # Open the UI/TTS stream only after a complete, valid reply has been saved.
+        await broadcast.push(session.id, {"type": "token", "token": full_response, "done": False})
         await broadcast.push(session.id, {
             "type": "new_message",
+            "message_id": assistant_message_id,
             "role": "assistant",
             "content": full_response,
+            "client_id": "",
+            "sender": session.display_name or "",
             "done": True,
+        })
+        await broadcast.push(session.id, {
+            "type": "token", "token": "", "done": True,
+            "message_id": assistant_message_id, "message_role": "assistant",
         })
         logger.info("[timer_expire] 回复完成 label=%s chars=%d", label, len(full_response))
 

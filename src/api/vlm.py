@@ -17,6 +17,7 @@ import traceback
 from string import Template
 
 from src.config.prompt_loader import get_prompt
+from src.llm.openai_compat import _normalize_base_url
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -180,7 +181,7 @@ async def _call_vlm(
 
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url=base_url or None,
+        base_url=_normalize_base_url(base_url) or None,
     )
 
     _ocr_prefix = ""

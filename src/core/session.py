@@ -77,7 +77,7 @@ class Session:
         """Record that a segment fired today (for once_per_day)."""
         self.segment_last_fired_date[segment_id] = date_str
 
-    def save_runtime_state(self) -> None:
+    def save_runtime_state(self) -> bool:
         """Persist volatile runtime state so it survives server restarts."""
         path = os.path.join(self.storage_root, _RUNTIME_STATE_FILE)
         data = {
@@ -87,11 +87,26 @@ class Session:
             "segment_last_fired": self.segment_last_fired,
             "segment_last_fired_date": self.segment_last_fired_date,
         }
+        temporary = None
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            import tempfile
+            os.makedirs(self.storage_root, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=".runtime-", suffix=".tmp", dir=self.storage_root)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, path)
+            return True
         except Exception as e:
             logger.warning("[Session] save_runtime_state failed: %s", e)
+            return False
+        finally:
+            if temporary and os.path.exists(temporary):
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
     def load_runtime_state(self) -> None:
         """Load persisted runtime state from disk on startup."""

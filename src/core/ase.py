@@ -898,17 +898,21 @@ class AseEngine:
                 await broadcast.push(session.id, {"token": raw_response, "done": False})
 
             # Save only the assistant response (no user trigger message)
-            store.append("assistant", full_response, sender=session.display_name or "")
+            assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
 
             await broadcast.push(session.id, {
                 "type": "new_message",
+                "message_id": assistant_message_id,
                 "role": "assistant",
                 "content": full_response,
                 "timestamp": time.time(),
                 "client_id": "",
                 "sender": session.display_name or "",
             })
-            await broadcast.push(session.id, {"token": "", "done": True})
+            await broadcast.push(session.id, {
+                "token": "", "done": True,
+                "message_id": assistant_message_id, "message_role": "assistant",
+            })
 
             duration_ms = int((time.time() - t0) * 1000)
             log_llm_response(

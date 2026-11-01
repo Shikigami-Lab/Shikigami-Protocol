@@ -3,6 +3,85 @@
    间距/圆角/字号/阴影/过渡/字体，外加两个「派生」色 token：
    --text-tertiary 用 color-mix 从各主题的 secondary+bg 自动算出，
    --warning* 为全局警告色（取代散落在 HTML 里的硬编码琥珀色）。 */
+/* Task details attach to messages; workspace shares the existing theme. */
+.agent-task-card { width: fit-content; max-width: 100%; min-width: 0; color: var(--text-secondary); font-size: var(--fs-sm); }
+.agent-task-summary { display: flex; align-items: center; gap: var(--space-1); max-width: 100%; min-height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: var(--space-1) 0; }
+.agent-task-summary:hover { color: var(--text-primary); }
+.agent-task-summary .agent-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-task-chevron { flex: 0 0 12px; text-align: center; }
+.agent-task-time { flex-shrink: 0; margin-left: var(--space-1); font-size: var(--fs-xs); color: var(--text-tertiary); }
+.agent-task-attention { flex-shrink: 0; font-size: var(--fs-xs); }
+.agent-task-details { width: 480px; max-width: 100%; padding: var(--space-2) 0 var(--space-2) var(--space-3); border-left: 1px solid var(--border); overflow-wrap: anywhere; }
+.agent-run-header, .agent-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.agent-run-header { justify-content: space-between; }
+.agent-task-events { max-height: 280px; max-height: min(280px, 40dvh); overflow-y: auto; overscroll-behavior: contain; }
+.agent-event { margin-top: var(--space-2); padding-left: var(--space-2); border-left: 2px solid var(--border); }
+.agent-task-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: var(--space-1) 0; color: var(--text-secondary); max-height: 160px; overflow: auto; }
+.agent-state-completed { color: var(--green); }
+.agent-error, .agent-state-failed { color: var(--red); }
+.agent-state-approval_requested, .agent-state-tool-warning, .agent-warning { color: var(--warning); }
+.agent-approval { padding: var(--space-2); margin-top: var(--space-2); border: 1px solid var(--warning-border); border-radius: var(--radius-md); background: var(--warning-bg); }
+.agent-artifacts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.agent-artifact-link { max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.agent-artifact-link:disabled { color: var(--text-tertiary); cursor: default; }
+.agent-task-summary:focus-visible, .agent-task-card button:focus-visible, .agent-workspace-drawer button:focus-visible,
+.agent-workspace-drawer [role="tabpanel"]:focus-visible, .agent-workspace-opener:focus-visible,
+.agent-continue-clear:focus-visible, .agent-settings-advanced summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agent-workspace-drawer:focus { outline: none; }
+.agent-workspace-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; max-width: 100%; z-index: 220; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-sidebar); color: var(--text-primary); font-size: var(--fs-sm); }
+.agent-workspace-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 61px; padding: var(--space-3) var(--space-4); }
+.agent-workspace-header h2 { margin: 0; font-size: var(--fs-base); font-weight: 600; }
+.agent-workspace-tabs { display: flex; gap: var(--space-4); padding: 0 var(--space-4); border-bottom: 1px solid var(--border); }
+.agent-workspace-tabs [role="tab"] { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-1); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.agent-workspace-tabs [aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.agent-task-count { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.agent-workspace-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom)); }
+.agent-workspace-details, .agent-workspace-tasks { min-width: 0; overflow-wrap: anywhere; }
+.agent-workspace-tasks .agent-task-card { width: 100%; border-bottom: 1px solid var(--border); padding: var(--space-1) 0; }
+.agent-workspace-tasks .agent-task-summary { width: 100%; }
+.agent-workspace-tasks .agent-task-time { margin-left: auto; }
+.agent-workspace-tasks .agent-task-details { width: 100%; }
+.agent-workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-2); }
+.agent-file-list { list-style: none; padding: 0; margin: 0; min-width: 0; max-height: 220px; overflow-y: auto; }
+.agent-file-button { display: flex; flex-direction: column; width: 100%; text-align: left; padding: var(--space-2); border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: inherit; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.agent-file-button small { color: var(--text-secondary); }
+.agent-file-button[aria-pressed="true"] { border-color: var(--border); background: var(--bg-panel); color: var(--text-primary); }
+.agent-file-preview { min-width: 0; overflow-wrap: anywhere; }
+.agent-file-metadata fieldset { display: grid; gap: var(--space-2); min-width: 0; margin: var(--space-2) 0; padding: 0; border: 0; }
+.agent-file-metadata textarea { resize: vertical; }
+.todo-list button.tp-check { padding: 0; border: 0; background: transparent; font: inherit; }
+.agent-file-preview .agent-actions strong { min-width: 0; max-width: 100%; }
+.agent-file-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: var(--fs-xs); padding: var(--space-2); background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.agent-file-preview img { display: block; max-width: 100%; max-height: 220px; object-fit: contain; margin: var(--space-2) 0; }
+.agent-version { padding: var(--space-1) 0; }
+.agent-upload { position: relative; overflow: hidden; }
+.agent-upload input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.agent-upload-disabled { opacity: .5; }
+.agent-upload:focus-within, .agent-file-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-toolbar { flex-wrap: wrap; }
+.chat-toolbar .toolbar-status { min-width: 0; flex: 1 1 80px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: var(--fs-xs); }
+.chat-toolbar .toolbar-status.agent-warning { color: var(--warning); }
+.chat-toolbar .agent-continue-selection { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: 100%; padding: 2px var(--space-2); border-radius: var(--radius-pill); background: var(--accent-dim); color: var(--text-secondary); font-size: var(--fs-xs); }
+.agent-continue-selection > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-continue-clear { flex-shrink: 0; border: 0; border-radius: var(--radius-sm); padding: var(--space-1); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+#app .chat-main, .message-row .bubble-col { min-width: 0; }
+/* The drawer is outside chat flow; v-show controls whether space is reserved. */
+#app:has(> .agent-workspace-drawer:not([style*="display: none"])) .chat-main { margin-right: 400px; }
+.agent-workspace-backdrop { position: fixed; inset: 0; z-index: 219; background: color-mix(in srgb, var(--text-primary) 20%, transparent); }
+@media (max-width: 1000px) {
+  #app:has(> .agent-workspace-drawer:not([style*="display: none"])) .chat-main { margin-right: 0; }
+  .agent-workspace-drawer { width: min(400px, 100%); }
+}
+@media (max-width: 520px) {
+  .agent-workspace-drawer { width: 100%; border-left: 0; }
+  .agent-task-time { display: none; }
+  .agent-workspace-tasks .agent-task-time { display: inline; }
+  #app .chat-header { gap: var(--space-2); }
+  #app .header-left { min-width: 0; }
+  #app .current-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #app .header-right { flex-shrink: 0; gap: var(--space-1); }
+  .agent-workspace-opener.toolbar-btn { padding: var(--space-1) 6px; }
+}
 :root {
   /* 间距（4px 基准） */
   --space-1: 4px;

@@ -24,6 +24,9 @@ _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 
 
 def _load_profile(profile_id: str) -> Dict[str, Any]:
+    if (not profile_id or profile_id in ('.', '..') or len(profile_id) > 256
+            or any(c in profile_id for c in '/\\:') or any(ord(c) < 32 for c in profile_id)):
+        raise HTTPException(status_code=400, detail='Invalid character identity')
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -74,6 +77,8 @@ async def list_tools(request: Request, profile_id: str = ""):
             profile_cfg = tool_cfgs.get(tool_id) or {}
 
         merged = {**default_cfg, **profile_cfg}
+        if t.get('agent_capable'):
+            merged['enabled'] = merged.get('enabled', True) is True
         result.append({**t, "config": merged})
 
     return {"tools": result}
@@ -87,8 +92,10 @@ class ToolConfigPatch(BaseModel):
 
 
 @router.patch("/api/profiles/{profile_id}/tool_configs")
-async def patch_tool_config(profile_id: str, body: ToolConfigPatch):
+async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Request):
     """保存某工具的配置到 profile JSON。trend 工具写入 trend_config，其余写入 tool_configs.{tool_id}。"""
+    from src.api.agent import _same_origin
+    _same_origin(request)
     try:
         data = _load_profile(profile_id)
     except HTTPException:
@@ -96,6 +103,12 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch):
 
     tool_id = body.tool_id
     cfg = body.config
+    if tool_id == 'agent':
+        from src.agent.capabilities import KEYS
+        if any(key not in (*KEYS, 'enabled', 'autonomy_enabled') or (value is not None and type(value) is not bool) for key, value in cfg.items()):
+            raise HTTPException(status_code=422, detail='Agent settings must be known boolean or null (inherit) fields')
+    if tool_id in ('timer', 'todo') and 'enabled' in cfg and type(cfg['enabled']) is not bool:
+        raise HTTPException(status_code=422, detail='Tool permission must be a boolean')
 
     if tool_id == "trend":
         existing = data.get("trend_config") or {}
@@ -107,6 +120,12 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch):
         data["tool_configs"] = tool_cfgs
 
     _save_profile(profile_id, data)
+    if tool_id == 'agent' or (tool_id == 'todo' and cfg.get('enabled') is False):
+        runtime = getattr(request.app.state, 'agent_runtime', None)
+        if runtime:
+            for run in list(runtime._runs.values()):
+                if run.profile_id == profile_id and not run.terminal and not runtime.permissions_valid(run):
+                    await runtime.cancel(run.id, profile_id)
     return {"ok": True}
 
 

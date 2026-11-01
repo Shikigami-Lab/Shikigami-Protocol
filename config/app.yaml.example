@@ -161,7 +161,7 @@ memory:
   daily_forgetting_enabled: true
   daily_decay_factor: 0.998
   daily_decay_min_weight: 0.1
-  daily_reinforcement_enabled: true
+  daily_reinforcement_enabled: false
   daily_consolidation_enabled: true
   daily_consolidation_after_days: 30
   daily_consolidation_weight_below: 1.0

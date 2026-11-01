@@ -8,16 +8,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
 ### Planned
 
 ### Known Issues
 
 ---
 
-## [0.11.0] — 2026-09-16
+## [0.11.0] — 2026-10-30
 
 ### Added
 
+- [UI] **Paste images into chat.** Pasting an image into the chat box attaches it to the pending message. Add text, remove the attachment, or send it through the existing image-analysis flow when ready.
+- [LLM] **Model picker for saved presets.** Fetch the provider's model list in Settings, filter it by typing, and select with the mouse or keyboard. Manual model entry remains available; save connection changes before refreshing the list.
+- [Prompt] **History time context.** Single and group chat prompts include time context aligned with the messages actually sent to the model, without adding time prefixes to message text.
 - [UI] **Slash-command autocomplete** — typing `/` in the chat box now pops an inline suggestion dropdown (keyword filter, ↑↓ navigation, Tab/Enter to complete the command name, Esc to dismiss). Once an argument is typed, Enter sends exactly what you wrote and the dropdown only hints the argument format. The ⌘ commands panel gained a search box, a "recently used" section, click-to-run for argument-less commands (`/topic`, `/fact list`, …), and a footer listing the natural-language phrases that trigger tools directly. Both views render from a single command registry.
 - [Commands] **`/topic` — ask for a fresh topic on demand.** Picks material from the topic-discovery sources (preferring external ones: web trends / random topics, falling back to the user's life / conversation recall / the AI itself) and injects it into the very same reply — zero extra LLM calls. `/topic trend|回忆|生活|自己|随机` forces a source. Also triggers on bare natural-language requests like "换个话题" / "聊点新鲜的" / "anything new?"; anything beyond the bare request — a negation ("别换个话题"), a statement ("我没有什么新鲜事"), a search request, or a topic of your own ("换个话题，聊聊X") — is left to normal chat. Neither the command nor the trigger picks material while topic discovery is turned off.
 - [Memory] **Remembers how you address the character.** Nicknames you use for the character are detected from your own messages and accumulate in the user portrait: they don't fade when unused, up to 8 are kept (the least used drop out first), and they can be removed by hand. Detection runs as one extra helper-model call after each portrait refresh and needs the portrait enabled. The forms show as chips in Settings → User Portrait, where detection can also be turned off.
@@ -29,6 +34,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- [Chat] Single-message deletion now uses stable message IDs in single and group chats, including ASE proactive messages and timer-expiry reminders. Deleting from chat or the history panel updates the matching active view and broadcasts the deletion to connected views of the same conversation. A failed deletion is reported instead of silently removing the local bubble.
+- [LLM] Full endpoint URLs ending in `/chat/completions`, including OpenRouter endpoints, are normalized to the API base URL for chat requests and model listing. Image analysis (VLM) reuses the same normalization.
+- [Timer] Fixed a failure that prevented timer-expiry reminders from appearing in chat.
+- [Windows] A peer reset during asyncio transport shutdown (WinError 10054) no longer interrupts socket release or floods the server log with cleanup tracebacks. Other transport and application errors remain visible.
+- [Memory] The shipped `daily_reinforcement_enabled` default is now `false`, matching the inactive reinforcement path. This changes the default setting; it does not enable daily reinforcement. Daily weight decay is unaffected.
 - [Memory] Profile edits saved while a user-portrait refresh or a persona evolution was waiting on the model are no longer overwritten when that call finishes.
 - [Memory] Day summaries now receive the character's persona and how to refer to the user, not just the character's name, including profiles with a custom day-summary prompt (all bundled examples have one). Without it, models sometimes wrote "as an AI, I can't…" disclaimers instead of an in-character diary, and those summaries were injected back into every chat. The built-in diary prompt also asks for 3–5 sentences and never breaks character.
 - [Wizard] The persona wizard and prompt autofill report an empty model reply (blocked by a content filter, timed out) or an LLM error as such, instead of a confusing JSON parse error. Replies with prose around the JSON, or with code fences inside JSON strings, now parse.
@@ -44,6 +54,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- [Topics] Expanded the built-in icebreaker and choice-question pools. Random-topic selection remembers recently used text to reduce repeats, applies the configured recent-use window, and keeps cached built-in candidates within the selected pool.
 - [Persona Evolution] Evolution is now conservative: at most 0–2 changes per round, each backed by evidence that holds across multiple conversations, and a round with too little evidence is skipped instead of forcing a change. The original persona is the baseline: every 3rd evolution (configurable in the evolution settings, 0 = off) rebuilds on it and keeps only changes with lasting evidence, a result that drops one of the original section headings is rejected, and user details (profile facts, temporary states, sensitive information) stay out of the persona. A persona over its length cap is still compressed in rounds without new changes (one extra model call when the first reply skips).
 - [Memory] The user portrait records only what the user actually said or did (no psychological analysis, guessed motives or judgmental labels) and leaves out sensitive details such as real names, addresses, ID numbers, credentials, medical or financial details unless the user has volunteered them repeatedly.
 - [UI] The prompt autofill panel shows which model will run it: the analysis model when it is enabled, otherwise the active chat model.

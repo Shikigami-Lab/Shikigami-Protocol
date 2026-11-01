@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20260916a" />
-  <link rel="stylesheet" href="css/settings.css?v=20260916a" />
+  <link rel="stylesheet" href="css/styles.css?v=20261102tri1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261102tri1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20260916a"></script>
+  <script src="js/i18n.js?v=20261102tri1"></script>
 </head>
 <body>
 
@@ -30,7 +30,7 @@
   ></div>
 
   <!-- ════════════════ SIDEBAR ════════════════ -->
-  <aside class="sidebar" :class="{ open: sidebarOpen }">
+  <aside class="sidebar" :class="{ open: sidebarOpen }" :inert="agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId">
     <div class="sidebar-header">
       <div class="app-logo" aria-hidden="true"><img src="icon.png" alt="" class="app-logo-img" onerror="this.style.display='none';this.nextElementSibling?.classList.add('use-fallback');" /><span class="app-logo-fallback">式</span></div>
       <span class="app-name">Shikigami</span>
@@ -245,7 +245,7 @@
   </div>
 
   <!-- ════════════════ MAIN ════════════════ -->
-  <main class="chat-main">
+  <main class="chat-main" :inert="agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId">
 
     <!-- Header -->
     <header class="chat-header">
@@ -261,6 +261,12 @@
         <button v-if="isGroupChat" type="button" class="header-back-single-btn" @click="leaveGroupChat" :title="t('statusGroupLeft')">{{ t('headerBackToSingle') }}</button>
       </div>
       <div class="header-right">
+        <button v-if="!currentGroupId && currentSessionId" ref="agentWorkspaceOpener" type="button"
+                class="toolbar-btn agent-workspace-opener" :class="{ on: agentWorkspaceOpen }"
+                :title="t('agentWorkspace')" :aria-label="t('agentWorkspace')"
+                :aria-expanded="agentWorkspaceOpen" aria-controls="agent-workspace-drawer" @click="toggleAgentWorkspace">
+          <span aria-hidden="true">📁</span><span v-if="agentActiveTaskCount" class="agent-task-count">{{ agentActiveTaskCount }}</span>
+        </button>
         <!-- 状态、统计、主动感知（顶栏，工具留在工具栏） -->
         <div class="header-status-row">
           <div class="toolbar-status-wrap header-status-wrap">
@@ -574,13 +580,26 @@
                 </svg>
               </button>
             </div>
+            <agent-task-card v-for="run in messageAgentRuns(msg)" :key="agentRunKey(run)"
+              :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
+              :event-label="agentEventLabel" :event-text="agentEventText"
+              :terminal="agentTerminal(run.state)" :artifact-path="agentArtifactPath"
+              :can-continue="agentCanContinueRun(run)"
+              :can-detach="agentCanDetach && agentChatContext?.runKey === agentRunKey(run)" :has-timers="agentHasTimerEvents(run)"
+              @cancel="cancelAgentRun(run)" @continue="selectAgentContinuation(run)"
+              @approve="answerAgentApproval(run, $event)" @artifact="openAgentArtifact"
+              @timers="openAgentTimers" @detach="detachAgentChat"></agent-task-card>
             <!-- 时间戳（仅当前会话新消息有此字段） -->
             <span v-if="msg.timestamp" class="msg-time">{{ formatMsgTime(msg.timestamp) }}</span>
+            <span v-if="msg.partial" class="msg-time">{{ ['cancelled', 'failed'].includes(msg.generation_status) ? t('agentGeneration_' + msg.generation_status) : t('agentPartialReply') }}</span>
             <!-- P5-B: Message action bar -->
             <div v-if="msg.role === 'assistant'" class="msg-actions">
               <button @click="rewriteMessage(i)" :title="t('rewriteBtnTitle')">↺</button>
+              <button v-if="msg.agent_run_id && agentTerminal(msg.generation_status)" type="button"
+                      :title="t('agentContinue')" :aria-label="t('agentContinue')"
+                      :disabled="!agentCanContinueRun({id: msg.agent_run_id, profile_id: msg.session_id, session_id: msg.session_id, state: msg.generation_status})" @click="continueAgentMessage(msg)"><span aria-hidden="true">↪</span></button>
               <button @click="toggleCollapse(i)" :title="msg.collapsed ? t('expandBtnTitle') : t('collapseBtnTitle')">{{ msg.collapsed ? '⊞' : '⊟' }}</button>
-              <button @click="replayTTS(i)" :title="t('replayTTSTitle')">▶</button>
+              <button v-if="!msg.partial" @click="replayTTS(i)" :title="t('replayTTSTitle')">▶</button>
               <button @click="stopTTSPlayback()" :title="t('stopTTSTitle')"
                       :style="isPlayingAudio ? 'color:var(--accent);opacity:1' : 'opacity:0.4'">■</button>
               <button @click="deleteMessage(i)" :title="t('deleteMsgTitle')">✕</button>
@@ -613,12 +632,6 @@
         </div>
       </div>
 
-    </div>
-
-    <!-- Status bar -->
-    <div class="status-bar">
-      <span v-if="engineWarning && statusText === t('statusReady')" style="color:var(--warning)">⚠ {{ engineWarning }}</span>
-      <span v-else>{{ statusText }}</span>
     </div>
 
     <!-- Toolbar (P4 + P5-C) -->
@@ -678,29 +691,20 @@
       <div v-if="toolbarConfig.todos.enabled && !currentGroupId" class="toolbar-panel-wrap">
         <button class="toolbar-btn" :class="{ on: showTodosPanel }"
                 @click="toggleTodosPanel" :title="t('todosTitle')">📋</button>
-        <div class="toolbar-panel" v-show="showTodosPanel">
+        <div class="toolbar-panel tp-todos" v-show="showTodosPanel">
           <div class="tp-header">
             <span>{{ t('todosPanelTitle') }}</span>
             <button class="tp-close" @click="showTodosPanel = false">✕</button>
           </div>
-          <div class="tp-add-row">
-            <input class="tp-input" v-model="newTodoText" :placeholder="t('todosNewPlaceholder')"
-                   @keydown.enter="addTodo" />
-            <button class="tp-add-btn" @click="addTodo">+</button>
-          </div>
-          <div class="tp-list">
-            <div v-if="todos.length === 0" class="tp-empty">{{ t('todosEmpty') }}</div>
-            <div v-for="t in todos" :key="t.id" class="tp-item" :class="{ done: t.done }">
-              <span class="tp-check" @click="toggleTodo(t.id)">{{ t.done ? '✓' : '○' }}</span>
-              <span class="tp-text">{{ t.content }}</span>
-              <button class="tp-del" @click="deleteTodo(t.id)">✕</button>
-            </div>
-          </div>
+          <todo-list :t="t" :owner="todoOwner" :todos="visibleTodos" v-model:draft="newTodoText"
+                     :artifact-path="todoArtifactPath" @update:owner="selectTodoOwner" @add="addTodo"
+                     @toggle="toggleTodo" @delete="deleteTodo" @clear="clearDoneTodos"
+                     @artifact="openTodoArtifact"></todo-list>
         </div>
       </div>
 
       <!-- 计时器 button + panel（群聊下隐藏） -->
-      <div v-if="toolbarConfig.timer.enabled && !currentGroupId" class="toolbar-panel-wrap">
+      <div v-if="(toolbarConfig.timer.enabled || showTimerPanel) && !currentGroupId" class="toolbar-panel-wrap">
         <button class="toolbar-btn" :class="{ on: showTimerPanel }"
                 @click="toggleTimerPanel" :title="t('timerTitle')">⏱</button>
         <div class="toolbar-panel" v-show="showTimerPanel">
@@ -794,6 +798,15 @@
         </div>
       </div>
 
+      <button v-if="agentCanDetach" type="button" class="toolbar-btn" :title="t('agentBackground')"
+              :aria-label="t('agentBackground')" @click="detachAgentChat"><span aria-hidden="true">↗</span></button>
+      <span v-if="agentContinueRunId && !currentGroupId" class="agent-continue-selection" :title="t('agentContinueSelected')" role="status">
+        <span aria-hidden="true">↪</span><span>{{ t('agentContinueContext') }}</span>
+        <button type="button" class="agent-continue-clear" :title="t('agentContinueClear')" :aria-label="t('agentContinueClear')" @click="agentContinueRunId = ''">✕</button>
+      </span>
+      <span class="toolbar-status" role="status" :class="{ 'agent-warning': engineWarning && statusText === t('statusReady') }"
+            :title="engineWarning && statusText === t('statusReady') ? engineWarning : statusText">{{ engineWarning && statusText === t('statusReady') ? '⚠ ' + engineWarning : statusText }}</span>
+
     </div>
 
     <!-- Input area -->
@@ -819,6 +832,7 @@
           rows="2"
           :placeholder="isGroupChat ? t('inputPlaceholderGroup') : t('inputPlaceholderSingle')"
           @keydown="handleKeydown"
+          @paste="onChatPaste"
           @focus="$event.target.scrollIntoView({ block: 'nearest', behavior: 'smooth' })"
           :disabled="isStreaming"
         ></textarea>
@@ -833,6 +847,115 @@
     </div>
 
   </main>
+
+  <div v-if="agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && currentSessionId" class="agent-workspace-backdrop"
+       aria-hidden="true" @click="closeAgentWorkspace"></div>
+  <aside v-if="!currentGroupId && currentSessionId" v-show="agentWorkspaceOpen" ref="agentWorkspaceDrawer"
+         class="agent-workspace-drawer" id="agent-workspace-drawer" role="dialog"
+         :aria-modal="agentDrawerNarrow" aria-labelledby="agent-workspace-title" tabindex="-1"
+         @keydown.esc.stop.prevent="closeAgentWorkspace" @keydown.tab="trapAgentWorkspaceFocus">
+    <div class="agent-workspace-header">
+      <h2 id="agent-workspace-title">{{ t('agentWorkspace') }}</h2>
+      <button ref="agentWorkspaceClose" type="button" class="toolbar-btn" :title="t('agentWorkspaceClose')"
+              :aria-label="t('agentWorkspaceClose')" @click="closeAgentWorkspace">✕</button>
+    </div>
+    <div class="agent-workspace-tabs" role="tablist" :aria-label="t('agentWorkspace')" @keydown="navigateAgentWorkspaceTabs">
+      <button id="agent-files-tab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'files'"
+              :tabindex="agentWorkspaceTab === 'files' ? 0 : -1" aria-controls="agent-files-panel"
+              @click="selectAgentWorkspaceTab('files')">{{ t('agentWorkspaceFilesTab') }}</button>
+      <button id="agent-plans-tab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'plans'"
+              :tabindex="agentWorkspaceTab === 'plans' ? 0 : -1" aria-controls="agent-plans-panel"
+              @click="selectAgentWorkspaceTab('plans')">{{ t('agentWorkspacePlansTab') }}</button>
+      <button id="agent-tasks-tab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'tasks'"
+              :tabindex="agentWorkspaceTab === 'tasks' ? 0 : -1" aria-controls="agent-tasks-panel"
+              @click="selectAgentWorkspaceTab('tasks')">{{ t('agentWorkspaceTasksTab') }}<span v-if="agentActiveTaskCount" class="agent-task-count">{{ agentActiveTaskCount }}</span></button>
+    </div>
+    <div class="agent-workspace-body">
+      <div v-show="agentWorkspaceTab === 'files'" id="agent-files-panel" role="tabpanel" aria-labelledby="agent-files-tab" tabindex="0" class="agent-workspace-details">
+        <p class="form-hint">{{ t('agentWorkspaceHint') }}</p>
+        <div class="agent-actions">
+          <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceLoading" @click="refreshAgentWorkspace">{{ t('agentWorkspaceRefresh') }}</button>
+          <label class="s-btn s-btn-small s-btn-secondary agent-upload" :class="{ 'agent-upload-disabled': agentWorkspaceLocked }">
+            {{ t('agentWorkspaceUpload') }}
+            <input type="file" :aria-label="t('agentWorkspaceUpload')" :disabled="agentWorkspaceLocked" @change="uploadAgentWorkspaceFile" />
+          </label>
+        </div>
+        <p v-if="agentOwnTaskActive" class="form-hint">{{ t('agentWorkspaceLocked') }}</p>
+        <p v-else-if="!agentRunsKnown[currentSessionId] || agentRunErrors[currentSessionId]" class="form-hint">{{ t('agentWorkspaceChecking') }}</p>
+        <p v-if="agentWorkspaceError" class="agent-error" role="alert">{{ agentWorkspaceError }}</p>
+        <p v-if="agentWorkspaceInventoryHint" class="form-hint agent-warning" role="status">{{ agentWorkspaceInventoryHint }}</p>
+        <p v-if="agentWorkspaceLoading" role="status">{{ t('loading') }}</p>
+        <p v-else-if="!agentWorkspaceFiles.length && !agentWorkspaceError && !agentWorkspaceInventoryHint">{{ t('agentWorkspaceEmpty') }}</p>
+        <div class="agent-workspace-layout">
+          <ul v-if="agentWorkspaceFiles.length" class="agent-file-list">
+            <li v-for="file in agentWorkspaceFiles" :key="file.path">
+              <button type="button" class="agent-file-button" :aria-pressed="agentWorkspaceSelected?.path === file.path" @click="selectAgentWorkspaceFile(file)">
+                <span>{{ file.path }}</span>
+                <small>{{ t('agentWorkspaceCategory_' + agentWorkspaceFileMetadata(file).category) }}<span v-if="file.pinned === true"> · {{ t('agentWorkspacePinned') }}</span></small>
+                <small v-if="file.description">{{ file.description }}</small><small>{{ file.size }} B · {{ agentRunTime(file.modified) }}</small>
+                <small v-if="file.oversized" class="agent-warning">{{ t('agentWorkspaceOversizedShort') }}</small>
+              </button>
+            </li>
+          </ul>
+          <div v-if="agentWorkspaceSelected" class="agent-file-preview">
+            <div class="agent-actions"><strong>{{ agentWorkspaceSelected.path }}</strong>
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceSelected.oversized === true" @click="downloadAgentWorkspaceFile">{{ t('agentWorkspaceDownload') }}</button>
+            </div>
+            <form class="agent-file-metadata" @submit.prevent="saveAgentWorkspaceMetadata">
+              <fieldset :disabled="agentWorkspaceLocked">
+                <label for="agent-file-description">{{ t('agentWorkspaceDescription') }}</label>
+                <textarea id="agent-file-description" class="form-input" rows="2" maxlength="200" v-model="agentWorkspaceMetadata.description"></textarea>
+                <label for="agent-file-category">{{ t('agentWorkspaceCategory') }}</label>
+                <select id="agent-file-category" class="form-select" v-model="agentWorkspaceMetadata.category">
+                  <option v-for="category in agentWorkspaceCategories" :key="category" :value="category">{{ t('agentWorkspaceCategory_' + category) }}</option>
+                </select>
+                <label><input type="checkbox" v-model="agentWorkspaceMetadata.pinned" /> {{ t('agentWorkspacePinned') }}</label>
+                <button type="submit" class="s-btn s-btn-small s-btn-secondary">{{ t('agentWorkspaceMetadataSave') }}</button>
+              </fieldset>
+            </form>
+            <p v-if="agentWorkspacePreviewBusy" role="status">{{ t('loading') }}</p>
+            <p v-if="agentWorkspacePreviewHint" class="form-hint">{{ agentWorkspacePreviewHint }}</p>
+            <img v-if="agentWorkspaceImage" :src="agentWorkspaceImage" :alt="agentWorkspaceSelected.path" />
+            <pre v-else-if="agentWorkspaceText">{{ agentWorkspaceText }}</pre>
+            <details>
+              <summary>{{ t('agentWorkspaceVersions') }} · {{ agentWorkspaceVersions.length }}</summary>
+              <p v-if="agentWorkspaceVersionError" class="agent-error" role="alert">{{ agentWorkspaceVersionError }}</p>
+              <p v-else-if="!agentWorkspaceVersions.length && !agentWorkspacePreviewBusy" class="form-hint">{{ t('agentWorkspaceNoVersions') }}</p>
+              <div v-for="version in agentWorkspaceVersions" :key="version.id" class="agent-version agent-actions">
+                <span>{{ agentRunTime(version.created_at) || t('agentWorkspaceSavedVersion') }}</span>
+                <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceLocked" @click="restoreAgentWorkspaceVersion(version)">{{ t('agentWorkspaceRestore') }}</button>
+                <p v-if="agentWorkspaceVersionHint(version)" class="form-hint agent-warning">{{ agentWorkspaceVersionHint(version) }}</p>
+              </div>
+            </details>
+          </div>
+          <p v-else-if="agentWorkspaceFiles.length" class="form-hint">{{ t('agentWorkspaceSelect') }}</p>
+        </div>
+      </div>
+      <div v-show="agentWorkspaceTab === 'plans'" id="agent-plans-panel" role="tabpanel" aria-labelledby="agent-plans-tab" tabindex="0">
+        <todo-list :t="t" :owner="todoOwner" :todos="visibleTodos" v-model:draft="newTodoText"
+                     :artifact-path="todoArtifactPath" @update:owner="selectTodoOwner" @add="addTodo"
+                     @toggle="toggleTodo" @delete="deleteTodo" @clear="clearDoneTodos"
+                     @artifact="openTodoArtifact"></todo-list>
+      </div>
+      <div v-show="agentWorkspaceTab === 'tasks'" id="agent-tasks-panel" role="tabpanel" aria-labelledby="agent-tasks-tab" tabindex="0" class="agent-workspace-tasks">
+        <div v-if="agentRunErrors[currentSessionId]" class="agent-error" role="alert">
+          {{ t('agentRefreshFailed') }}: {{ agentRunErrors[currentSessionId] }}
+          <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentPollBusy" @click="refreshAgentRuns">{{ t('agentRetry') }}</button>
+        </div>
+        <p v-else-if="!agentRunsKnown[currentSessionId]" class="form-hint" role="status">{{ t('loading') }}</p>
+        <p v-else-if="!currentAgentRuns.length" class="form-hint">{{ t('agentWorkspaceTasksEmpty') }}</p>
+        <agent-task-card v-for="run in currentAgentRuns" :key="agentRunKey(run)"
+              :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
+              :event-label="agentEventLabel" :event-text="agentEventText" :time-label="agentRunTime(run.created_at)"
+              :terminal="agentTerminal(run.state)" :artifact-path="agentArtifactPath"
+              :can-continue="agentCanContinueRun(run)"
+              :can-detach="agentCanDetach && agentChatContext?.runKey === agentRunKey(run)" :has-timers="agentHasTimerEvents(run)"
+              @cancel="cancelAgentRun(run)" @continue="selectAgentContinuation(run)"
+              @approve="answerAgentApproval(run, $event)" @artifact="openAgentArtifact"
+              @timers="openAgentTimers" @detach="detachAgentChat"></agent-task-card>
+      </div>
+    </div>
+  </aside>
 
   <!-- ════════════════ SETTINGS OVERLAY ════════════════ -->
   <div class="settings-overlay" :class="{ open: settingsOpen }" @click="closeSettings()"></div>
@@ -1250,7 +1373,7 @@
 
                 <div class="form-field">
                   <div class="form-label">{{ t('llmTypeLabel') }}</div>
-                  <select class="form-select" v-model="presetForm.type">
+                  <select class="form-select" v-model="presetForm.type" @change="clearLLMModels">
                     <option value="openai_compat">OpenAI / Compat</option>
                     <option value="gemini">Google Gemini</option>
                     <option value="ollama">{{ t('llmTypeOllama') }}</option>
@@ -1266,6 +1389,7 @@
                       class="form-input"
                       :type="llmShowKey ? 'text' : 'password'"
                       v-model="presetForm.api_key"
+                      @input="clearLLMModels"
                       :placeholder="presetForm.has_key ? t('llmApiKeyExisting') : t('llmApiKeyPlaceholder')"
                     />
                     <button class="key-toggle" @click="llmShowKey = !llmShowKey">{{ llmShowKey ? '🙈' : '👁' }}</button>
@@ -1274,12 +1398,41 @@
 
                 <div class="form-field">
                   <div class="form-label">Base URL</div>
-                  <input class="form-input" v-model="presetForm.base_url" :placeholder="t('llmBaseUrlPlaceholderZh')" />
+                  <input class="form-input" v-model="presetForm.base_url" @input="clearLLMModels" :placeholder="t('llmBaseUrlPlaceholderZh')" />
                 </div>
 
                 <div class="form-field">
                   <div class="form-label">{{ t('llmModelNameLabel') }}</div>
-                  <input class="form-input" v-model="presetForm.model" placeholder="gpt-4o / gemini-2.5-flash / …" />
+                  <div class="llm-model-picker-row">
+                    <div class="llm-model-input-wrap">
+                      <input class="form-input" v-model="presetForm.model" autocomplete="off"
+                        role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+                        :aria-expanded="llmModelDropdownOpen" aria-controls="llm-model-options"
+                        @focus="openLLMModelDropdown" @blur="closeLLMModelDropdown"
+                        @input="filterLLMModelDropdown" @keydown="handleLLMModelKeydown"
+                        placeholder="gpt-4o / gemini-2.5-flash / …" />
+                      <div v-if="llmModelDropdownOpen" id="llm-model-options" class="llm-model-options" role="listbox" @mousedown.prevent>
+                        <button v-for="(model, index) in filteredLLMModels" :key="model" type="button"
+                          class="llm-model-option" role="option"
+                          :class="{ 'is-active': index === llmModelActiveIndex, 'is-selected': model === presetForm.model }"
+                          :aria-selected="model === presetForm.model"
+                          @mouseenter="llmModelActiveIndex = index" @click="selectLLMModel(model)">
+                          {{ model }}
+                        </button>
+                        <div v-if="!filteredLLMModels.length" class="llm-model-options-empty">{{ t('llmModelsNoMatches') }}</div>
+                      </div>
+                    </div>
+                    <button type="button" class="s-btn s-btn-secondary llm-model-fetch-btn"
+                      :disabled="llmModelsLoading || llmModelConnectionDirty"
+                      :title="llmModelConnectionDirty ? t('llmModelsSaveFirst') : ''"
+                      @click="fetchLLMModels">
+                      {{ llmModelsLoading ? t('llmModelsLoading') : (llmModels.length ? t('llmModelsRefresh') : t('llmModelsFetch')) }}
+                    </button>
+                  </div>
+                  <div class="form-hint">{{ t('llmModelsHint') }}</div>
+                  <div v-if="llmModelsStatus" class="form-hint llm-model-status" :class="`is-${llmModelsStatusType}`">
+                    {{ llmModelsStatus }}
+                  </div>
                 </div>
               </div><!-- end 连接配置 s-card -->
 
@@ -3777,6 +3930,36 @@
 
               <!-- ─── 工具配置 ─── -->
               <div v-if="profileSubTab === 'tools'" class="profile-subtab-panel">
+                <div v-if="!toolsLoading" class="s-card">
+                  <div class="s-card-title">{{ t('agentProfilePermissions') }}</div>
+                  <p class="form-hint">{{ t('agentProfileHint') }}</p>
+                  <fieldset class="param-row" style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.agent || !selectedProfileId" aria-labelledby="agent-profile-tools-label">
+                    <span id="agent-profile-tools-label" class="param-label" style="flex:1;width:auto;">{{ t('agentProfileToolsEnable') }}</span>
+                    <tri-toggle :model-value="getProfileAgentPermission('enabled')"
+                      @update:model-value="saveToolConfig('agent', {enabled: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
+                  <fieldset class="param-row" style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.agent || !selectedProfileId" aria-labelledby="agent-profile-autonomy-label">
+                    <span id="agent-profile-autonomy-label" class="param-label" style="flex:1;width:auto;">{{ t('agentAutonomyProfileEnable') }}</span>
+                    <tri-toggle :model-value="getProfileAgentPermission('autonomy_enabled')"
+                      @update:model-value="saveToolConfig('agent', {autonomy_enabled: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
+                  <p class="form-hint">{{ t('agentAutonomyProfileHint') }}</p>
+                  <fieldset v-for="capability in agentCapabilities" :key="capability" class="param-row"
+                    style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.agent || !selectedProfileId" :aria-labelledby="'agent-profile-' + capability + '-label'"
+                    :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''">
+                    <span :id="'agent-profile-' + capability + '-label'" class="param-label" style="flex:1;width:auto;">{{ t('agentCapability_' + capability) }}</span>
+                    <tri-toggle :model-value="getProfileAgentPermission(capability)"
+                      @update:model-value="saveToolConfig('agent', {[capability]: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
+                  <p class="form-hint">{{ t('agentProfileNativeHint') }}</p>
+                  <toggle-row v-for="tool in toolsList.filter(tw => tw.tool_id === 'timer' && tw.agent_capable === true)" :key="tool.tool_id"
+                    :label="t('agentTimerPermission')" :model-value="tool.config?.enabled !== false" :disabled="toolsSaving.timer"
+                    @update:model-value="saveToolConfig('timer', {enabled: $event}, selectedProfileId)"></toggle-row>
+                  <p v-if="!toolsList.some(tw => tw.tool_id === 'timer' && tw.agent_capable === true)" class="form-hint">{{ t('agentNoCapableTools') }}</p>
+                </div>
                 <div v-if="toolsLoading" class="hint-text" style="padding:20px 0 0;">{{ t('loading') }}</div>
                 <template v-else-if="!toolsList.filter(tw => tw.type === 'awareness').length">
                   <p class="hint-text" style="padding:20px 0 0;">{{ t('toolsNone') }}</p>
@@ -4034,6 +4217,61 @@
       <div v-if="activeTab === 'tools'" class="settings-tab-content">
         <div class="settings-section-title">{{ t('profileSubTabTools') }}</div>
         <p class="form-hint" style="margin-bottom:16px;">{{ t('toolsTabHint') }}</p>
+
+        <div class="s-card agent-settings-card">
+          <div class="s-card-title">{{ t('agentToolsTitle') }}</div>
+          <toggle-row :label="t('agentEnable')" :model-value="agentSettingsForm.enabled" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                      @update:model-value="saveAgentSettings({enabled: $event})"></toggle-row>
+          <p class="form-hint">{{ t('agentEnableHint') }}</p>
+          <toggle-row :label="t('agentAutonomyEnable')" :model-value="agentSettingsForm.autonomy_enabled" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                      @update:model-value="saveAgentSettings({autonomy_enabled: $event})"></toggle-row>
+          <p class="form-hint">{{ t('agentAutonomyHint') }}</p>
+          <div class="form-field">
+            <label class="form-label" for="agent-autonomy-interval">{{ t('agentAutonomyInterval') }}</label>
+            <input id="agent-autonomy-interval" class="form-input" type="number" min="60" max="86400" step="1" v-model.number="agentSettingsForm.autonomy_interval_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="agent-autonomy-hourly-cap">{{ t('agentAutonomyHourlyCap') }}</label>
+            <input id="agent-autonomy-hourly-cap" class="form-input" type="number" min="1" max="128" step="1" v-model.number="agentSettingsForm.autonomy_max_requests_per_hour" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+          </div>
+          <p class="form-hint">{{ t('agentAutonomyBudgetHint') }}</p>
+          <button type="button" class="s-btn s-btn-secondary" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                  @click="saveAgentSettings({autonomy_interval_seconds: agentSettingsForm.autonomy_interval_seconds, autonomy_max_requests_per_hour: agentSettingsForm.autonomy_max_requests_per_hour})">{{ t('agentSaveLimits') }}</button>
+          <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentDefaultLabel') + t('agentCapability_' + capability)"
+            :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''"
+            :model-value="agentSettingsForm[capability]"
+            :disabled="agentSettingsBusy || !agentSettingsLoaded || (capability === 'code_enabled' && !agentSettingsForm.workspace_enabled)"
+            @update:model-value="saveAgentSettings({[capability]: $event})"></toggle-row>
+          <p class="form-hint">{{ t('agentCapabilityHint') }}</p>
+          <p class="form-hint">{{ t('agentWebDnsHint') }}</p>
+          <div class="form-field">
+            <label class="form-label" for="agent-model-name">{{ t('agentModel') }}</label>
+            <div class="agent-settings-model">
+              <input id="agent-model-name" class="form-input" readonly :value="agentRuntime?.model || '—'" />
+              <button type="button" class="s-btn s-btn-secondary" @click="activeTab = 'llm'">{{ t('agentModelSettings') }}</button>
+            </div>
+          </div>
+          <div class="agent-actions">
+            <span role="status">{{ t('agentRuntime') }}: {{ agentSettingsBusy ? t('loading') : (agentRuntime ? t('agentRuntime_' + agentRuntime.state) : t('agentRuntime_unknown')) }}</span>
+            <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentSettingsBusy" @click="loadAgentSettings(true)">{{ t('agentCheckRetry') }}</button>
+          </div>
+          <p v-if="agentRuntime?.detail" class="form-hint">{{ agentRuntime.detail }}</p>
+          <p v-if="agentSettingsError" class="agent-error" role="alert">{{ agentSettingsError }}</p>
+          <details class="agent-settings-advanced">
+            <summary>{{ t('agentAdvanced') }}</summary>
+            <p class="form-hint">{{ t('agentLimitsHint') }}</p>
+            <div class="form-field">
+              <label class="form-label" for="agent-request-limit">{{ t('agentMaxRequests') }}</label>
+              <input id="agent-request-limit" class="form-input" type="number" min="1" max="32" step="1" v-model.number="agentSettingsForm.max_model_requests" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="agent-timeout">{{ t('agentTimeout') }}</label>
+              <input id="agent-timeout" class="form-input" type="number" min="10" max="600" step="1" v-model.number="agentSettingsForm.timeout_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+            </div>
+            <button type="button" class="s-btn s-btn-secondary" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                    @click="saveAgentSettings({max_model_requests: agentSettingsForm.max_model_requests, timeout_seconds: agentSettingsForm.timeout_seconds})">{{ t('agentSaveLimits') }}</button>
+          </details>
+        </div>
 
         <div v-if="toolsLoading" class="hint-text" style="padding:20px 0 0;">{{ t('loading') }}</div>
         <template v-else-if="toolsList.length">
@@ -5313,9 +5551,10 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20260518i"></script>
-<script src="js/components.js?v=20260518i"></script>
-<script src="js/settings.js?v=20260916a"></script>
-<script src="js/app.js?v=20260916a"></script>
+<script src="js/api-paths.js?v=20261102tri1"></script>
+<script src="js/components.js?v=20261102tri1"></script>
+<script src="js/settings.js?v=20261102tri1"></script>
+<script src="js/agent-ui.js?v=20261102tri1"></script>
+<script src="js/app.js?v=20261102tri1"></script>
 </body>
 </html>

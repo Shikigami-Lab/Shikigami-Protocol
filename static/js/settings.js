@@ -107,6 +107,14 @@ const SettingsMixin = {
       presetSaving: false,
       llmTestResult: null,   // { presetName, ok, latency_ms, error }
       llmTestLoading: false,
+      llmModels: [],
+      llmModelsLoading: false,
+      llmModelsStatus: '',
+      llmModelsStatusType: '',
+      llmModelsFetchSequence: 0,
+      llmModelDropdownOpen: false,
+      llmModelSearch: '',
+      llmModelActiveIndex: -1,
 
       // ── 入门 / 环境自检 ──
       setupGuide: null,
@@ -203,6 +211,14 @@ const SettingsMixin = {
       toolsList: [],            // [{tool_id, label, type, description, config, ...}]
       toolsLoading: false,
       toolsSaving: {},          // { tool_id: bool }
+      toolsLoadSequence: 0,
+      profilesLoadSequence: 0,
+      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null,
+        autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12 },
+      agentRuntime: null,
+      agentSettingsLoaded: false,
+      agentSettingsBusy: false,
+      agentSettingsError: '',
       trendStatus: { unused_count: 0, total_count: 0, last_fetched_at: null },
       trendFetching: false,
       trendNewSource: { type: 'rss', label: '', url: '', query: '' },
@@ -543,6 +559,19 @@ const SettingsMixin = {
   },
 
   computed: {
+    llmModelConnectionDirty() {
+      const saved = this.llmPresets[this.selectedPresetName];
+      return !saved
+        || this.presetForm.type !== (saved.type || 'openai_compat')
+        || this.presetForm.base_url !== (saved.base_url || '')
+        || !!this.presetForm.api_key.trim();
+    },
+    filteredLLMModels() {
+      const query = this.llmModelSearch.trim().toLowerCase();
+      return query
+        ? this.llmModels.filter(model => model.toLowerCase().includes(query))
+        : this.llmModels;
+    },
     selectedProfileIndex() {
       if (!this.selectedProfileId || !this.profiles.length) return -1;
       return this.profiles.findIndex(p => p.profile_id === this.selectedProfileId);
@@ -917,6 +946,7 @@ const SettingsMixin = {
       }
       if (newTab === 'tools' && this.settingsOpen) {
         this.loadToolsConfig();
+        this.loadAgentSettings();
       }
       if (newTab === 'memory' && this.settingsOpen) {
         this.memoryPanelLoading = true;
@@ -1042,6 +1072,10 @@ const SettingsMixin = {
 
     openSettings() {
       this.settingsOpen = true;
+      if (this.activeTab === 'tools') {
+        this.loadToolsConfig();
+        this.loadAgentSettings();
+      }
       this.confirmingAction = null;
       {
         let t = localStorage.getItem('theme') || '';
@@ -1281,6 +1315,7 @@ const SettingsMixin = {
 
     selectPreset(name) {
       this.selectedPresetName = name;
+      this.clearLLMModels();
       const p = this.llmPresets[name];
       if (!p) return;
       const unsupported = p.unsupported_params || [];
@@ -1303,6 +1338,111 @@ const SettingsMixin = {
         extra_body_raw: p.extra_body ? JSON.stringify(p.extra_body, null, 2) : '',
       };
       this.llmShowKey = false;
+    },
+
+    clearLLMModels() {
+      this.llmModelsFetchSequence += 1;
+      this.llmModels = [];
+      this.llmModelsLoading = false;
+      this.llmModelsStatus = '';
+      this.llmModelsStatusType = '';
+      this.llmModelDropdownOpen = false;
+      this.llmModelSearch = '';
+      this.llmModelActiveIndex = -1;
+    },
+
+    openLLMModelDropdown() {
+      if (!this.llmModels.length) return;
+      this.llmModelSearch = '';
+      this.llmModelActiveIndex = -1;
+      this.llmModelDropdownOpen = true;
+    },
+
+    filterLLMModelDropdown(event) {
+      this.llmModelSearch = event.target.value;
+      this.llmModelActiveIndex = -1;
+      this.llmModelDropdownOpen = this.llmModels.length > 0;
+    },
+
+    closeLLMModelDropdown() {
+      this.llmModelDropdownOpen = false;
+      this.llmModelActiveIndex = -1;
+    },
+
+    selectLLMModel(model) {
+      this.presetForm.model = model;
+      this.llmModelSearch = '';
+      this.closeLLMModelDropdown();
+    },
+
+    handleLLMModelKeydown(event) {
+      if (event.key === 'Escape') {
+        this.closeLLMModelDropdown();
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (!this.llmModelDropdownOpen) this.openLLMModelDropdown();
+        const count = this.filteredLLMModels.length;
+        if (!count) return;
+        const direction = event.key === 'ArrowDown' ? 1 : -1;
+        const current = this.llmModelActiveIndex;
+        this.llmModelActiveIndex = current < 0
+          ? (direction > 0 ? 0 : count - 1)
+          : Math.max(0, Math.min(count - 1, current + direction));
+        event.preventDefault();
+        return;
+      }
+      if (event.key === 'Enter' && this.llmModelDropdownOpen && this.llmModelActiveIndex >= 0) {
+        const model = this.filteredLLMModels[this.llmModelActiveIndex];
+        if (model) {
+          event.preventDefault();
+          this.selectLLMModel(model);
+        }
+      }
+    },
+
+    async fetchLLMModels() {
+      if (!this.selectedPresetName || this.llmModelsLoading) return;
+      if (this.llmModelConnectionDirty) {
+        this.llmModelsStatus = this.t('llmModelsSaveFirst');
+        this.llmModelsStatusType = 'error';
+        return;
+      }
+
+      const presetName = this.selectedPresetName;
+      const requestSequence = ++this.llmModelsFetchSequence;
+      this.llmModelsLoading = true;
+      this.llmModelsStatus = '';
+      this.llmModelsStatusType = '';
+      try {
+        const response = await fetch(
+          getBaseUrl() + API_PATHS.settingsLlmPresetModels(presetName)
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const status = data.detail && data.detail.upstream_status;
+          throw new Error(`HTTP ${status || response.status}`);
+        }
+        if (requestSequence !== this.llmModelsFetchSequence) return;
+
+        this.llmModels = [...new Set((data.models || []).filter(model => typeof model === 'string' && model.trim()))]
+          .sort((left, right) => left.localeCompare(right));
+        this.llmModelsStatus = this.llmModels.length
+          ? this.t('llmModelsFound').replace('{count}', this.llmModels.length)
+          : this.t('llmModelsEmpty');
+        this.llmModelsStatusType = this.llmModels.length ? 'success' : 'info';
+        this.llmModelSearch = '';
+        this.llmModelActiveIndex = -1;
+        this.llmModelDropdownOpen = this.llmModels.length > 0;
+      } catch (error) {
+        if (requestSequence !== this.llmModelsFetchSequence) return;
+        this.llmModelsStatus = `${this.t('llmModelsFetchFailed')}${error.message ? ` (${error.message})` : ''}`;
+        this.llmModelsStatusType = 'error';
+      } finally {
+        if (requestSequence === this.llmModelsFetchSequence) {
+          this.llmModelsLoading = false;
+        }
+      }
     },
 
     _collectUnsupported(form) {
@@ -1348,7 +1488,10 @@ const SettingsMixin = {
         const data = await res.json();
         if (data.ok) {
           this.showToast(this.t('toastLLMSaved'), 'success');
+          const savedPresetName = body.name;
+          this.selectedPresetName = savedPresetName;
           await this.loadLLMPresets();
+          this.selectPreset(savedPresetName);
           this.loadSetupGuide();
         } else {
           this.showToast(`保存失败: ${data.error || data.detail || 'unknown'}`, 'error');
@@ -1677,9 +1820,11 @@ const SettingsMixin = {
     /* ─────────────── Profiles ─────────────── */
 
     async loadProfiles() {
+      const sequence = ++this.profilesLoadSequence, selected = this.selectedProfileId;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.profiles());
         const data = await res.json();
+        if (!res.ok || sequence !== this.profilesLoadSequence || selected !== this.selectedProfileId) return;
         this.profiles = data.profiles || [];
         if (this.profiles.length && !this.selectedProfileId) {
           this.selectProfile(this.profiles[0].profile_id);
@@ -1812,6 +1957,15 @@ const SettingsMixin = {
       document.addEventListener('pointercancel', onUp);
     },
     selectProfile(profileId) {
+      if (profileId !== this.selectedProfileId) {
+        // Invalidate immediately, including a switch away and back before Vue's watchers run.
+        this.profilesLoadSequence++;
+        this.toolsLoadSequence++;
+        this.toolsList = [];
+        this.toolsLoading = false;
+        this.trendStatus = { unused_count: 0, total_count: 0, last_fetched_at: null };
+        this.weatherStatus = { available: false };
+      }
       this._profileFormLoaded = false;
       this.selectedProfileId = profileId;
       const p = this.profiles.find(x => x.profile_id === profileId);
@@ -2732,12 +2886,7 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         if (!res.ok) throw new Error(await res.text());
-        // 从本地列表移除，避免重新拉取
-        const idx = this.chatHistory.findIndex(m => m.id === msgId);
-        if (idx !== -1) {
-          this.chatHistory.splice(idx, 1);
-          this.chatHistoryTotal = Math.max(0, this.chatHistoryTotal - 1);
-        }
+        this._applyMessageDeleted(msgId, profileId);
       } catch (e) {
         this.showToast(`删除失败: ${e.message}`, 'error');
       }
@@ -4979,45 +5128,108 @@ const SettingsMixin = {
 
     /* ─────────────── Tools tab ─────────────── */
 
+    async loadAgentSettings(check = false) {
+      if (this.agentSettingsBusy) return;
+      this.agentSettingsBusy = true;
+      this.agentSettingsError = '';
+      try {
+        const settings = await this.agentFetch(API_PATHS.agentSettings());
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
+          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
+        this.agentSettingsLoaded = true;
+        this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
+      } catch (error) {
+        this.agentSettingsError = error.message;
+        this.agentRuntime = null;
+      } finally { this.agentSettingsBusy = false; }
+    },
+
+    async saveAgentSettings(patch) {
+      if (this.agentSettingsBusy || !this.agentSettingsLoaded) return;
+      if (('max_model_requests' in patch && (!Number.isInteger(patch.max_model_requests) || patch.max_model_requests < 1 || patch.max_model_requests > 32)) ||
+          ('timeout_seconds' in patch && (!Number.isInteger(patch.timeout_seconds) || patch.timeout_seconds < 10 || patch.timeout_seconds > 600))) {
+        this.agentSettingsError = this.t('agentLimitsInvalid');
+        return;
+      }
+      if (('autonomy_enabled' in patch && typeof patch.autonomy_enabled !== 'boolean') ||
+          ('autonomy_interval_seconds' in patch && (!Number.isInteger(patch.autonomy_interval_seconds) || patch.autonomy_interval_seconds < 60 || patch.autonomy_interval_seconds > 86400)) ||
+          ('autonomy_max_requests_per_hour' in patch && (!Number.isInteger(patch.autonomy_max_requests_per_hour) || patch.autonomy_max_requests_per_hour < 1 || patch.autonomy_max_requests_per_hour > 128))) {
+        this.agentSettingsError = this.t('agentAutonomyLimitsInvalid');
+        return;
+      }
+      this.agentSettingsBusy = true;
+      this.agentSettingsError = '';
+      try {
+        const settings = await this.agentFetch(API_PATHS.agentSettings(), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+        });
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
+          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
+        this.agentRuntime = await this.agentFetch(API_PATHS.agentStatus());
+        this.showToast(this.t('savedOk'), 'success');
+      } catch (error) {
+        this.agentSettingsError = error.message;
+        this.agentRuntime = null;
+      } finally { this.agentSettingsBusy = false; }
+    },
+
     async loadToolsConfig(profileId) {
       const pid = profileId || this.selectedProfileId || '';
+      const sequence = ++this.toolsLoadSequence;
+      const selected = this.selectedProfileId, tab = this.activeTab;
       this.toolsLoading = true;
       try {
         const url = pid ? `/api/tools?profile_id=${encodeURIComponent(pid)}` : '/api/tools';
         const res = await fetch(getBaseUrl() + url);
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        if (sequence !== this.toolsLoadSequence || selected !== this.selectedProfileId || tab !== this.activeTab) return;
         this.toolsList = data.tools || [];
         if (pid) {
           await this.loadTrendStatus(pid);
+          if (sequence !== this.toolsLoadSequence || selected !== this.selectedProfileId || tab !== this.activeTab) return;
           await this.loadWeatherStatus(pid);
         }
       } catch (e) {
-        this.showToast(this.t('errLoadTools'), 'error');
+        if (sequence === this.toolsLoadSequence && selected === this.selectedProfileId && tab === this.activeTab) {
+          this.toolsList = [];
+          this.showToast(this.t('errLoadTools'), 'error');
+        }
       } finally {
-        this.toolsLoading = false;
+        if (sequence === this.toolsLoadSequence) this.toolsLoading = false;
       }
     },
 
     async saveToolConfig(toolId, config, profileId) {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
+      const sequence = this.toolsLoadSequence;
+      const isCurrent = () => pid === this.selectedProfileId && sequence === this.toolsLoadSequence;
       this.toolsSaving = { ...this.toolsSaving, [toolId]: true };
       try {
-        const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/tool_configs`, {
+        const res = await fetch(getBaseUrl() + `/api/profiles/${encodeURIComponent(pid)}/tool_configs`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tool_id: toolId, config }),
         });
         const data = await res.json();
-        if (data.ok) {
+        if (!res.ok || !data.ok) throw new Error(data.detail || this.t('errSave'));
+        if (isCurrent()) {
           this.showToast(this.t('savedOk'), 'success');
-          await this.loadToolsConfig(pid);
+          if (toolId === 'agent') await this.loadProfiles();
+          if (isCurrent()) await this.loadToolsConfig(pid);
         }
       } catch (e) {
-        this.showToast(this.t('errSave'), 'error');
+        if (isCurrent()) this.showToast(this.t('errSave'), 'error');
       } finally {
         this.toolsSaving = { ...this.toolsSaving, [toolId]: false };
       }
+    },
+
+    getProfileAgentPermission(key) {
+      const profile = this.profiles.find(p => p.profile_id === this.selectedProfileId);
+      const value = profile?.tool_configs?.agent?.[key];
+      return typeof value === 'boolean' ? value : null;
     },
 
     getToolConfig(toolId) {
@@ -5028,9 +5240,11 @@ const SettingsMixin = {
     async loadTrendStatus(profileId) {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
+      const sequence = this.toolsLoadSequence;
       try {
         const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/status`);
-        this.trendStatus = await res.json();
+        const data = await res.json();
+        if (res.ok && pid === this.selectedProfileId && sequence === this.toolsLoadSequence) this.trendStatus = data;
       } catch (e) { /* silent */ }
     },
 
@@ -5092,9 +5306,11 @@ const SettingsMixin = {
     async loadWeatherStatus(profileId) {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
+      const sequence = this.toolsLoadSequence;
       try {
         const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/weather/status`);
-        this.weatherStatus = await res.json();
+        const data = await res.json();
+        if (res.ok && pid === this.selectedProfileId && sequence === this.toolsLoadSequence) this.weatherStatus = data;
       } catch (e) { /* silent */ }
     },
   },

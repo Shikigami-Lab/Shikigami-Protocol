@@ -5,9 +5,9 @@ import time
 import traceback
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.config.effective_config import get_effective_max_history_turns
 from src.core.broadcast import broadcast
@@ -28,36 +28,72 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     client_id: str = ""   # sender UUID — other clients use this to skip duplicates
+    request_id: str = Field(default="", max_length=128)
+    continue_run_id: str = Field(default="", max_length=128)
+    conversation_only: bool = False
+    session_id: str = Field(default="", max_length=256, pattern=r"^[^/\\:\x00-\x1f\x7f-\x9f]*$")
 
 
 @router.post("/chat")
 async def chat_endpoint(request: Request, body: ChatRequest):
     sm = request.app.state.session_manager
     config = request.app.state.config
+    runtime = getattr(request.app.state, 'agent_runtime', None)
+    if runtime:
+        from src.api.agent import _same_origin
+        _same_origin(request)
 
-    session = sm.get_current()
+    if body.session_id in ('.', '..'):
+        raise HTTPException(400, 'Invalid character identity')
+
+    session = sm.get_by_id(body.session_id) if body.session_id else sm.get_current()
 
     async def generate():
         session_id = session.id if session else None
+        agent_run = None
+        agent_runtime = getattr(request.app.state, "agent_runtime", None)
+        full_response = ""
+        response_saved = False
         streaming_set = getattr(request.app.state, "chat_streaming_sessions", None)
         if streaming_set is None:
             request.app.state.chat_streaming_sessions = set()
             streaming_set = request.app.state.chat_streaming_sessions
-        if session_id:
+        owns_stream_marker = bool(session_id and session_id not in streaming_set)
+        stream_counts = getattr(request.app.state, 'chat_stream_counts', None)
+        if stream_counts is None:
+            request.app.state.chat_stream_counts = stream_counts = {}
+        counted_stream = False
+        plain_revision = None
+        def plain_context_valid():
+            return (plain_revision is None or (
+                not agent_runtime._mutations.get(session.profile_id, 0)
+                and agent_runtime.store.revision(session.profile_id) == plain_revision))
+        if owns_stream_marker:
             streaming_set.add(session_id)
         try:
             if session is None:
                 yield f"data: {json.dumps({'error': 'No active session', 'done': True})}\n\n"
                 return
+            if not owns_stream_marker and not body.conversation_only:
+                yield f"data: {json.dumps({'error': 'This character already has an active reply. Stop it or wait for completion.', 'done': True})}\n\n"
+                return
+            if body.conversation_only and stream_counts.get(session_id, 0) >= 2:
+                yield f"data: {json.dumps({'error': 'A foreground reply is already running.', 'done': True})}\n\n"
+                return
+            stream_counts[session_id] = stream_counts.get(session_id, 0) + 1
+            counted_stream = True
 
             preset = config.get_active_llm_preset()
             # openai_compat 必需 base_url + model；api_key 对本地模型(Ollama/LM Studio)可空，
             # 故不能用 api_key 判断「已配置」。
-            if not preset.get("base_url") or not preset.get("model"):
+            user_msg = body.message.strip()
+            if (not preset.get("base_url") or not preset.get("model")) and not user_msg.startswith('/'):
                 yield f"data: {json.dumps({'error': 'LLM not configured. Set base_url and model for the active preset (Settings → Models).', 'done': True})}\n\n"
                 return
 
             store = session.conversation_store
+            if body.conversation_only and agent_runtime:
+                plain_revision = agent_runtime.store.revision(session.profile_id)
             # 确保 MemoryManager 在 build_messages 之前存在（segments 需要它）
             from src.api.memory import _get_or_create_manager as _ensure_mem_mgr
             _ensure_mem_mgr(request, session.profile_id)
@@ -73,7 +109,22 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 app=request.app,
                 out_extras=build_extras,
             )
-            llm = get_provider(preset)
+            use_agent = bool(agent_runtime and agent_runtime.tools_allowed(session.profile_id) and not user_msg.startswith('/') and not body.conversation_only)
+            if body.continue_run_id and not use_agent:
+                raise ValueError('Enable AI tools to continue a task')
+            if not user_msg.startswith('/'):
+                if use_agent:
+                    from src.agent.capabilities import capability_context
+                    info = capability_context(agent_runtime.access_for(session.profile_id))
+                    if agent_runtime.timer_allowed(session.profile_id):
+                        info += '\nYou may create, list and cancel timers. Ask when duration is unspecified.'
+                    _inject_context(messages, info)
+                else:
+                    _inject_context(messages, '[Tool availability]\nNo tools are enabled for this turn. '
+                        'Chat normally, but do not claim to have executed operations. Manual toolbar buttons and slash commands remain available.')
+            if use_agent:
+                agent_run = agent_runtime.prepare(session, messages, preset, client_id=body.client_id,
+                                                  request_id=body.request_id, continue_run_id=body.continue_run_id)
 
             # ── log: incoming user turn ──────────────────────────────
             log_chat_request(
@@ -101,48 +152,43 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
             # Record user message（带 sender，群聊防污染）
             user_name = getattr(config, "user_name", "用户") or "用户"
-            store.append("user", body.message, sender=user_name)
+            user_message_id = store.append("user", body.message, sender=user_name,
+                **({'agent_run_id': agent_run.id} if agent_run else {}))
+            if agent_run:
+                agent_runtime.store.bind_messages(agent_run.id, user_message_id=user_message_id)
             await broadcast.push(session.id, {
                 "type": "new_message",
+                "message_id": user_message_id,
                 "role": "user",
                 "content": body.message,
                 "timestamp": time.time(),
                 "client_id": body.client_id,
+                "request_id": body.request_id,
                 "sender": user_name,
             })
+            yield f"data: {json.dumps({'message_id': user_message_id, 'message_role': 'user'})}\n\n"
 
-            # ── 双轨工具检测（消息保存后、LLM 调用前）───────────────────────────
-
-            user_msg = body.message.strip()
-
-            # 轨道1：NL触发器（仅非 / 命令消息）
-            if not user_msg.startswith("/"):
-                try:
-                    from src.commands.nl_triggers import get_nl_triggers
-                    for trigger in get_nl_triggers():
-                        if trigger.detect(user_msg):
-                            nl_result = await trigger.execute(user_msg, session, request.app)
-                            if nl_result and nl_result.context_for_llm:
-                                _inject_context(messages, nl_result.context_for_llm)
-                except Exception as e:
-                    logger.warning("[chat] NL trigger 失败: %s", e)
-
-            # 轨道2：显式 /命令（仅 / 前缀）
+            # Explicit commands retain their existing direct service path.
             if user_msg.startswith("/"):
                 try:
                     from src.commands.base import dispatch_command
                     cmd_result = await dispatch_command(user_msg, session, request.app)
                     if cmd_result.bypass_llm:
+                        assistant_message_id = store.append('assistant', cmd_result.direct_response,
+                                                            sender=session.display_name or '')
+                        response_saved = True
                         await broadcast.push(session.id, {
                             "type": "new_message",
+                            "message_id": assistant_message_id,
                             "role": "assistant",
                             "content": cmd_result.direct_response,
                             "timestamp": time.time(),
                             "client_id": body.client_id,
+                            "request_id": body.request_id,
                             "sender": session.display_name or "",
                         })
                         yield f"data: {json.dumps({'token': cmd_result.direct_response, 'done': False})}\n\n"
-                        yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
+                        yield f"data: {json.dumps({'token': '', 'done': True, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
                         return
                     elif cmd_result.context_for_llm:
                         _inject_context(messages, cmd_result.context_for_llm)
@@ -165,9 +211,41 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             full_response = ""
             llm_stream_start = time.perf_counter()
             try:
-                async for token in llm.stream_chat(messages):
-                    full_response += token
-                    yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                if agent_run:
+                    async for payload in agent_runtime.stream(agent_run):
+                        if 'token' in payload:
+                            full_response += payload['token']
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    run_row = agent_runtime.store.get_run(agent_run.id)
+                    invalid_context = run_row['stale'] or not agent_runtime.context_valid(agent_run)
+                    run_state = 'cancelled' if invalid_context else run_row['state']
+                    if run_state != 'completed':
+                        if full_response and agent_runtime.context_valid(agent_run):
+                            assistant_message_id = store.append('assistant', full_response, sender=session.display_name or '',
+                                agent_run_id=agent_run.id, generation_status=run_state)
+                            agent_runtime.store.bind_messages(agent_run.id, assistant_message_id=assistant_message_id)
+                            response_saved = True
+                            await broadcast.push(session.id, {'type': 'new_message', 'message_id': assistant_message_id,
+                                'role': 'assistant', 'content': full_response, 'timestamp': time.time(),
+                                'client_id': body.client_id, 'request_id': body.request_id,
+                                'sender': session.display_name or '', 'partial': True,
+                                'generation_status': run_state, 'agent_run_id': agent_run.id})
+                        else:
+                            assistant_message_id = None
+                        yield f"data: {json.dumps({'done': True, 'cancelled': run_state == 'cancelled', 'discard_partial': invalid_context, 'error': None if run_state == 'cancelled' else '工具任务未完成，请查看任务状态。', 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
+                        return
+                else:
+                    llm = get_provider(preset)
+                    async for token in llm.stream_chat(messages):
+                        if not plain_context_valid():
+                            yield f"data: {json.dumps({'done': True, 'cancelled': True, 'discard_partial': True})}\n\n"
+                            return
+                        full_response += token
+                        yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+
+                if not agent_run and not plain_context_valid():
+                    yield f"data: {json.dumps({'done': True, 'cancelled': True, 'discard_partial': True})}\n\n"
+                    return
 
                 # ── debug: build + LLM 耗时写入 build_timings.log ─────────────
                 llm_stream_ms = (time.perf_counter() - llm_stream_start) * 1000
@@ -206,20 +284,26 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         actual_error,
                         {"session_id": session.id, "response_preview": (full_response or "(empty)")[:500], "reason": reason},
                     )
-                    store.append("assistant", "", sender=session.display_name or "")
+                    assistant_message_id = store.append("assistant", "", sender=session.display_name or "")
                     await broadcast.push(session.id, {
                         "type": "new_message",
+                        "message_id": assistant_message_id,
                         "role": "assistant",
                         "content": "回复生成失败，请重试。",
                         "timestamp": time.time(),
                         "client_id": body.client_id,
+                        "request_id": body.request_id,
                         "sender": session.display_name or "",
                     })
                     log_llm_response(session_id=session.id, response=full_response or "(empty)", model=preset.get("model", ""))
-                    yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response'})}\n\n"
+                    yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response', 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
                     return  # 错误/空回复到此结束：不再走后续引擎/广播，也不重复 yield done
                 else:
-                    store.append("assistant", full_response, sender=session.display_name or "")
+                    assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "",
+                        **({'agent_run_id': agent_run.id, 'generation_status': 'completed'} if agent_run else {}))
+                    if agent_run:
+                        agent_runtime.store.bind_messages(agent_run.id, assistant_message_id=assistant_message_id)
+                    response_saved = True
 
                 # ── P4: 情绪分类 + 好感度 LLM（fire-and-forget）──────────────────
                 if not is_error_or_empty:
@@ -287,10 +371,12 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     # Broadcast completed assistant reply（带 sender）
                     await broadcast.push(session.id, {
                         "type": "new_message",
+                        "message_id": assistant_message_id,
                         "role": "assistant",
                         "content": full_response,
                         "timestamp": time.time(),
                         "client_id": body.client_id,
+                        "request_id": body.request_id,
                         "sender": session.display_name or "",
                     })
 
@@ -301,17 +387,28 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                         model=preset.get("model", ""),
                     )
 
-                    yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
+                    yield f"data: {json.dumps({'token': '', 'done': True, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
 
             except (GeneratorExit, asyncio.CancelledError):
                 logger.info("[chat] 流被客户端中断，停止生成")
+                if agent_run and full_response and not response_saved and agent_runtime.context_valid(agent_run):
+                    partial_id = store.append('assistant', full_response, sender=session.display_name or '',
+                        agent_run_id=agent_run.id, generation_status='cancelled')
+                    agent_runtime.store.bind_messages(agent_run.id, assistant_message_id=partial_id)
+                    response_saved = True
                 raise
             except Exception as e:
                 logger.error(f"[chat] generation error: {e}")
                 log_error("chat/generate", str(e), {"session_id": session.id}, traceback_str=traceback.format_exc())
                 yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
         finally:
-            if session_id:
+            if agent_run and not agent_run.terminal:
+                asyncio.create_task(agent_runtime.cancel(agent_run.id, session.profile_id))
+            if counted_stream:
+                stream_counts[session_id] = max(0, stream_counts.get(session_id, 1) - 1)
+            if (counted_stream or owns_stream_marker) and not stream_counts.get(session_id, 0):
                 streaming_set.discard(session_id)
 
     return StreamingResponse(
@@ -437,9 +534,10 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                     actual_error,
                     {"session_id": session.id, "response_preview": (full_response or "(empty)")[:500], "reason": reason},
                 )
-                store.append("assistant", "", sender=session.display_name or "")
+                assistant_message_id = store.append("assistant", "", sender=session.display_name or "")
                 await broadcast.push(session.id, {
                     "type": "new_message",
+                    "message_id": assistant_message_id,
                     "role": "assistant",
                     "content": "回复生成失败，请重试。",
                     "timestamp": time.time(),
@@ -447,9 +545,9 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                     "sender": session.display_name or "",
                 })
                 log_llm_response(session_id=session.id, response=full_response or "(empty)", model=preset.get("model", ""))
-                yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response'})}\n\n"
+                yield f"data: {json.dumps({'token': '', 'done': True, 'error': 'empty or error response', 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
             else:
-                store.append("assistant", full_response, sender=session.display_name or "")
+                assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
                 emotion_engine = getattr(request.app.state, "emotion_engine", None)
                 if emotion_engine:
                     from src.config.effective_config import get_effective_engine_config
@@ -468,6 +566,7 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                     ))
                 await broadcast.push(session.id, {
                     "type": "new_message",
+                    "message_id": assistant_message_id,
                     "role": "assistant",
                     "content": full_response,
                     "timestamp": time.time(),
@@ -476,7 +575,7 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
                 })
                 log_llm_response(session_id=session.id, response=full_response,
                              model=preset.get("model", ""))
-                yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
+                yield f"data: {json.dumps({'token': '', 'done': True, 'message_id': assistant_message_id, 'message_role': 'assistant'})}\n\n"
 
         except Exception as e:
             logger.error("[system_trigger] generation error: %s", e)

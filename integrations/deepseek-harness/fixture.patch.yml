@@ -1,0 +1,22 @@
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    personaPrefix: ''
+- id: llm-pi-ai
+  config:
+    providers:
+      fixture:
+        apiKeyEnv: FIXTURE_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:8090/v1
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+        models:
+          - id: fixture-model
+            contextWindow: 128000
+            maxTokens: 1024
+- insert:
+    - id: shikigami-contract-fixture
+      name: /opt/contract/tests/fixture-plugin.mjs

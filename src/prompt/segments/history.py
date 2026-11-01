@@ -14,13 +14,93 @@ back to group store only + [sender]: content for other AIs.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict, deque
+from datetime import datetime
 from typing import Any, Dict, List
 
+from src.llm.message_normalization import PromptMessage
 from src.memory.merged_history import get_merged_recent_messages
 from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 
 logger = logging.getLogger(__name__)
+
+
+def _format_timestamp(timestamp: Any) -> str:
+    try:
+        return datetime.fromtimestamp(float(timestamp)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def _single_provenance(merged, store, n_turns):
+    """Retain single-chat metadata across the legacy merged-history projection.
+
+    Keep the merger's ordering, caps and speech. Its group records lack a stable
+    store ID, so those need metadata forwarding in merged_history itself. Do not
+    infer status from speech or match across stores. Once the merger forwards
+    metadata this compatibility path is a no-op.
+    """
+    if not any(m.get("source", "single") == "single" and "generation_status" not in m
+               for m in merged):
+        return merged
+
+    def key(m):
+        return (m.get("timestamp"), m.get("role"), (m.get("content") or "").strip(),
+                (m.get("sender") or "").strip())
+
+    sources = defaultdict(deque)
+    for m in store.get_recent_with_ts(n_turns):
+        sources[key(m)].append(m)
+    result = []
+    # Newest-first matching handles a cap cutting through identical timestamped
+    # rows (the store and merger both retain chronological insertion order).
+    for m in reversed(merged):
+        item = dict(m)
+        if item.get("source", "single") == "single" and sources[key(item)]:
+            original = sources[key(item)].pop()
+            for field in ("id", "agent_run_id", "generation_status"):
+                if field in original:
+                    item.setdefault(field, original[field])
+        result.append(item)
+    return list(reversed(result))
+
+
+def _exclude_current_user_message(
+    formatted: List[Dict[str, str]],
+    source: List[Dict[str, Any]],
+    current_user_message: str,
+):
+    current_user_message = current_user_message or ""
+    if not formatted or not source or not current_user_message.strip():
+        return formatted, source
+    last_source = source[-1]
+    if (last_source.get("role") == "user"
+            and (last_source.get("content") or "").strip() == current_user_message.strip()):
+        return formatted[:-1], source[:-1]
+    return formatted, source
+
+
+def _result_with_time_sources(
+    formatted: List[Dict[str, str]],
+    source: List[Dict[str, Any]],
+    current_user_message: str,
+) -> SegmentResult:
+    formatted, source = _exclude_current_user_message(formatted, source, current_user_message)
+    # Reserve the index's system priority, but defer numbering until the final
+    # wire structure is known. Attributes never enter the store or JSON payload.
+    messages = ([PromptMessage({"role": "system", "content": ""},
+                               time_index_span=(0, 0))] if source else [])
+    for message, original in zip(formatted, source):
+        metadata = "历史 " + (_format_timestamp(original.get("timestamp")) or "时间未知")
+        status = original.get("generation_status", "completed")
+        if original.get("role") == "assistant" and status in ("cancelled", "failed"):
+            # Fixed, trusted metadata attached to this fragment survives role
+            # conversion/merging and is rendered only in the system time index.
+            metadata += (f"；AI 回复未完成（generation_status={status}），仅为部分输出，"
+                         "不代表任务或工具执行成功；不可据此重复有副作用的操作")
+        messages.append(PromptMessage(message, time_sources=(metadata,)))
+    return SegmentResult(messages=messages)
 
 
 def _transform_for_group_chat(
@@ -119,11 +199,12 @@ class HistorySegment(PromptSegment):
                     ctx.n_history_turns,
                     cap=None,
                 )
+                merged = _single_provenance(merged, ctx.session.conversation_store, ctx.n_history_turns)
                 msgs = _format_merged_for_group_chat(merged, reply_as, user_name, current_group_gname)
-                return SegmentResult(messages=msgs)
-            msgs = ctx.store.get_recent(ctx.n_history_turns)
-            msgs = _transform_for_group_chat(msgs, reply_as, user_name)
-            return SegmentResult(messages=msgs)
+                return _result_with_time_sources(msgs, merged, ctx.user_msg)
+            msgs = ctx.store.get_recent_with_ts(ctx.n_history_turns)
+            formatted = _transform_for_group_chat(msgs, reply_as, user_name)
+            return _result_with_time_sources(formatted, msgs, ctx.user_msg)
         merged = get_merged_recent_messages(
             ctx.session,
             app,
@@ -131,4 +212,6 @@ class HistorySegment(PromptSegment):
             ctx.n_history_turns,
             cap=None,
         )
-        return SegmentResult(messages=_format_merged_for_llm(merged))
+        merged = _single_provenance(merged, ctx.session.conversation_store, ctx.n_history_turns)
+        formatted = _format_merged_for_llm(merged)
+        return _result_with_time_sources(formatted, merged, ctx.user_msg)

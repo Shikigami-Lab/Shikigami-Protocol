@@ -905,6 +905,43 @@ textarea.form-input {
   resize: vertical;
 }
 .form-input[readonly] { opacity: 0.55; cursor: default; }
+.llm-model-picker-row { display: flex; align-items: center; gap: 8px; }
+.llm-model-input-wrap { position: relative; flex: 1; min-width: 0; }
+.llm-model-input-wrap .form-input { width: 100%; }
+.llm-model-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+}
+.llm-model-option {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.llm-model-option:hover,
+.llm-model-option.is-active { background: var(--accent-dim); }
+.llm-model-option.is-selected { color: var(--accent); }
+.llm-model-options-empty { padding: 8px 9px; color: var(--text-secondary); font-size: var(--set-fs-hint, 11px); }
+.llm-model-fetch-btn { flex: 0 0 auto; }
+.llm-model-status.is-success { color: var(--green, #4caf7d); }
+.llm-model-status.is-error { color: var(--red, #e55); }
 .form-select {
   width: 100%;
   background: var(--bg-app);
@@ -2431,6 +2468,20 @@ textarea.form-input {
 .toolbar-panel.tp-commands { width: 320px; }
 .toolbar-panel.tp-config   { width: 200px; }
 
+@media (max-width: 768px) {
+  .toolbar-panel.tp-todos {
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 .tp-header {
   display: flex;
   justify-content: space-between;
@@ -2509,6 +2560,9 @@ textarea.form-input {
 }
 .tp-item:hover { background: var(--accent-dim); }
 .tp-item.done .tp-text { text-decoration: line-through; opacity: 0.5; }
+.tp-todo-body { flex: 1; min-width: 0; }
+.tp-todo-body .tp-text { display: block; }
+.tp-todo-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .tp-check {
   cursor: pointer;
   width: 16px;
@@ -3832,3 +3886,11 @@ textarea.form-input {
   color: var(--text-tertiary);
   font-size: var(--fs-2xs);
 }
+/* Agent controls share the existing cards, inputs and button system. */
+.agent-settings-card { margin-bottom: var(--space-4); }
+.agent-settings-card > .form-hint { margin-bottom: var(--space-3); }
+.agent-settings-card .toggle-switch:focus-within .toggle-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agent-settings-model { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.agent-settings-model .form-input { flex: 1; min-width: 120px; }
+.agent-settings-advanced { border-top: 1px solid var(--border); margin-top: var(--space-3); padding-top: var(--space-3); }
+.agent-settings-advanced summary { cursor: pointer; color: var(--text-secondary); font-size: var(--fs-sm); }

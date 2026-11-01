@@ -2,21 +2,33 @@ name: Docker Build Test
 
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "master", "dev" ]
     paths:
       - 'Dockerfile'
       - 'docker-compose.yml'
       - 'requirements.txt'
       - 'requirements-ai.txt'
+      - '.dockerignore'
+      - 'package.json'
+      - 'config/**'
+      - 'static/**'
+      - '.github/workflows/docker-test.yml'
+      - '.github/workflows/release.yml'
+      - '.github/scripts/**'
       - 'src/**'
       - 'server.py'
   pull_request:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "master", "dev" ]
   workflow_dispatch: # 允许手动触发
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   docker-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     
     steps:
     - name: Checkout Code
@@ -25,11 +37,10 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        node-version: "22"
-        cache: 'npm'
+        python-version: "3.12"
 
     - name: Build Docker Image
       uses: docker/build-push-action@v5
@@ -40,24 +51,4 @@ jobs:
         tags: shikigami-protocol:test
 
     - name: Run Docker Container (Smoke Test)
-      run: |
-        # 复制配置示例以供测试
-        cp config/app.yaml.example config/app.yaml
-        cp .env.example .env
-        
-        # 运行容器并在后台执行
-        docker run -d -p 7788:7788 --name shikigami-test shikigami-protocol:test
-        
-        # 等待服务启动 (10秒)
-        sleep 10
-        
-        # 检查容器日志 (排查启动错误)
-        docker logs shikigami-test
-        
-        # 测试端口是否响应 (使用 curl 检查)
-        # 如果返回非 0 状态码，代表请求失败或服务未起
-        curl -f http://localhost:7788/ || echo "Server might not have a root endpoint, but port is open"
-
-    - name: Cleanup Container
-      if: always()
-      run: docker rm -f shikigami-test
+      run: python .github/scripts/docker_smoke.py --image shikigami-protocol:test --timeout 90

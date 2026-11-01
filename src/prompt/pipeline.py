@@ -24,6 +24,7 @@ _last_build_timings: Dict[str, Any] = {}
 from src.config.profile_loader import ProfileLoader
 from src.core.session import Session
 from src.memory.conversation_store import ConversationStore
+from src.llm.message_normalization import PromptMessage, normalize_messages
 from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat, targets_ase
 from src.prompt.macros import build_macro_table, expand_messages
 from src.prompt.registry import get_registered
@@ -262,8 +263,17 @@ def build_messages(
     if extra_system:
         sys_parts.append(extra_system.strip())
 
+    time_index_parts = None
     if sys_parts:
-        messages.append({"role": "system", "content": "\n\n".join(sys_parts)})
+        system_message = PromptMessage({"role": "system", "content": "\n\n".join(sys_parts)})
+        for index, (_, part) in enumerate(sys_with_priority):
+            if getattr(part, "time_index_span", None) is not None:
+                time_index_parts = (
+                    "\n\n".join(sys_parts[:index]) + ("\n\n" if index else ""),
+                    ("\n\n" if index + 1 < len(sys_parts) else "") + "\n\n".join(sys_parts[index + 1:]),
+                )
+                break
+        messages.append(system_message)
 
     messages.extend(prefix_non_system)
     messages.extend(history_msgs)
@@ -281,14 +291,16 @@ def build_messages(
             last_message_override = dict(last_message_override)
             orig = last_message_override.get("content", "")
             last_message_override["content"] = user_seg_text + ("\n\n" + orig if orig.strip() else "")
-        messages.append(last_message_override)
+        messages.append(PromptMessage(last_message_override,
+                                      time_sources=("当前请求（非历史时间）",)))
     else:
         final_user = user_seg_text + ("\n\n" + user_msg if user_msg and user_msg.strip() else "")
         final_user = final_user.strip()
         # 群聊等场景下 store 已先 append 了当前 user 消息，history 末尾已是 user_msg，避免重复
         last = messages[-1] if messages else None
         if not (last and last.get("role") == "user" and (last.get("content") or "").strip() == (final_user or "").strip()):
-            messages.append({"role": "user", "content": final_user})
+            messages.append(PromptMessage({"role": "user", "content": final_user},
+                                          time_sources=("当前请求（非历史时间）",)))
 
     # SillyTavern macro expansion: text imported from character cards usually says {{char}}/{{user}}
     # instead of names. Expanding at the exit covers every source at once (persona, style constraints,
@@ -296,7 +308,7 @@ def build_messages(
     # In group chat {{char}} is the character currently replying, not the session itself.
     _up_profile = (profile.get("user_persona") or {})
     _up_global = extras.get("user_persona_global") or {}
-    messages = expand_messages(messages, build_macro_table(
+    macro_table = build_macro_table(
         char_name=(extras.get("group_reply_as_sender")
                    or getattr(session, "display_name", "") or ""),
         user_name=(extras.get("group_user_name")
@@ -305,7 +317,25 @@ def build_messages(
                    or extras.get("user_name") or ""),
         persona=(_up_profile.get("introduction")
                  or _up_global.get("introduction") or ""),
-    ))
+    )
+    messages = expand_messages(messages, macro_table)
+    if time_index_parts is not None:
+        expanded = expand_messages([{"role": "system", "content": part} for part in time_index_parts], macro_table)
+        before, after = (part["content"] for part in expanded)
+        system_message["content"] = before + after
+        system_message.time_index_span = (len(before), len(before))
+
+    # Preview the same index the provider would send now, but keep raw turns and
+    # provenance: timer/system_trigger callers still remove or replace the last
+    # user turn. The provider rebuilds the index after those edits. Existing call
+    # logs describe this pre-normalization list, not a capture of the wire payload.
+    wire_systems = [m for m in normalize_messages(messages) if m["role"] == "system"]
+    for message, wire in zip((m for m in messages if m["role"] == "system"), wire_systems):
+        span = getattr(message, "time_index_span", None)
+        if span is not None:
+            start, end = span
+            message.time_index_span = (start, end + len(wire["content"]) - len(message["content"]))
+        message["content"] = wire["content"]
 
     _last_build_timings["assemble_ms"] = round((time.perf_counter() - assemble_start) * 1000, 2)
     _last_build_timings["total_build_ms"] = round((time.perf_counter() - build_start) * 1000, 2)

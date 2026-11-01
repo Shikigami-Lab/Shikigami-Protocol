@@ -76,6 +76,8 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         self.storage_root = tmp.name
         self.pushed = []
         self.stored = []
+        self.stored_ids = []
+        self._next_message_id = 41
         config = SimpleNamespace(
             get_ase_config=lambda: {},
             get_vlm_config=lambda: {},
@@ -89,11 +91,19 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
             storage_root=self.storage_root,
             last_user_message_time=0.0,
             conversation_store=SimpleNamespace(
-                append=lambda role, content, sender="": self.stored.append((role, content))
+                append=self._append_message
             ),
             reflection_state={"urgency": 0.9, "thought": "-"},
             save_runtime_state=lambda: None,
         )
+
+    def _append_message(self, role, content, sender=""):
+        """Like ConversationStore.append, persist a row and return its integer ID."""
+        message_id = self._next_message_id
+        self._next_message_id += 1
+        self.stored.append((role, content))
+        self.stored_ids.append(message_id)
+        return message_id
 
     async def _speak(self, tokens):
         async def push(session_id, data, exclude=None):
@@ -148,6 +158,18 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.stored)
         self.assertEqual({}, self.engine._state.get("p1", {}))
         self.assertEqual(0.0, self.session.reflection_state["urgency"])
+
+    async def test_broadcast_uses_stored_ids_for_streamed_and_held_replies(self):
+        await self._speak(["Hello", " there."])
+        await self._speak(["(", "sil"])
+
+        messages = [p for p in self.pushed if p.get("type") == "new_message"]
+        self.assertEqual(2, len(messages))
+        self.assertEqual([41, 42], self.stored_ids)
+        self.assertEqual(self.stored_ids, [p.get("message_id") for p in messages])
+        self.assertEqual(self.stored, [(p["role"], p["content"]) for p in messages])
+        completed = [p for p in self.pushed if "token" in p and p.get("done")]
+        self.assertEqual(self.stored_ids, [p.get("message_id") for p in completed])
 
     async def test_reply_held_back_until_the_end_is_still_sent(self):
         await self._speak(["(", "sil"])

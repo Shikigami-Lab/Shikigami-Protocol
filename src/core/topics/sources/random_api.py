@@ -7,6 +7,7 @@
 拉取到的条目写入 profiles/<id>/topic_random_cache.json（带生成 ID + 时间戳），
 resolve 读缓存。builtin 无网络、零成本，每次缺候选即时补；http 的同步请求会阻塞
 事件循环，故放到后台线程拉取、写缓存，本轮先用旧缓存，下个自省周期再取到新内容。
+已用话题正文保存在同一缓存中，按 recent_used_window 去重；内置小题库至少保留一条可抽。
 """
 import asyncio
 import json
@@ -36,6 +37,30 @@ _BUILTIN_POOLS = {
         "如果可以瞬间学会一项技能，你会选什么？",
         "你理想中一个完全放空的周末是什么样子？",
         "最近有什么东西特别想买，又一直没下手？",
+        "今天有没有一个瞬间，你想把它偷偷存档？",
+        "最近有没有一首歌，听到前奏就不想切走？",
+        "要给现在的心情配一种天气，你会选哪种？",
+        "如果今晚只做一件让自己舒服的事，你想做什么？",
+        "有没有一种味道，会让你一下子想起某个地方？",
+        "最近你对什么东西突然有了点好奇？",
+        "如果把今天剪成一分钟短片，你会留下哪一幕？",
+        "有没有一件看起来很普通、你却很喜欢的小东西？",
+        "如果我们开一家没什么正经生意的小店，你想卖什么？",
+        "有什么事情你不擅长，但做起来还是挺开心？",
+        "如果给你的房间加一个完全没必要的功能，你想加什么？",
+        "你有什么别人觉得奇怪、自己却很享受的小习惯？",
+        "最近看到过哪句话，想多停留一会儿？",
+        "你有没有一个想去看看、暂时还没计划的地方？",
+        "如果能重新体验某个游戏、电影或故事的第一次，你会选哪个？",
+        "有什么小技能，虽然派不上大用场，你还是很想学？",
+        "如果给今天起个名字，你觉得它叫什么？",
+        "你喜欢怎样的背景声音：雨声、咖啡馆，还是安静一点？",
+        "有没有一种小时候喜欢的东西，现在还会让你开心？",
+        "如果突然收到一张不用赶路的车票，你想在哪里下车？",
+        "要给现在的自己准备一个小礼物，你会选什么？",
+        "你有没有特别喜欢的一段路，哪怕它没什么风景？",
+        "有什么东西你愿意花时间慢慢做，完全不追求效率？",
+        "如果今天可以删掉一个小麻烦，你想删掉哪个？",
     ],
     "trivia": [
         "章鱼有三颗心脏，其中两颗在它游泳时会停跳。",
@@ -52,8 +77,37 @@ _BUILTIN_POOLS = {
         "你会选一直是夏天，还是一直是冬天？",
         "你会选读懂所有动物的话，还是会说所有人类的语言？",
         "你会选记住读过的每一本书，还是记住去过的每一个地方？",
+        "你会选一间能看海的房间，还是一间能听雨的房间？",
+        "你会选每天多一小时独处，还是每周多一个完全自由的下午？",
+        "你会选随时把东西找到，还是让所有设备永远不用充电？",
+        "你会选在熟悉的城市发现秘密小巷，还是去陌生的小镇住一周？",
+        "你会选有一只会聊天的猫，还是一盆会吐槽的植物？",
+        "你会选每次做饭都刚刚好，还是每次拍照都拍到想要的样子？",
+        "你会选把梦录下来，还是把脑中的画面直接画出来？",
+        "你会选一辆开往任意海边的车，还是一扇通往任意书店的门？",
+        "你会选生活里自带背景音乐，还是偶尔出现只有你看得见的字幕？",
+        "你会选把房间变成森林小屋，还是变成宇宙飞船的休息舱？",
+        "你会选随时暂停十分钟，还是每天撤回一句刚说出口的话？",
+        "你会选和喜欢的作者吃顿饭，还是进入喜欢的故事里待一天？",
+        "你会选每周试一种没吃过的食物，还是每月学一种没碰过的爱好？",
+        "你会选随时知道植物缺什么，还是随时知道宠物在想什么？",
+        "你会选窗外永远是喜欢的风景，还是门外总能遇到有趣的小店？",
+        "你会选把讨厌的家务瞬间做完，还是让所有排队都只等一分钟？",
+        "你会选去过去看看一座城市，还是去未来看看一片森林？",
+        "你会选一整天没人打扰，还是有人陪你漫无目的地逛一天？",
+        "你会选做东西时灵感不断，还是想休息时马上就能放松？",
+        "你会选拥有随时变得安静的耳机，还是随时能变舒服的椅子？",
+        "你会选一次非常惊喜的旅行，还是十次熟悉又舒服的小出门？",
+        "你会选亲手做一份小礼物，还是一起完成一件没做过的小事？",
+        "你会选在山顶看日出，还是在海边等日落？",
+        "你会选家里有一间秘密图书馆，还是有一个四季都能用的小花园？",
     ],
 }
+
+
+def _builtin_pool(src_cfg: dict) -> list[str]:
+    pool_name = (src_cfg.get("builtin_pool") or "icebreaker").strip()
+    return _BUILTIN_POOLS.get(pool_name) or _BUILTIN_POOLS["icebreaker"]
 
 
 @register_topic_source
@@ -77,9 +131,10 @@ class RandomApiTopicSource(TopicSource):
                 data = json.load(f)
             data.setdefault("items", {})
             data.setdefault("last_fetch_at", 0.0)
+            data.setdefault("recent_texts", [])
             return data
         except Exception:
-            return {"items": {}, "last_fetch_at": 0.0}
+            return {"items": {}, "last_fetch_at": 0.0, "recent_texts": []}
 
     def _save_cache(self, storage_root: str, cache: dict) -> None:
         path = self._cache_path(storage_root)
@@ -108,11 +163,11 @@ class RandomApiTopicSource(TopicSource):
         return iid
 
     # ── fetch ────────────────────────────────────────────────────────────────
-    def _fetch_builtin(self, src_cfg: dict) -> str:
-        """从内置题库随机取一条（本地、零成本）。"""
-        pool_name = (src_cfg.get("builtin_pool") or "icebreaker").strip()
-        pool = _BUILTIN_POOLS.get(pool_name) or _BUILTIN_POOLS["icebreaker"]
-        return random.choice(pool)
+    def _fetch_builtin(self, src_cfg: dict, recent_texts: Optional[list[str]] = None) -> str:
+        """从内置题库随机取一条，避开近期已经使用的正文。"""
+        pool = _builtin_pool(src_cfg)
+        available = [text for text in pool if text not in (recent_texts or [])]
+        return random.choice(available or pool)
 
     def _schedule_http_fetch(self, storage_root: str, src_cfg: dict) -> None:
         """把同步 http 拉取丢到后台线程，避免阻塞自省所在的事件循环。"""
@@ -153,16 +208,29 @@ class RandomApiTopicSource(TopicSource):
         storage_root = ctx.storage_root
         cache = self._load_cache(storage_root)
         items: dict = cache["items"]
-        usable = [iid for iid in items if f"random_api:{iid}" not in ctx.recently_used]
+        mode = (src_cfg.get("mode") or "builtin").strip()
+        window = max(0, int(ctx.config.get("recent_used_window", 10)))
+        recent_texts = cache["recent_texts"]
+        pool = None if mode == "http" else _builtin_pool(src_cfg)
+        if pool is not None:
+            recent_texts = [text for text in recent_texts if text in pool]
+            window = min(window, len(pool) - 1)
+        recent_texts = recent_texts[-window:] if window else []
+        usable = [
+            iid for iid, entry in items.items()
+            if f"random_api:{iid}" not in ctx.recently_used
+            and (entry.get("text") or "").strip() not in recent_texts
+            and (pool is None or (entry.get("text") or "").strip() in pool)
+        ]
 
-        if (src_cfg.get("mode") or "builtin").strip() == "http":
+        if mode == "http":
             # http：同步请求会阻塞事件循环 —— 缺候选或缓存过期时后台线程补，本轮先用旧缓存
             stale = (time.time() - cache.get("last_fetch_at", 0.0)) > _REFRESH_SECS
             if not usable or stale:
                 self._schedule_http_fetch(storage_root, src_cfg)
         elif not usable:
             # builtin：本地题库零成本，缺候选就即时补一条
-            iid = self._cache_add(storage_root, self._fetch_builtin(src_cfg))
+            iid = self._cache_add(storage_root, self._fetch_builtin(src_cfg, recent_texts))
             items = self._load_cache(storage_root)["items"]
             usable.append(iid)
 
@@ -183,7 +251,14 @@ class RandomApiTopicSource(TopicSource):
 
     def mark_used(self, item_id: str, ctx: TopicSourceContext) -> None:
         cache = self._load_cache(ctx.storage_root)
-        if cache["items"].pop(item_id, None) is not None:
+        entry = cache["items"].pop(item_id, None)
+        if entry is not None:
+            text = (entry.get("text") or "").strip()
+            window = max(0, int(ctx.config.get("recent_used_window", 10)))
+            recent_texts = [previous for previous in cache["recent_texts"] if previous != text]
+            if text:
+                recent_texts.append(text)
+            cache["recent_texts"] = recent_texts[-window:] if window else []
             self._save_cache(ctx.storage_root, cache)
 
 

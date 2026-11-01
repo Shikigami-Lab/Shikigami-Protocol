@@ -176,8 +176,8 @@
   "chaos_config": {
     "enabled": false
   },
-  "gpt_sovits_ref_audio_path": "Voices\\example_luna_voice.wav",
-  "qwen3_tts_ref_audio_path": "Voices\\example_luna_voice.wav",
-  "gpt_sovits_ref_text": "大概率适用，而且是“核心问题层面”的适用，不只是改了某个模式的 UI 文案。",
-  "qwen3_tts_ref_text": "大概率适用，而且是“核心问题层面”的适用，不只是改了某个模式的 UI 文案。"
+  "gpt_sovits_ref_audio_path": "",
+  "qwen3_tts_ref_audio_path": "",
+  "gpt_sovits_ref_text": "",
+  "qwen3_tts_ref_text": ""
 }

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from src.core.broadcast import broadcast
 from src.utils.debug_logger import log_session_switch, log_session_create, log_backup, log_error
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,9 @@ async def clear_session_history(
                         pass
     else:
         store.clear()
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime:
+        await runtime.invalidate(session.profile_id)
     return {"ok": True}
 
 
@@ -120,6 +124,9 @@ async def delete_messages_from(session_id: str, msg_idx: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     store.delete_from_index(msg_idx)
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime:
+        await runtime.invalidate(session.profile_id)
     return {"ok": True}
 
 
@@ -132,6 +139,13 @@ async def delete_message_by_id(session_id: str, msg_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     if hasattr(store, "delete_by_id") and store.delete_by_id(msg_id):
+        runtime = getattr(request.app.state, "agent_runtime", None)
+        if runtime:
+            await runtime.invalidate(session.profile_id)
+        await broadcast.push(session_id, {
+            "type": "message_deleted",
+            "message_id": msg_id,
+        })
         return {"ok": True}
     raise HTTPException(status_code=404, detail="Message not found")
 
@@ -145,6 +159,9 @@ async def delete_message(session_id: str, msg_idx: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     store.delete_at_index(msg_idx)
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime:
+        await runtime.invalidate(session.profile_id)
     return {"ok": True}
 
 

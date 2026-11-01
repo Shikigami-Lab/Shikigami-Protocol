@@ -129,6 +129,40 @@ async def get_llm_presets(request: Request):
     }
 
 
+@router.get("/settings/llm/presets/{name}/models")
+async def list_llm_preset_models(name: str, request: Request):
+    """List model IDs available to a saved LLM preset without exposing its API key."""
+    config = request.app.state.config
+    preset = config.llm_presets.get(name)
+    if not preset:
+        raise HTTPException(status_code=404, detail={"code": "preset_not_found"})
+
+    try:
+        provider = get_provider(preset)
+        list_models = getattr(provider, "list_models", None)
+        if not callable(list_models):
+            raise HTTPException(status_code=501, detail={"code": "model_listing_unsupported"})
+        return {"models": await list_models()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        upstream_status = getattr(exc, "status_code", None)
+        logger.warning(
+            "[settings] model discovery failed for preset %s (%s)",
+            name,
+            upstream_status or type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": {
+                    "code": "model_discovery_failed",
+                    "upstream_status": upstream_status,
+                }
+            },
+        )
+
+
 class LLMPresetBody(BaseModel):
     name: str
     type: str = "openai_compat"
@@ -1234,6 +1268,10 @@ async def delete_profile(profile_id: str, request: Request):
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime:
+        await runtime.invalidate(profile_id)
 
     # If profile is active, switch away first (so periodic engines won't keep references)
     # If deleting the active profile, switch to another one first
