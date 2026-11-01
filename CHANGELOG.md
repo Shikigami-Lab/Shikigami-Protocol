@@ -10,6 +10,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- [Windows] A peer reset during asyncio transport shutdown (WinError 10054) no longer interrupts socket release or floods the server log with cleanup tracebacks. Other transport and application errors remain visible.
+- [Memory] `daily_reinforcement_enabled` shipped as `true` but the feature never ran. The fact ids injected into a prompt are written to `ctx.extras` inside `build_messages`, which merges the caller's dict into a new one, so `shown_fact_ids` never reached the chat handler and `used_fact_ids_by_date` was never recorded — every daily run reported `reinforce_count: 0`. The shipped default is now `false` so the config matches actual behaviour; weight decay is unaffected.
+
 ### Planned
 
 ### Known Issues
