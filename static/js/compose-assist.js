@@ -1,4 +1,4 @@
-/* Composer-only AI writing actions. Generated text is never sent automatically. */
+/* Reply drafts require Apply; explicit continuation creates the next character reply. */
 window.ComposeAssistMixin = {
   data() {
     return {
@@ -13,7 +13,7 @@ window.ComposeAssistMixin = {
       composeAssistTargetProfileId: '',
       composeAssistSessionId: '',
       composeAssistGroupId: '',
-      _composeAssistController: null,
+      composeAssistController: null,
     };
   },
   watch: {
@@ -22,7 +22,7 @@ window.ComposeAssistMixin = {
   },
   unmounted() { this.closeComposeAssist(false); },
   methods: {
-    _composeAssistTarget() {
+    composeAssistTarget() {
       const message = [...(this.messages || [])].reverse().find(item =>
         item.role === 'assistant' && item.id != null && !item._streaming && (item.content || '').trim());
       if (!message) return null;
@@ -36,12 +36,12 @@ window.ComposeAssistMixin = {
       if (matches.length !== 1) return null;
       return { messageId: message.id, profileId: matches[0].profile_id };
     },
-    _composeAssistIsCurrent() {
+    composeAssistIsCurrent() {
       if (this.inputText !== this.composeAssistBaseDraft ||
           (this.currentSessionId || '') !== this.composeAssistSessionId ||
           (this.currentGroupId || '') !== this.composeAssistGroupId) return false;
       if (this.composeAssistTargetMessageId == null) return true;
-      const target = this._composeAssistTarget();
+      const target = this.composeAssistTarget();
       return !!target && target.messageId === this.composeAssistTargetMessageId &&
         target.profileId === this.composeAssistTargetProfileId;
     },
@@ -51,15 +51,12 @@ window.ComposeAssistMixin = {
         return;
       }
       const draft = this.inputText || '';
-      const target = this._composeAssistTarget();
-      if (mode === 'continue' && !draft.trim()) {
-        this.showToast?.(this.t('composeAssistNeedDraft'), 'error');
-        return;
-      }
-      if ((mode === 'reply' || this.currentGroupId) && !target) {
+      const target = this.composeAssistTarget();
+      if (!target) {
         this.showToast?.(this.t('composeAssistNeedTarget'), 'error');
         return;
       }
+      this.closeComposeAssist(false);
       this.showCommandsPanel = false;
       this.composeAssistMode = mode;
       this.composeAssistInstruction = '';
@@ -71,10 +68,13 @@ window.ComposeAssistMixin = {
       this.composeAssistSessionId = this.currentSessionId || '';
       this.composeAssistGroupId = this.currentGroupId || '';
       this.composeAssistOpen = true;
-      this.$nextTick(() => this.$refs.composeAssistInstruction?.focus());
+      this.$nextTick(() => {
+        if (mode === 'continue') this.generateComposeAssist();
+        else this.$refs.composeAssistInstruction?.focus();
+      });
     },
     async generateComposeAssist() {
-      if (this.composeAssistBusy || !this._composeAssistIsCurrent()) {
+      if (this.composeAssistBusy || !this.composeAssistIsCurrent()) {
         this.composeAssistError = this.t('composeAssistContextChanged');
         return;
       }
@@ -82,7 +82,7 @@ window.ComposeAssistMixin = {
       this.composeAssistCandidate = '';
       this.composeAssistError = '';
       const controller = new AbortController();
-      this._composeAssistController = controller;
+      this.composeAssistController = controller;
       try {
         const response = await fetch(getBaseUrl() + API_PATHS.chatComposeAssist(), {
           method: 'POST',
@@ -94,32 +94,40 @@ window.ComposeAssistMixin = {
             group_id: this.composeAssistGroupId || null,
             target_message_id: this.composeAssistTargetMessageId,
             target_profile_id: this.composeAssistTargetProfileId || null,
-            draft: this.composeAssistBaseDraft,
+            draft: this.composeAssistMode === 'continue' ? '' : this.composeAssistBaseDraft,
             instruction: this.composeAssistInstruction.trim(),
           }),
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || this.t('composeAssistFailed'));
-        if (!this._composeAssistIsCurrent()) {
+        if (this.composeAssistController !== controller || !this.composeAssistOpen) return;
+        if (this.composeAssistMode !== 'continue' && !this.composeAssistIsCurrent()) {
           this.composeAssistError = this.t('composeAssistContextChanged');
           return;
         }
         const generated = (data.text || '').trim();
         if (!generated) throw new Error(this.t('composeAssistFailed'));
-        this.composeAssistCandidate = this.composeAssistMode === 'continue'
-          ? this.composeAssistBaseDraft.replace(/\s+$/, '') + '\n\n' + generated
-          : generated;
+        if (this.composeAssistMode === 'continue') {
+          const groupId = this.composeAssistGroupId;
+          const sessionId = this.composeAssistSessionId;
+          this.closeComposeAssist(false);
+          if (groupId) await this.loadGroupHistory(groupId);
+          else await this.loadHistory(sessionId);
+          this.$nextTick(() => this.scrollToBottom?.());
+        } else {
+          this.composeAssistCandidate = generated;
+        }
       } catch (error) {
-        if (error.name !== 'AbortError') this.composeAssistError = error.message || this.t('composeAssistFailed');
+        if (this.composeAssistController === controller && error.name !== 'AbortError') this.composeAssistError = error.message || this.t('composeAssistFailed');
       } finally {
-        if (this._composeAssistController === controller) {
-          this._composeAssistController = null;
+        if (this.composeAssistController === controller) {
+          this.composeAssistController = null;
           this.composeAssistBusy = false;
         }
       }
     },
     applyComposeAssist() {
-      if (!this.composeAssistCandidate || !this._composeAssistIsCurrent()) {
+      if (!this.composeAssistCandidate || !this.composeAssistIsCurrent()) {
         this.composeAssistError = this.t('composeAssistContextChanged');
         return;
       }
@@ -128,8 +136,8 @@ window.ComposeAssistMixin = {
       this.$nextTick(() => this.$refs.chatTextarea?.focus());
     },
     closeComposeAssist(restoreFocus = true) {
-      if (this._composeAssistController) this._composeAssistController.abort();
-      this._composeAssistController = null;
+      if (this.composeAssistController) this.composeAssistController.abort();
+      this.composeAssistController = null;
       this.composeAssistOpen = false;
       this.composeAssistBusy = false;
       if (restoreFocus) this.$nextTick(() => this.$refs.chatTextarea?.focus());

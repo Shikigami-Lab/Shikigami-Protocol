@@ -1,4 +1,5 @@
-"""Draft writing assistance for the chat composer; never writes chat history."""
+"""User reply drafts and explicit continuation of the last character reply."""
+import time
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field
 from src.config.effective_config import get_effective_max_history_turns
 from src.config.profile_loader import ProfileLoader
 from src.core.session import Session
+from src.core.broadcast import broadcast
 from src.llm.registry import get_provider
 from src.prompt.pipeline import build_messages
 
@@ -30,16 +32,14 @@ def _latest_assistant(store):
     return None
 
 
-def _task_prompt(body: ComposeAssistRequest) -> str:
+def _task_prompt(body: ComposeAssistRequest, target: dict) -> str:
     instruction = body.instruction.strip()
     if body.mode == "continue":
-        if not body.draft.strip():
-            raise HTTPException(status_code=422, detail="Write a draft before asking AI to continue it")
         return (
-            "Writing command: continue the user's unfinished draft. Return only new text that follows its ending; "
-            "do not repeat the draft, add a preface, or send anything to the chat. Preserve its language and voice.\n\n"
-            f"Current draft:\n{body.draft}\n\n"
-            + (f"Optional instruction: {instruction}" if instruction else "")
+            "Continue your previous character reply from where it ended, as the same character. "
+            "Write only the next part. Preserve its language, voice and scene; do not repeat it, "
+            "introduce a user action or add a preface.\n\n"
+            f"Previous character reply:\n{target['content']}"
         )
     if body.target_message_id is None:
         raise HTTPException(status_code=422, detail="A character message is required to draft a reply")
@@ -101,7 +101,7 @@ def _group_context(request: Request, body: ComposeAssistRequest, target: dict):
 
 @router.post("/compose-assist")
 async def compose_assist(request: Request, body: ComposeAssistRequest):
-    """Use the active model and current character context to propose editable text."""
+    """Use the active model to draft a user reply or continue the character."""
     config = request.app.state.config
     preset = config.get_active_llm_preset()
     if not preset or not preset.get("base_url") or not preset.get("model"):
@@ -119,24 +119,33 @@ async def compose_assist(request: Request, body: ComposeAssistRequest):
             target = _latest_assistant(store)
             session, store, group_options = _group_context(request, body, target)
         else:
-            raise HTTPException(status_code=422, detail="Choose a character message before continuing a group-chat draft")
+            raise HTTPException(status_code=422, detail="A character message is required for continuation")
     else:
         session = request.app.state.session_manager.get_by_id(body.session_id)
         if session is None or session.id != body.session_id:
             raise HTTPException(status_code=404, detail="Chat session was not found")
         store = session.conversation_store
-        if body.mode == "reply":
-            target = _latest_assistant(store)
-            if target is None or target.get("id") != body.target_message_id:
-                raise HTTPException(status_code=409, detail="The character message changed; reopen the command")
+        target = _latest_assistant(store)
+        if target is None or target.get("id") != body.target_message_id:
+            raise HTTPException(status_code=409, detail="The character message changed; reopen the command")
+
+    anchor = store.get_page_with_id(1, 0)
+    anchor_id = anchor[-1]["id"] if anchor else None
+    if body.mode == "continue" and anchor_id != target["id"]:
+        raise HTTPException(status_code=409, detail="The latest message must be a character reply to continue it")
 
     from src.api.memory import _get_or_create_manager
     _get_or_create_manager(request, session.profile_id)
-    prompt = _task_prompt(body)
+    prompt = _task_prompt(body, target)
+    writing_role = (
+        "Continue speaking as the character. The request is to extend your previous reply, not to draft a user reply."
+        if body.mode == "continue" else
+        "You are helping the user prepare an unsent chat draft. Write from the user's perspective; "
+        "do not answer as the character, do not claim the draft was sent, and do not add commentary."
+    )
     group_options["extra_system"] = (
         (group_options.get("extra_system") or "")
-        + "\n\nYou are helping the user prepare an unsent chat draft. Write from the user's perspective; "
-        "do not answer as the character, do not claim the draft was sent, and do not add commentary."
+        + "\n\n" + writing_role
     ).strip()
     messages = build_messages(
         session,
@@ -154,4 +163,16 @@ async def compose_assist(request: Request, body: ComposeAssistRequest):
         raise HTTPException(status_code=502, detail="Writing assistance could not reach the configured model") from exc
     if not result or result.startswith("[LLM Error:"):
         raise HTTPException(status_code=502, detail="The model did not return a usable draft")
+    if body.mode == "continue":
+        disconnected = await request.is_disconnected()
+        current = store.get_page_with_id(1, 0)
+        if disconnected or not current or current[-1]["id"] != anchor_id:
+            raise HTTPException(status_code=409, detail="The chat changed or continuation was cancelled; no reply was saved")
+        sender = target.get("sender") or session.display_name or ""
+        message_id = store.append("assistant", result, sender=sender)
+        await broadcast.push(f"group:{body.group_id}" if body.group_id else session.id, {
+            "type": "new_message", "message_id": message_id, "role": "assistant",
+            "content": result, "sender": sender, "timestamp": time.time(), "client_id": "",
+        })
+        return {"text": result, "mode": body.mode, "message_id": message_id}
     return {"text": result, "mode": body.mode}
