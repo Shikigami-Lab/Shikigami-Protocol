@@ -121,7 +121,10 @@ class AgentTodoTests(unittest.IsolatedAsyncioTestCase):
 class TodoMCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_scoped_catalog_and_write_annotations(self):
         from unittest.mock import AsyncMock
-        from tests.test_agent_business_tools import business_client
+        if __package__:
+            from .test_agent_business_tools import business_client
+        else:
+            from test_agent_business_tools import business_client
         from src.agent.todo_tools import TODO_TOOLS
         callback = AsyncMock(return_value={'ok': True})
         async with business_client(callback, TODO_TOOLS) as client:
