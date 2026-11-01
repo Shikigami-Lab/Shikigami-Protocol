@@ -42,6 +42,10 @@ def artifact_preview(files):
     """Keep whole paths and reserve space for the rest of the 8KB run event."""
     result = []
     for file in files[:20]:
+        # Filenames may resemble credentials. Leave such files reachable in
+        # the scoped workspace inventory, without breaking the receipt commit.
+        if _SECRET.search(str(file.get('path', ''))):
+            continue
         candidate = result + [file]
         if len(json.dumps(candidate, ensure_ascii=False).encode()) > 4000:
             break

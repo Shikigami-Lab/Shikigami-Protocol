@@ -72,6 +72,29 @@ class ReflectionResultTests(unittest.IsolatedAsyncioTestCase):
     async def reflect(self):
         await self.engine._reflect(self.session, {})
 
+    async def test_pending_character_plans_are_reflection_data_not_user_todos(self):
+        from src.tools.todo.store import TodoStore
+        store = TodoStore(self.session.storage_root)
+        store.add('Synthetic user responsibility')
+        store.add('Synthetic unfinished fox drawing', owner='ai')
+        self.runtime.access_for = mock.Mock(return_value={'todo_enabled': True})
+        self.runtime.settings = {'enabled': True}
+        await self.reflect()
+        system = self.provider.chat.call_args.args[0][0]['content']
+        self.assertIn('Synthetic unfinished fox drawing', system)
+        self.assertNotIn('Synthetic user responsibility', system)
+
+    async def test_pending_plan_can_be_considered_without_recent_chat(self):
+        from src.tools.todo.store import TodoStore
+        self.session._store.get_recent.return_value = []
+        self.rows[:] = []
+        TodoStore(self.session.storage_root).add('Synthetic ongoing project', owner='ai')
+        self.runtime.access_for = mock.Mock(return_value={'todo_enabled': True})
+        self.runtime.settings = {'enabled': True}
+        await self.reflect()
+        self.provider.chat.assert_awaited_once()
+        self.assertIn('Synthetic ongoing project', self.provider.chat.call_args.args[0][0]['content'])
+
     async def test_saved_reflection_starts_real_runtime_and_result_does_not_loop(self):
         from src.agent.runtime import AgentRuntime
         self.session.id = self.session.profile_id

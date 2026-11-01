@@ -47,6 +47,9 @@
 .agent-file-button small { color: var(--text-secondary); }
 .agent-file-button[aria-pressed="true"] { border-color: var(--border); background: var(--bg-panel); color: var(--text-primary); }
 .agent-file-preview { min-width: 0; overflow-wrap: anywhere; }
+.agent-file-metadata fieldset { display: grid; gap: var(--space-2); min-width: 0; margin: var(--space-2) 0; padding: 0; border: 0; }
+.agent-file-metadata textarea { resize: vertical; }
+.todo-list button.tp-check { padding: 0; border: 0; background: transparent; font: inherit; }
 .agent-file-preview .agent-actions strong { min-width: 0; max-width: 100%; }
 .agent-file-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: var(--fs-xs); padding: var(--space-2); background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .agent-file-preview img { display: block; max-width: 100%; max-height: 220px; object-fit: contain; margin: var(--space-2) 0; }

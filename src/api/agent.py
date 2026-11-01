@@ -30,6 +30,7 @@ class SettingsPatch(BaseModel):
     code_enabled: Optional[bool] = Field(default=None, strict=True)
     web_enabled: Optional[bool] = Field(default=None, strict=True)
     history_enabled: Optional[bool] = Field(default=None, strict=True)
+    todo_enabled: Optional[bool] = Field(default=None, strict=True)
     autonomy_enabled: Optional[bool] = Field(default=None, strict=True)
     autonomy_interval_seconds: Optional[int] = Field(default=None, strict=True, ge=60, le=86400)
     autonomy_max_requests_per_hour: Optional[int] = Field(default=None, strict=True, ge=1, le=128)
@@ -66,7 +67,7 @@ async def patch_settings(request: Request, body: SettingsPatch):
         raise HTTPException(422, str(error)) from None
     save_settings(runtime.root / "config" / "app.yaml", value)
     request.app.state.config.agent = value
-    revoked = [key for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled')
+    revoked = [key for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled')
                if previous.get(key) and not value[key]]
     autonomy_revoked = previous['autonomy_enabled'] and not value['autonomy_enabled']
     if not value['enabled'] or revoked or autonomy_revoked:

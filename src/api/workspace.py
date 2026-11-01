@@ -11,6 +11,7 @@ from starlette.formparsers import MultiPartException, MultiPartParser
 
 from src.agent import workspace
 from src.api.agent import _runtime, _same_origin
+from src.agent.workspace_catalog import FileDescription
 
 router = APIRouter(prefix="/api/agent/workspace", dependencies=[Depends(_same_origin)])
 
@@ -61,12 +62,26 @@ def _mutation(runtime, profile_id):
 @router.get("/files")
 async def files(request: Request, profile_id: str):
     with _errors():
-        inventory = _profile(request, profile_id).workspaces.inventory(profile_id)
+        runtime = _profile(request, profile_id)
+        inventory = runtime.catalog.inventory(profile_id)
         total = sum(row["size"] for row in inventory["files"])
         return {**inventory, "total_bytes": total,
                 "total_bytes_is_lower_bound": inventory["truncated"],
                 "over_byte_limit": True if total > workspace.MAX_WORKSPACE_BYTES else
                     None if inventory["truncated"] else False}
+
+
+class Metadata(FileDescription):
+    profile_id: str = Field(min_length=1, max_length=256)
+
+
+@router.patch('/metadata')
+async def metadata(request: Request, body: Metadata):
+    with _errors():
+        runtime = _profile(request, body.profile_id)
+        with _mutation(runtime, body.profile_id):
+            file = runtime.catalog.describe(body.profile_id, **body.model_dump(exclude={'profile_id'}))
+        return {'ok': True, 'file': file}
 
 
 @router.get("/snapshot")

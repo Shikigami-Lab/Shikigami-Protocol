@@ -7,7 +7,9 @@
     const nativeName = String(name || '').replace(/^mcp__shikigami__/, '');
     return Object.prototype.hasOwnProperty.call(actions, nativeName) ? actions[nativeName] : '';
   };
-  const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled'];
+  const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled'];
+  const workspaceTabs = ['files', 'plans', 'tasks'];
+  const fileCategories = ['note', 'work', 'material', 'other'];
   const textOf = value => typeof value === 'string' ? value : (value == null ? '' : JSON.stringify(value, null, 2));
   const keyOf = run => JSON.stringify([run.profile_id, run.session_id, run.run_id || run.id]);
   const visibleRuns = (runs, profile, session) => Object.values(runs)
@@ -50,6 +52,7 @@
       agentWorkspaceTab: 'files', agentDrawerNarrow: false,
       agentArtifactOpenSequence: 0,
       agentWorkspaceVersions: [], agentWorkspaceText: '', agentWorkspaceImage: '',
+      agentWorkspaceCategories: fileCategories, agentWorkspaceMetadata: { description: '', category: 'other', pinned: false },
       agentWorkspaceError: '', agentWorkspaceVersionError: '', agentWorkspacePreviewHint: '',
       agentWorkspaceLoading: false, agentWorkspacePreviewBusy: false, agentWorkspaceMutationBusy: false,
       agentWorkspaceEpoch: 0, agentWorkspaceListSequence: 0, agentWorkspaceFileSequence: 0,
@@ -514,6 +517,7 @@
         this.agentWorkspacePreviewHint = '';
         this.agentWorkspaceVersions = [];
         this.agentWorkspaceVersionError = '';
+        this.agentWorkspaceMetadata = { description: '', category: 'other', pinned: false };
       },
       closeAgentWorkspace(options = {}) {
         const wasOpen = this.agentWorkspaceOpen;
@@ -543,22 +547,32 @@
       openAgentWorkspace(tab = 'files') {
         if (!this.currentSessionId || this.currentGroupId) return;
         if (!this.agentWorkspaceOpen) this._agentDrawerOpener = typeof document === 'undefined' ? null : document.activeElement;
-        this.agentWorkspaceTab = tab === 'tasks' ? 'tasks' : 'files';
+        this.agentWorkspaceTab = workspaceTabs.includes(tab) ? tab : 'files';
         this.agentWorkspaceOpen = true;
         this.refreshAgentRuns();
         this.$nextTick(() => this.$refs?.agentWorkspaceClose?.focus?.());
-        return this.refreshAgentWorkspace();
+        return this.agentWorkspaceTab === 'plans' ? this.refreshTodos() : this.refreshAgentWorkspace();
       },
       selectAgentWorkspaceTab(tab) {
-        if (!['files', 'tasks'].includes(tab)) return;
+        if (!workspaceTabs.includes(tab) || this.currentGroupId || !this.currentSessionId) return;
         if (!this.agentWorkspaceOpen) return this.openAgentWorkspace(tab);
         this.agentWorkspaceTab = tab;
+        if (tab === 'plans') return this.refreshTodos();
+        if (tab === 'files') return this.refreshAgentWorkspace();
+      },
+      navigateAgentWorkspaceTabs(event) {
+        if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key) || this.currentGroupId || !this.agentWorkspaceOpen) return;
+        event.preventDefault();
+        const index = event.key === 'Home' ? 0 : event.key === 'End' ? workspaceTabs.length - 1 :
+          (workspaceTabs.indexOf(this.agentWorkspaceTab) + (event.key === 'ArrowRight' ? 1 : -1) + workspaceTabs.length) % workspaceTabs.length;
+        this.selectAgentWorkspaceTab(workspaceTabs[index]);
+        event.currentTarget.querySelectorAll('[role="tab"]')[index]?.focus();
       },
       trapAgentWorkspaceFocus(event) {
         if (!this.agentWorkspaceOpen || !this.agentDrawerNarrow || event.key !== 'Tab') return;
         const drawer = this.$refs?.agentWorkspaceDrawer;
         if (!drawer) return;
-        const controls = [...drawer.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], summary, [tabindex]:not([tabindex="-1"])')]
+        const controls = [...drawer.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])')]
           .filter(element => {
             if (!element.getClientRects().length || element.tabIndex < 0) return false;
             // Closed details can retain layout boxes in Chromium. Their hidden
@@ -618,6 +632,11 @@
             } else if (['oversized', 'previewable', 'size', 'modified'].some(key => refreshed[key] !== selected[key])) {
               // A smaller replacement must clear the old read-limit state.
               await this.selectAgentWorkspaceFile(refreshed, { invalidateArtifact: false });
+            } else {
+              const previous = this.agentWorkspaceFileMetadata(selected);
+              const pristine = Object.keys(previous).every(key => this.agentWorkspaceMetadata[key] === previous[key]);
+              this.agentWorkspaceSelected = refreshed;
+              if (pristine && !this.agentWorkspaceMutationBusy) this.agentWorkspaceMetadata = this.agentWorkspaceFileMetadata(refreshed);
             }
           }
         } catch (error) {
@@ -643,6 +662,7 @@
         const current = () => this.agentWorkspaceIsCurrent(context) && sequence === this.agentWorkspaceFileSequence;
         this.clearAgentWorkspacePreview();
         this.agentWorkspaceSelected = file;
+        this.agentWorkspaceMetadata = this.agentWorkspaceFileMetadata(file);
         this.agentWorkspacePreviewBusy = true;
         this.agentWorkspaceError = '';
         const versions = (async () => {
@@ -690,19 +710,51 @@
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         } catch (error) { if (this.agentWorkspaceIsCurrent(context)) this.agentWorkspaceError = error.message; }
       },
+      agentWorkspaceFileMetadata(file) {
+        return { description: typeof file?.description === 'string' ? file.description : '',
+          category: fileCategories.includes(file?.category) ? file.category : 'other', pinned: file?.pinned === true };
+      },
+      saveAgentWorkspaceMetadata() {
+        const value = { ...this.agentWorkspaceMetadata };
+        if (this.agentWorkspaceLocked || !this.agentWorkspaceSelected) return;
+        if (typeof value.description !== 'string' || [...value.description].length > 200 ||
+            !fileCategories.includes(value.category) || typeof value.pinned !== 'boolean') {
+          this.agentWorkspaceError = this.t('agentWorkspaceMetadataInvalid'); return;
+        }
+        return this.mutateAgentWorkspace('metadata', value);
+      },
       async mutateAgentWorkspace(kind, value) {
         const context = this.agentWorkspaceContext();
         if (this.agentWorkspaceMutationBusy || !this.agentWorkspaceIsCurrent(context)) return;
         const path = this.agentWorkspaceSelected?.path;
+        const fileSequence = this.agentWorkspaceFileSequence;
+        const roleContext = kind === 'metadata' ? this.todoViewContext() : null;
+        const current = () => this.agentWorkspaceIsCurrent(context) && (kind !== 'metadata' ||
+          (this.todoViewIsCurrent(roleContext) && this.agentWorkspaceSelected?.path === path && this.agentWorkspaceFileSequence === fileSequence));
         this.agentWorkspaceMutationBusy = true;
         this.agentWorkspaceError = '';
         try {
           // Fresh preflight supplements the UI lock; the backend must enforce the lock atomically.
           const data = await this.agentFetch(API_PATHS.agentRuns(context.profile));
-          if (!this.agentWorkspaceIsCurrent(context)) return;
+          if (!current()) return;
           if (!Array.isArray(data.runs)) throw new Error(this.t('agentWorkspaceInvalid'));
           if (data.runs.some(run => run.profile_id === context.profile && !terminal(run.state))) throw new Error(this.t('agentWorkspaceLocked'));
-          if (kind === 'upload') {
+          if (kind === 'metadata') {
+            if (!this.agentArtifactPath(path)) return;
+            const result = await this.agentFetch(API_PATHS.agentWorkspaceMetadata(), { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ profile_id: context.profile, path, ...value }) });
+            if (!current()) return;
+            const file = result.file;
+            if (result.ok !== true || file?.path !== path || typeof file.description !== 'string' ||
+                [...file.description].length > 200 || !fileCategories.includes(file.category) || typeof file.pinned !== 'boolean') {
+              throw new Error(this.t('agentWorkspaceInvalid'));
+            }
+            const metadata = this.agentWorkspaceFileMetadata(file);
+            this.agentWorkspaceFiles = this.agentWorkspaceFiles.map(row => row.path === path ? { ...row, ...metadata } : row);
+            this.agentWorkspaceSelected = { ...this.agentWorkspaceSelected, ...metadata };
+            this.agentWorkspaceMetadata = metadata;
+            return;
+          } else if (kind === 'upload') {
             const body = new FormData(); body.append('profile_id', context.profile); body.append('file', value);
             await this.agentWorkspaceResponse(API_PATHS.agentWorkspaceUpload(), { method: 'POST', body });
           } else {
@@ -716,7 +768,7 @@
           if (kind === 'restore' && this.agentWorkspaceIsCurrent(context) && this.agentWorkspaceSelected?.path === path) {
             await this.selectAgentWorkspaceFile(this.agentWorkspaceFiles.find(file => file.path === path) || this.agentWorkspaceSelected);
           }
-        } catch (error) { if (this.agentWorkspaceIsCurrent(context)) this.agentWorkspaceError = error.message; }
+        } catch (error) { if (current()) this.agentWorkspaceError = error.message; }
         finally { this.agentWorkspaceMutationBusy = false; }
       },
       async uploadAgentWorkspaceFile(event) {

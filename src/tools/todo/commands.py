@@ -3,7 +3,7 @@ import logging
 
 from src.commands.base import CommandResult, register_command
 from src.tools.todo.store import TodoStore
-from src.utils.debug_logger import log_todo, log_error
+from src.utils.debug_logger import log_todo
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ async def handle_todo(sub: str, args: str, session, app) -> CommandResult:
     store = TodoStore(session.storage_root)
 
     if sub in ("list", "ls", "查看", "列表", ""):
-        items = store.get_all()
+        items = [t for t in store.get_all() if t.owner == "user"]
         pending = [t for t in items if not t.done]
         done = [t for t in items if t.done]
         lines = []

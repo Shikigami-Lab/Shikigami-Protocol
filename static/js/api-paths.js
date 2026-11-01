@@ -29,6 +29,7 @@ window.API_PATHS = {
   agentWorkspaceFile: (pid, path, download = false) => `/api/agent/workspace/file?profile_id=${encodeURIComponent(pid)}&path=${encodeURIComponent(path)}${download ? '&download=true' : ''}`,
   agentWorkspaceVersions: (pid, path) => `/api/agent/workspace/versions?profile_id=${encodeURIComponent(pid)}&path=${encodeURIComponent(path)}`,
   agentWorkspaceRestore: () => '/api/agent/workspace/restore',
+  agentWorkspaceMetadata: () => '/api/agent/workspace/metadata',
   agentWorkspaceUpload: () => '/api/agent/workspace/upload',
   agentSettings: () => '/api/agent/settings',
   agentView: () => '/api/agent/view',

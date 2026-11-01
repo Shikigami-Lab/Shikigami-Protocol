@@ -6,6 +6,51 @@
  */
 window.SK_COMPONENTS = {
 
+  // Both surfaces delegate to the same parent controller and ownership guards.
+  'todo-list': {
+    props: {
+      t: { type: Function, required: true },
+      owner: { type: String, required: true },
+      todos: { type: Array, required: true },
+      draft: { type: String, default: '' },
+      artifactPath: { type: Function, required: true },
+    },
+    emits: ['update:owner', 'update:draft', 'add', 'toggle', 'delete', 'clear', 'artifact'],
+    template: `
+      <div class="todo-list">
+        <div class="mem-subtab-bar" role="group" :aria-label="t('todosPanelTitle')">
+          <button v-for="actor in ['user', 'ai']" :key="actor" type="button" class="mem-subtab-btn"
+                  :class="{ active: owner === actor }" :aria-pressed="owner === actor"
+                  @click="$emit('update:owner', actor)">{{ t(actor === 'ai' ? 'todosOwnerAi' : 'todosOwnerUser') }}</button>
+        </div>
+        <div class="tp-add-row">
+          <input class="tp-input" :value="draft" @input="$emit('update:draft', $event.target.value)"
+                 :aria-label="t(owner === 'ai' ? 'todosNewPlanPlaceholder' : 'todosNewPlaceholder')"
+                 :placeholder="t(owner === 'ai' ? 'todosNewPlanPlaceholder' : 'todosNewPlaceholder')"
+                 @keydown.enter="$emit('add')" />
+          <button type="button" class="tp-add-btn" :aria-label="t('todosAdd')" @click="$emit('add')">+</button>
+        </div>
+        <div class="tp-list">
+          <div v-if="todos.length === 0" class="tp-empty">{{ t(owner === 'ai' ? 'todosPlansEmpty' : 'todosEmpty') }}</div>
+          <div v-for="todo in todos" :key="todo.id" class="tp-item" :class="{ done: todo.done }">
+            <button type="button" class="tp-check" :aria-label="todo.content" :aria-pressed="!!todo.done"
+                    @click="$emit('toggle', todo.id)">{{ todo.done ? '✓' : '○' }}</button>
+            <div class="tp-todo-body">
+              <span class="tp-text" :title="todo.content">{{ todo.content }}</span>
+              <div v-if="artifactPath(todo, 'source_path') || artifactPath(todo, 'evidence_path')" class="tp-todo-links">
+                <button v-for="field in ['source_path', 'evidence_path'].filter(field => artifactPath(todo, field))"
+                        :key="field" type="button" class="tp-close" @click="$emit('artifact', todo, field)">{{ t(field === 'source_path' ? 'todosSource' : 'todosEvidence') }}</button>
+              </div>
+            </div>
+            <button type="button" class="tp-del" :aria-label="t('todosDelete')" @click="$emit('delete', todo.id)">✕</button>
+          </div>
+        </div>
+        <div v-if="todos.some(todo => todo.done)" class="tp-add-row">
+          <button type="button" class="tp-close" @click="$emit('clear')">{{ t('todosClearDone') }}</button>
+        </div>
+      </div>`,
+  },
+
   // Presentation only: parent owns run mapping, permissions and all side effects.
   'agent-task-card': {
     props: {

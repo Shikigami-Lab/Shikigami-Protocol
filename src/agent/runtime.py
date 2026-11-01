@@ -68,7 +68,10 @@ class AgentRuntime:
         self.data_root = self.root / "data" / "agent"
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.store = LinkStore(self.data_root / "links.sqlite3")
-        self.workspaces = WorkspaceStore(self.data_root / 'workspaces')
+        self.workspaces = WorkspaceStore(self.data_root / 'workspaces', profiles_root=self.root/'profiles',
+            migration_allowed=self._workspace_migration_allowed)
+        from src.agent.workspace_catalog import WorkspaceCatalog
+        self.catalog = WorkspaceCatalog(self.root/'profiles', self.workspaces)
         self.store.recover_interrupted()
         self.timers = timer_manager or _timer_manager
         self.profile_loader = profile_loader or ProfileLoader().load
@@ -97,6 +100,19 @@ class AgentRuntime:
     def access_for(self, profile_id):
         return capabilities(self.settings, self.profile_loader(profile_id))
 
+    def _workspace_migration_allowed(self, profile_id):
+        # Called while storage is locked. Do not invert its lock order by taking
+        # _state_lock: prepare reads the catalog before admitting a file writer.
+        return (not self.cleanup_pending(profile_id) and not any(
+            r.profile_id == profile_id and r.access.get('workspace_enabled') and
+            (not r.terminal or (r.task is not None and not r.task.done()))
+            for r in getattr(self, '_runs', {}).values()))
+
+    def workspace_context(self, profile_id):
+        if not self.settings['enabled'] or not self.access_for(profile_id)['workspace_enabled']:
+            return ''
+        return self.catalog.context(profile_id)
+
     def _authorize(self, run, *, timer=False):
         if (self._closed or run.stopped.is_set() or run.terminal or not self.settings["enabled"] or not self.tools_allowed(run.profile_id)
                 or not self.context_valid(run)):
@@ -121,6 +137,8 @@ class AgentRuntime:
         limits = self.settings
         if not limits["enabled"]:
             raise ValueError("AI tools are disabled")
+        if session.id != session.profile_id:
+            raise ValueError('Harness group chat is not enabled in this phase')
         if not self.tools_allowed(session.profile_id):
             raise ValueError('AI tools are disabled for this character')
         if origin not in ('user', 'reflection'):
@@ -137,6 +155,10 @@ class AgentRuntime:
             if sum(not r.terminal for r in self._runs.values()) >= 2:
                 raise ValueError("Two tasks are already running; wait or stop one")
             revision = self.store.revision(session.profile_id)
+            directory_context = self.workspace_context(session.profile_id)
+            if directory_context:
+                messages = [copy(m) for m in messages]
+                next(m for m in messages if m['role'] == 'system')['content'] += directory_context
             if continue_run_id:
                 prior = self.task_context(session, continue_run_id)
                 messages = [copy(m) for m in messages]
@@ -146,8 +168,6 @@ class AgentRuntime:
                 context_revision=revision, origin=origin, messages=messages)
             gateway = ModelGateway(dict(preset), limits["max_model_requests"],
                                    authorize=lambda: self._authorize(self._runs[run_id]), client=self.model_client)
-            if session.id != session.profile_id:
-                raise ValueError('Harness group chat is not enabled in this phase')
             # Store native Harness identity separately from the stable app
             # session carried by _Run and UI events. Each context gets a new ID.
             self.store.begin_run(run_id, session.profile_id, run_id, origin=origin)
@@ -588,6 +608,22 @@ class AgentRuntime:
             raise ValueError('Tool is disabled for this character')
         if name == 'task_context':
             result = self.task_context(run.session, args.get('run_id', ''))
+        elif name == 'workspace_describe':
+            from src.agent.workspace_catalog import FileDescription
+            value = FileDescription.model_validate(args)
+            def describe():
+                with self._state_lock:
+                    self._authorize(run)
+                    self.catalog.describe(run.profile_id, **value.model_dump())
+                    return {'ok': True}
+            result = await asyncio.to_thread(describe)
+        elif name.startswith('todo_'):
+            def execute():
+                from src.agent.todo_tools import execute_todo
+                with self._state_lock:
+                    self._authorize(run)
+                    return execute_todo(self, run, name, args, request_id)
+            result = await asyncio.to_thread(execute)
         else:
             from src.agent.business_tools import call_business_tool
             result = await call_business_tool(self.app, run.session, name, args)

@@ -9,11 +9,12 @@ DELETE /sessions/{sid}/todos           — 清空已完成
 数据层统一走 TodoStore（支持 priority / due_date）。
 """
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.agent import _same_origin
 from src.tools.todo.store import TodoStore
 from src.utils.debug_logger import log_tool_todo
 
@@ -22,6 +23,10 @@ router = APIRouter()
 
 
 def _get_session(request: Request, session_id: str):
+    if (not session_id.strip() or session_id in (".", "..") or len(session_id) > 256
+            or any(c in session_id for c in ("/", "\\", ":"))
+            or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in session_id)):
+        raise HTTPException(status_code=400, detail="Invalid session identity")
     sm = request.app.state.session_manager
     session = sm.get_by_id(session_id)
     if not session:
@@ -39,32 +44,37 @@ async def list_todos(session_id: str, request: Request):
 
 
 class TodoCreate(BaseModel):
-    content: str
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(max_length=2000)
     priority: int = 3
     due_date: Optional[float] = None
+    owner: Literal["user", "ai"] = "user"
 
 
-@router.post("/sessions/{session_id}/todos", status_code=201)
+@router.post("/sessions/{session_id}/todos", status_code=201, dependencies=[Depends(_same_origin)])
 async def create_todo(session_id: str, body: TodoCreate, request: Request):
     session = _get_session(request, session_id)
     content = body.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="content cannot be empty")
     store = TodoStore(session.storage_root)
-    item = store.add(content, due_date=body.due_date, priority=body.priority)
+    item = store.add(content, due_date=body.due_date, priority=body.priority, owner=body.owner)
     log_tool_todo("create", session_id=session_id, todo_id=item.id,
                   content=content, priority=body.priority)
     return item.to_dict()
 
 
 class TodoPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     done: Optional[bool] = None
-    content: Optional[str] = None
+    content: Optional[str] = Field(default=None, max_length=2000)
 
 
-@router.patch("/sessions/{session_id}/todos/{todo_id}")
+@router.patch("/sessions/{session_id}/todos/{todo_id}", dependencies=[Depends(_same_origin)])
 async def update_todo(session_id: str, todo_id: str, body: TodoPatch, request: Request):
     session = _get_session(request, session_id)
+    if body.content is not None and not body.content.strip():
+        raise HTTPException(status_code=400, detail="content cannot be empty")
     store = TodoStore(session.storage_root)
     item = store.update(todo_id, done=body.done, content=body.content)
     if item is None:
@@ -74,7 +84,7 @@ async def update_todo(session_id: str, todo_id: str, body: TodoPatch, request: R
     return {"ok": True, "todo": item.to_dict()}
 
 
-@router.delete("/sessions/{session_id}/todos/{todo_id}")
+@router.delete("/sessions/{session_id}/todos/{todo_id}", dependencies=[Depends(_same_origin)])
 async def delete_todo(session_id: str, todo_id: str, request: Request):
     session = _get_session(request, session_id)
     store = TodoStore(session.storage_root)
@@ -86,11 +96,11 @@ async def delete_todo(session_id: str, todo_id: str, request: Request):
     return {"ok": True}
 
 
-@router.delete("/sessions/{session_id}/todos")
-async def clear_done_todos(session_id: str, request: Request):
+@router.delete("/sessions/{session_id}/todos", dependencies=[Depends(_same_origin)])
+async def clear_done_todos(session_id: str, request: Request, owner: Literal["user", "ai"] = "user"):
     """清空已完成的待办。"""
     session = _get_session(request, session_id)
     store = TodoStore(session.storage_root)
-    removed = store.clear_done()
+    removed = store.clear_done(owner=owner)
     log_tool_todo("clear_done", session_id=session_id, removed_count=removed)
     return {"ok": True, "removed": removed}

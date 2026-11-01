@@ -286,6 +286,8 @@ class WorkspaceAPITests(unittest.IsolatedAsyncioTestCase):
         self.module = workspace_module()
         self.store = self.module.WorkspaceStore(Path(self.tmp.name) / "workspaces")
         self.runtime = SimpleNamespace(workspaces=self.store, _runs={}, _state_lock=threading.RLock())
+        from src.agent.workspace_catalog import WorkspaceCatalog
+        self.runtime.catalog = WorkspaceCatalog(Path(self.tmp.name)/'profiles', self.store)
         self.app = FastAPI()
         self.app.state.agent_runtime = self.runtime
         self.lookups = []

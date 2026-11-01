@@ -213,7 +213,7 @@ const SettingsMixin = {
       toolsSaving: {},          // { tool_id: bool }
       toolsLoadSequence: 0,
       profilesLoadSequence: 0,
-      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null,
+      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null,
         autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12 },
       agentRuntime: null,
       agentSettingsLoaded: false,
@@ -5134,7 +5134,7 @@ const SettingsMixin = {
       this.agentSettingsError = '';
       try {
         const settings = await this.agentFetch(API_PATHS.agentSettings());
-        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false,
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
           autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
         this.agentSettingsLoaded = true;
         this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
@@ -5163,7 +5163,7 @@ const SettingsMixin = {
         const settings = await this.agentFetch(API_PATHS.agentSettings(), {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
-        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false,
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
           autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
         this.agentRuntime = await this.agentFetch(API_PATHS.agentStatus());
         this.showToast(this.t('savedOk'), 'success');

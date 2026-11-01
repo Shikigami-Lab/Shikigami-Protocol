@@ -19,7 +19,7 @@ class TodosSegment(PromptSegment):
 
     def build(self, ctx: BuildContext) -> SegmentResult:
         try:
-            todos = TodoStore(ctx.session.storage_root).get_pending()
+            todos = TodoStore(ctx.session.storage_root).get_pending(owner="user")
         except Exception as e:
             logger.warning("[TodosSegment] load failed: %s", e)
             return SegmentResult(messages=[])

@@ -12,6 +12,161 @@ const realVue = vueSandbox.Vue;
 const componentSandbox = vm.createContext({ window: {} });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/js/components.js'), 'utf8'), componentSandbox);
 const taskCard = componentSandbox.window.SK_COMPONENTS['agent-task-card'];
+const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+
+function metadataHarness() {
+  const { model, sandbox } = harness();
+  model.agentWorkspaceOpen = true;
+  model.agentRunsKnown.p1 = true;
+  const file = { path: 'notes/plan.md', description: 'Old purpose', category: 'note', pinned: false, previewable: false };
+  model.agentWorkspaceFiles = [file];
+  model.agentWorkspaceSelected = file;
+  model.agentWorkspaceMetadata = { description: 'New purpose', category: 'work', pinned: true };
+  return { model, sandbox, file };
+}
+
+test('metadata PATCH uses same-origin fetch and updates selected file and inventory', async () => {
+  const { model, sandbox } = metadataHarness();
+  const calls = [];
+  sandbox.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => options ? ({ ok: true, file: { path: 'notes/plan.md', description: 'New purpose', category: 'work', pinned: true } }) : ({ runs: [] }) };
+  };
+  await model.saveAgentWorkspaceMetadata();
+  assert.equal(calls[1].url, 'http://fixture.test/api/agent/workspace/metadata');
+  assert.equal(calls[1].options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(calls[1].options.body), { profile_id: 'p1', path: 'notes/plan.md', description: 'New purpose', category: 'work', pinned: true });
+  assert.equal(model.agentWorkspaceFiles[0].description, 'New purpose');
+  assert.equal(model.agentWorkspaceSelected.pinned, true);
+  assert.equal(model.agentWorkspaceMutationBusy, false);
+});
+
+for (const change of ['file', 'file-return', 'profile', 'close', 'group']) {
+  for (const fail of [false, true]) test(`late metadata ${fail ? 'failure' : 'success'} cannot affect ${change} view`, async () => {
+    const { model } = metadataHarness();
+    const pending = deferred(); let sent = 0;
+    model.agentFetch = async (url, options) => options ? (sent++, pending.promise) : ({ runs: [] });
+    const saving = model.saveAgentWorkspaceMetadata();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sent, 1);
+    if (change.startsWith('file')) {
+      model.agentFetch = async () => ({ versions: [] });
+      await model.selectAgentWorkspaceFile({ path: 'other.txt', previewable: false });
+      if (change === 'file-return') await model.selectAgentWorkspaceFile({ path: 'notes/plan.md', previewable: false });
+    } else if (change === 'profile') { model.currentSessionId = 'p2'; model.agentViewChanged(); }
+    else if (change === 'close') { model.closeAgentWorkspace(); model.agentWorkspaceOpen = true; }
+    else model.currentGroupId = 'group';
+    model.agentWorkspaceMetadata = { description: 'Current draft', category: 'material', pinned: false };
+    model.agentWorkspaceError = 'Current error';
+    if (fail) pending.reject(new Error('Old error'));
+    else pending.resolve({ ok: true, file: { path: 'notes/plan.md', description: 'Stale', category: 'work', pinned: true } });
+    await saving;
+    assert.equal(model.agentWorkspaceMetadata.description, 'Current draft');
+    assert.equal(model.agentWorkspaceError, 'Current error');
+    assert.equal(model.agentWorkspaceMutationBusy, false);
+  });
+}
+
+test('metadata validation and workspace lock prevent writes; preflight rechecks task status', async () => {
+  const { model } = metadataHarness(); let writes = 0;
+  model.agentFetch = async (url, options) => { if (options) writes++; return { runs: [{ profile_id: 'p1', state: 'running' }] }; };
+  for (const invalid of [{ description: 'x'.repeat(201) }, { category: 'invalid' }, { pinned: 'yes' }]) {
+    model.agentWorkspaceMetadata = { description: '', category: 'note', pinned: false, ...invalid };
+    await model.saveAgentWorkspaceMetadata();
+  }
+  assert.equal(writes, 0);
+  model.agentWorkspaceMetadata = { description: 'Valid', category: 'other', pinned: false };
+  await model.saveAgentWorkspaceMetadata();
+  assert.equal(writes, 0);
+  assert.match(model.agentWorkspaceError, /running/);
+  model.agentWorkspaceMutationBusy = true;
+  await model.saveAgentWorkspaceMetadata();
+  assert.equal(writes, 0);
+});
+
+test('drawer keyboard wraps three tabs and supports Home/End while ignoring other keys', () => {
+  const { model } = harness(); model.agentWorkspaceOpen = true;
+  model.refreshTodos = () => {};
+  const focused = [], prevented = [];
+  const buttons = ['files', 'plans', 'tasks'].map(id => ({ focus() { focused.push(id); } }));
+  const press = key => model.navigateAgentWorkspaceTabs({ key, preventDefault() { prevented.push(key); }, currentTarget: { querySelectorAll: () => buttons } });
+  press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'plans');
+  press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'tasks');
+  press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'files');
+  press('ArrowLeft'); assert.equal(model.agentWorkspaceTab, 'tasks');
+  press('Home'); assert.equal(model.agentWorkspaceTab, 'files');
+  press('End'); assert.equal(model.agentWorkspaceTab, 'tasks');
+  press('Escape'); assert.equal(prevented.length, 6);
+  assert.deepEqual(focused, ['plans', 'tasks', 'files', 'tasks', 'files', 'tasks']);
+});
+
+test('Files tab loads inventory after opening Plans first', async () => {
+  const { model } = harness(); let lists = 0;
+  model.refreshTodos = async () => {};
+  model.refreshAgentWorkspace = async () => { lists++; };
+  await model.openAgentWorkspace('plans');
+  await model.selectAgentWorkspaceTab('files');
+  assert.equal(lists, 1);
+});
+
+test('inventory refresh updates unchanged file metadata and preserves unsaved descriptions', async () => {
+  const { model, file } = metadataHarness();
+  model.agentWorkspaceMetadata = model.agentWorkspaceFileMetadata(file);
+  model.agentFetch = async () => ({ files: [{ ...file, description: 'Updated externally', pinned: true }] });
+  await model.refreshAgentWorkspace();
+  assert.equal(model.agentWorkspaceMetadata.description, 'Updated externally');
+  assert.equal(model.agentWorkspaceSelected.pinned, true);
+  model.agentWorkspaceMetadata.description = 'Unsaved draft';
+  await model.refreshAgentWorkspace();
+  assert.equal(model.agentWorkspaceMetadata.description, 'Unsaved draft');
+});
+
+test('metadata preflight cannot submit for a file selected away from and back to', async () => {
+  const { model } = metadataHarness(); const pending = deferred(); let writes = 0;
+  model.agentFetch = async (url, options) => { if (options) writes++; return pending.promise; };
+  const saving = model.saveAgentWorkspaceMetadata();
+  model.agentWorkspaceFileSequence += 2;
+  pending.resolve({ runs: [] }); await saving;
+  assert.equal(writes, 0);
+});
+
+test('malformed metadata success cannot update inventory or selection', async () => {
+  const { model } = metadataHarness();
+  model.agentFetch = async (url, options) => options ? ({ ok: true, file: { path: 'another.txt', description: 'Wrong file', category: 'note', pinned: false } }) : ({ runs: [] });
+  await model.saveAgentWorkspaceMetadata();
+  assert.equal(model.agentWorkspaceSelected.description, 'Old purpose');
+  assert.equal(model.agentWorkspaceFiles[0].description, 'Old purpose');
+  assert.equal(model.agentWorkspaceError, model.t('agentWorkspaceInvalid'));
+});
+
+test('drawer retains focus wrap, Escape close and opener restoration with Plans selected', async () => {
+  const { model, sandbox } = harness();
+  model.agentWorkspaceOpen = true; model.agentDrawerNarrow = true; model.agentWorkspaceTab = 'plans';
+  const focused = [], first = { tabIndex: 0, getClientRects: () => [1], focus: () => focused.push('close') };
+  const last = { tabIndex: 0, getClientRects: () => [1], focus: () => focused.push('add') };
+  const hidden = { tabIndex: 0, getClientRects: () => [] };
+  model.$refs = { agentWorkspaceDrawer: { querySelectorAll(selector) {
+    assert.match(selector, /input:not\(:disabled\)/, 'fieldset-disabled metadata inputs must stay out of focus wrap');
+    return [first, last, hidden];
+  }, contains: element => [first, last].includes(element) } };
+  let prevented = 0;
+  sandbox.document.activeElement = first;
+  model.trapAgentWorkspaceFocus({ key: 'Tab', shiftKey: true, preventDefault() { prevented++; } });
+  sandbox.document.activeElement = last;
+  model.trapAgentWorkspaceFocus({ key: 'Tab', shiftKey: false, preventDefault() { prevented++; } });
+  assert.deepEqual(focused, ['add', 'close']); assert.equal(prevented, 2);
+  model._agentDrawerOpener = { isConnected: true, focus: () => focused.push('opener') };
+  model.closeAgentWorkspace();
+  assert.equal(model.agentWorkspaceOpen, false); assert.equal(focused.at(-1), 'opener');
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  assert.match(html, /@keydown\.esc\.stop\.prevent="closeAgentWorkspace"/);
+  assert.match(html, /@keydown\.tab="trapAgentWorkspaceFocus"/);
+  assert.match(html, /role="tablist"[^>]*@keydown="navigateAgentWorkspaceTabs"/);
+  for (const tab of ['files', 'plans', 'tasks']) {
+    assert.match(html, new RegExp('id="agent-' + tab + '-tab"[^>]*role="tab"[^>]*:aria-selected="agentWorkspaceTab === \'' + tab + '\''));
+    assert.match(html, new RegExp('id="agent-' + tab + '-panel" role="tabpanel" aria-labelledby="agent-' + tab + '-tab"'));
+  }
+});
 const event = (sequence, type = 'status', extra = {}) => ({
   run_id: 'r1', profile_id: 'p1', session_id: 'p1', sequence, type, status: 'running', ...extra,
 });

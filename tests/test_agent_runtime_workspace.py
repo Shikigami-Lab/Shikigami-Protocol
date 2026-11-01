@@ -48,5 +48,10 @@ class RuntimeWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         command = self.runtime._command(self.run)
         mounts = [command[i+1] for i,x in enumerate(command) if x=='--mount']
         self.assertTrue(any('target=/workspace' in m for m in mounts))
-        self.assertFalse(any('profiles' in m or 'docker.sock' in m for m in mounts))
+        self.assertFalse(any('docker.sock' in m for m in mounts))
+        workspace_mounts = [m for m in mounts if 'target=/workspace' in m]
+        self.assertEqual(len(workspace_mounts), 1)
+        self.assertIn('source=' + str(self.runtime.root/'profiles/test/workspace'), workspace_mounts[0])
+        self.assertFalse(any('source=' + str(self.runtime.root/'profiles') + ',' in m for m in mounts))
+        self.assertFalse(any('todos.json' in m or 'workspace_index.json' in m for m in mounts))
         self.assertEqual(command[command.index('--network')+1], 'none')

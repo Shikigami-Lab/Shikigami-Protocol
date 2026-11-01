@@ -334,8 +334,11 @@ const App = {
         commands:    { label: '命令',  icon: '⌘', enabled: true },
       },
 
-      // Todos (localStorage, no backend in P4-yet)
+      // The quick popup and workspace Plans tab share one todo controller.
       todos: [],
+      todoOwner: 'user',
+      todoViewEpoch: 0,
+      todoFetchSequence: 0,
       newTodoText: '',
 
       // Timers panel
@@ -2771,15 +2774,44 @@ const App = {
 
     /* ─────────────────── P5-C: Todos panel ─────────────────── */
 
-    async refreshTodos() {
-      if (!this.currentSessionId) return;
+    todoViewContext() {
+      return { profile: this.currentSessionId, epoch: this.todoViewEpoch };
+    },
+
+    todoViewIsCurrent(context) {
+      return !!context.profile && !this.currentGroupId && context.profile === this.currentSessionId &&
+        context.epoch === this.todoViewEpoch;
+    },
+
+    resetTodoView() {
+      this.todoViewEpoch++;
+      this.todoFetchSequence++;
+      this.todos = [];
+      this.todoOwner = 'user';
+      this.newTodoText = '';
+      this.showTodosPanel = false;
+    },
+
+    selectTodoOwner(owner) {
+      if (owner === 'user' || owner === 'ai') this.todoOwner = owner;
+    },
+
+    async refreshTodos(context = this.todoViewContext()) {
+      if (!this.todoViewIsCurrent(context)) return;
+      const sequence = ++this.todoFetchSequence;
       try {
-        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(this.currentSessionId));
-        if (res.ok) this.todos = (await res.json()).todos || [];
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(context.profile));
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!this.todoViewIsCurrent(context) || sequence !== this.todoFetchSequence) return;
+        this.todos = (Array.isArray(data.todos) ? data.todos : []).map(item => ({
+          ...item, _todoProfileId: context.profile, _todoViewEpoch: context.epoch,
+        }));
       } catch (_) {}
     },
 
     toggleTodosPanel() {
+      if (!this.currentSessionId || this.currentGroupId) return;
       this.showTodosPanel = !this.showTodosPanel;
       if (this.showTodosPanel) {
         this.showTimerPanel = false;
@@ -2790,40 +2822,64 @@ const App = {
     },
 
     async addTodo() {
-      const text = (this.newTodoText || '').trim();
-      if (!text || !this.currentSessionId) return;
+      const context = this.todoViewContext(), owner = this.todoOwner;
+      const draft = this.newTodoText, text = (draft || '').trim();
+      if (!text || !this.todoViewIsCurrent(context)) return;
       try {
-        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(this.currentSessionId), {
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(context.profile), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: text }),
+          body: JSON.stringify({ content: text, owner }),
         });
         if (!res.ok) { uiWarn('todos', 'addTodo failed', res.status); return; }
-        this.newTodoText = '';
-        await this.refreshTodos();
+        if (!this.todoViewIsCurrent(context)) return;
+        if (this.todoOwner === owner && this.newTodoText === draft) this.newTodoText = '';
+        await this.refreshTodos(context);
       } catch (e) { uiWarn('todos', 'addTodo error', e.message); }
     },
 
     async toggleTodo(id) {
-      if (!this.currentSessionId) return;
-      const t = this.todos.find(t => t.id === id);
+      const context = this.todoViewContext();
+      if (!this.todoViewIsCurrent(context)) return;
+      const t = this.visibleTodos.find(t => t.id === id);
       if (!t) return;
       try {
-        await fetch(getBaseUrl() + API_PATHS.sessionTodoById(this.currentSessionId, id), {
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodoById(context.profile, id), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ done: !t.done }),
         });
-        await this.refreshTodos();
+        if (res.ok && this.todoViewIsCurrent(context)) await this.refreshTodos(context);
       } catch (_) {}
     },
 
     async deleteTodo(id) {
-      if (!this.currentSessionId) return;
+      const context = this.todoViewContext();
+      if (!this.todoViewIsCurrent(context) || !this.visibleTodos.some(t => t.id === id)) return;
       try {
-        await fetch(getBaseUrl() + API_PATHS.sessionTodoById(this.currentSessionId, id), { method: 'DELETE' });
-        await this.refreshTodos();
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodoById(context.profile, id), { method: 'DELETE' });
+        if (res.ok && this.todoViewIsCurrent(context)) await this.refreshTodos(context);
       } catch (_) {}
+    },
+
+    async clearDoneTodos() {
+      const context = this.todoViewContext(), owner = this.todoOwner;
+      if (!this.todoViewIsCurrent(context) || !this.visibleTodos.some(t => t.done)) return;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(context.profile) + '?owner=' + encodeURIComponent(owner), { method: 'DELETE' });
+        if (res.ok && this.todoViewIsCurrent(context)) await this.refreshTodos(context);
+      } catch (_) {}
+    },
+
+    todoArtifactPath(todo, field) {
+      if (todo?.owner !== 'ai' || !['source_path', 'evidence_path'].includes(field) ||
+          !this.todoViewIsCurrent({ profile: todo._todoProfileId, epoch: todo._todoViewEpoch })) return '';
+      return this.agentArtifactPath(todo[field]);
+    },
+
+    openTodoArtifact(todo, field) {
+      const path = this.todoArtifactPath(todo, field);
+      if (path) return this.openAgentArtifact({ path, profile_id: todo._todoProfileId });
     },
 
     /* ─────────────────── P5-C: Timer panel ─────────────────── */
@@ -3075,6 +3131,12 @@ const App = {
   },
 
   watch: {
+    // Synchronous invalidation also covers A -> B -> A within one Vue tick.
+    todoViewKey: { flush: 'sync', handler() { this.resetTodoView(); } },
+    todoToolRevision() {
+      if (!this.currentGroupId && ((this.showTodosPanel && this.toolbarConfig.todos.enabled) ||
+          (this.agentWorkspaceOpen && this.agentWorkspaceTab === 'plans'))) this.refreshTodos();
+    },
     inputText() {
       // Any input change resets the selected suggestion and lifts a temporary Esc dismissal
       this.slashSelIdx = 0;
@@ -3106,6 +3168,29 @@ const App = {
   },
 
   computed: {
+    todoViewKey() { return JSON.stringify([this.currentSessionId, this.currentGroupId]); },
+    visibleTodos() {
+      return this.currentGroupId ? [] : this.todos.filter(item => (item.owner ?? 'user') === this.todoOwner);
+    },
+    todoToolRevision() {
+      if (this.currentGroupId || !this.currentSessionId) return '';
+      // Both live streams and the existing agent poll feed agentRuns.
+      return Object.values(this.agentRuns).filter(run => run.profile_id === this.currentSessionId && run.session_id === this.currentSessionId)
+        .flatMap(run => {
+          const calls = new Map(), revisions = [];
+          for (const event of run.events || []) {
+            if (event.profile_id !== this.currentSessionId || event.session_id !== this.currentSessionId) continue;
+            if (event.type === 'tool_call' && event.call_id) calls.set(event.call_id, event.tool_name);
+            if (event.type !== 'tool_result' || event.is_error !== false) continue;
+            // Native results carry call_id, not tool_name. Resolve only prior calls in this run.
+            const name = calls.get(event.call_id) || event.tool_name;
+            if (String(name || '').replace(/^mcp__shikigami__/, '').startsWith('todo_')) {
+              revisions.push(JSON.stringify([run.run_id || run.id, event.sequence]));
+            }
+          }
+          return revisions;
+        }).sort().join('|');
+    },
     /** 群组列表：置顶在前（按 pinnedGroupIds 顺序），其余按 created_at 降序 */
     sortedGroups() {
       const list = this.groups || [];

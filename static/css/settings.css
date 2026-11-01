@@ -2468,6 +2468,20 @@ textarea.form-input {
 .toolbar-panel.tp-commands { width: 320px; }
 .toolbar-panel.tp-config   { width: 200px; }
 
+@media (max-width: 768px) {
+  .toolbar-panel.tp-todos {
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 .tp-header {
   display: flex;
   justify-content: space-between;
@@ -2546,6 +2560,9 @@ textarea.form-input {
 }
 .tp-item:hover { background: var(--accent-dim); }
 .tp-item.done .tp-text { text-decoration: line-through; opacity: 0.5; }
+.tp-todo-body { flex: 1; min-width: 0; }
+.tp-todo-body .tp-text { display: block; }
+.tp-todo-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .tp-check {
   cursor: pointer;
   width: 16px;

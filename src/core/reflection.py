@@ -429,7 +429,14 @@ class ReflectionEngine:
         else:
             recent = store.get_recent(n_turns=recent_turns_n)
 
-        if not recent:
+        plan_context = ''
+        if runtime is not None and callable(getattr(runtime, 'access_for', None)):
+            try:
+                from src.agent.todo_tools import reflection_plan_context
+                plan_context = reflection_plan_context(runtime, session)
+            except Exception:
+                logger.warning('[reflection] character plans unavailable; keeping normal reflection')
+        if not recent and not plan_context:
             log_reflection_skip(session.id, "no_recent_turns")
             logger.debug("[reflection] session=%s: no recent turns, skipping", session.id)
             self._last_skip_reason = "no_recent_turns"
@@ -559,6 +566,12 @@ class ReflectionEngine:
             topic_discovery_cfg=_td_cfg,
         )
         messages = build_reflection_messages(session.id, ctx)
+        messages[0]['content'] += plan_context
+        if runtime is not None and callable(getattr(runtime, 'workspace_context', None)):
+            try:
+                messages[0]['content'] += runtime.workspace_context(session.profile_id)
+            except (ValueError, OSError):
+                logger.warning('[reflection] workspace directory unavailable; keeping normal reflection')
         autonomy = getattr(runtime, 'autonomy', None) if runtime is not None else None
         if autonomy is not None and autonomy.enabled(session):
             messages[0]['content'] += (

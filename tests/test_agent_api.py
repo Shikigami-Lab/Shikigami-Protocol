@@ -113,6 +113,37 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json(), {**DEFAULTS, "enabled": True})
         self.assertEqual(self.runtime._runs, {})
 
+    async def test_workspace_description_api_is_role_scoped_and_preserves_files(self):
+        from src.api.workspace import router as workspace_router
+        self.app.include_router(workspace_router)
+        for profile in ('alpha', 'beta'):
+            (self.runtime.workspaces.directory(profile)/'notes.md').write_text('Synthetic body')
+        response = await self.request('PATCH', '/workspace/metadata', json={
+            'profile_id': 'alpha', 'path': 'notes.md', 'description': 'Personal lab notebook',
+            'category': 'note', 'pinned': True})
+        self.assertEqual(response.status_code, 200)
+        alpha = await self.request('GET', '/workspace/files?profile_id=alpha')
+        beta = await self.request('GET', '/workspace/files?profile_id=beta')
+        self.assertEqual(alpha.json()['files'][0]['description'], 'Personal lab notebook')
+        self.assertEqual(beta.json()['files'][0]['description'], '')
+        self.assertTrue((self.root/'profiles/alpha/workspace_index.json').exists())
+        self.assertFalse((self.root/'profiles/alpha/workspace/workspace_index.json').exists())
+        self.assertEqual((self.runtime.workspaces.directory('alpha')/'notes.md').read_text(), 'Synthetic body')
+        for path in ('../notes.md', 'missing.txt'):
+            response = await self.request('PATCH', '/workspace/metadata', json={
+                'profile_id': 'alpha', 'path': path, 'description': 'bad'})
+            self.assertIn(response.status_code, (400, 404))
+
+    async def test_metadata_edit_cannot_race_active_workspace_writer(self):
+        from src.api.workspace import router as workspace_router
+        self.app.include_router(workspace_router)
+        self.config.agent['workspace_enabled'] = True
+        (self.runtime.workspaces.directory('alpha')/'notes.md').write_text('Synthetic')
+        self.prepare('alpha')
+        response = await self.request('PATCH', '/workspace/metadata', json={
+            'profile_id': 'alpha', 'path': 'notes.md', 'description': 'wait'})
+        self.assertEqual(response.status_code, 409)
+
     async def test_disabling_autonomy_cancels_only_reflection_tasks(self):
         self.sm.get_current = lambda: self.sm.sessions['alpha']
         self.config.agent.update(autonomy_enabled=True, workspace_enabled=True)
