@@ -5228,8 +5228,8 @@ const SettingsMixin = {
 
     getProfileAgentPermission(key) {
       const profile = this.profiles.find(p => p.profile_id === this.selectedProfileId);
-      if (key === 'autonomy_enabled') return profile?.tool_configs?.agent?.[key] === true;
-      return profile?.tool_configs?.agent?.[key] !== false;
+      const value = profile?.tool_configs?.agent?.[key];
+      return typeof value === 'boolean' ? value : null;
     },
 
     getToolConfig(toolId) {

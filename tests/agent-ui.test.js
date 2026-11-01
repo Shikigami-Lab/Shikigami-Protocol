@@ -308,7 +308,7 @@ test('autonomy validates integer ranges without making requests and saves valid 
   }
 });
 
-test('character autonomy requires explicit opt-in and PATCH stays profile scoped', async () => {
+test('character autonomy inherits when unset and PATCH stays profile scoped', async () => {
   const calls = [];
   const { model } = harness(async (url, options) => {
     calls.push({ url, body: JSON.parse(options.body) });
@@ -319,11 +319,171 @@ test('character autonomy requires explicit opt-in and PATCH stays profile scoped
   model.selectedProfileId = 'p1';
   assert.equal(model.getProfileAgentPermission('autonomy_enabled'), true);
   model.selectedProfileId = 'p2';
-  assert.equal(model.getProfileAgentPermission('autonomy_enabled'), false);
+  assert.equal(model.getProfileAgentPermission('autonomy_enabled'), null);
   model.loadProfiles = model.loadToolsConfig = async () => {};
   await model.saveToolConfig('agent', { autonomy_enabled: true }, 'p2');
   assert.match(calls[0].url, /\/p2\/tool_configs$/);
   assert.deepEqual(calls[0].body, { tool_id: 'agent', config: { autonomy_enabled: true } });
+});
+
+test('profile permission truth table preserves overrides independently of global defaults', () => {
+  const { model } = harness();
+  model.selectedProfileId = 'p1';
+  const keys = ['enabled', 'autonomy_enabled', ...model.agentCapabilities];
+  assert.equal(keys.length, 7);
+  for (const globalDefault of [false, true]) {
+    Object.assign(model.agentSettingsForm, Object.fromEntries(keys.map(key => [key, globalDefault])));
+    for (const key of keys) {
+      for (const value of [undefined, null, true, false]) {
+        model.profiles = [{ profile_id: 'p1', tool_configs: { agent: value === undefined ? {} : { [key]: value } } }];
+        assert.equal(model.getProfileAgentPermission(key), value ?? null,
+          `${key}: default=${globalDefault}, override=${value}`);
+      }
+    }
+  }
+});
+
+test('profile permission getter inherits for absent profile/config and never coerces invalid values', () => {
+  const { model } = harness();
+  model.selectedProfileId = 'p1';
+  for (const profiles of [[], [{ profile_id: 'p2' }], [{ profile_id: 'p1' }],
+    [{ profile_id: 'p1', tool_configs: {} }], [{ profile_id: 'p1', tool_configs: { agent: null } }]]) {
+    model.profiles = profiles;
+    for (const key of ['enabled', 'autonomy_enabled', ...model.agentCapabilities]) {
+      assert.equal(model.getProfileAgentPermission(key), null);
+    }
+  }
+  for (const value of ['true', 'false', 0, 1]) {
+    model.profiles = [{ profile_id: 'p1', tool_configs: { agent: { enabled: value } } }];
+    assert.equal(model.getProfileAgentPermission('enabled'), null);
+  }
+});
+
+test('saving inherit PATCHes null for each permission and reloads it without changing sibling permissions', async () => {
+  const calls = [];
+  const profile = { profile_id: 'p1', tool_configs: { agent: {} } };
+  const { model } = harness(async (url, options) => {
+    calls.push({ url, options });
+    if (options?.method === 'PATCH') {
+      const body = JSON.parse(options.body);
+      assert.equal(body.tool_id, 'agent');
+      Object.assign(profile.tool_configs.agent, body.config);
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: true, json: async () => ({ profiles: [JSON.parse(JSON.stringify(profile))] }) };
+  });
+  model.selectedProfileId = 'p1';
+  const keys = ['enabled', 'autonomy_enabled', ...model.agentCapabilities];
+  model.loadToolsConfig = async pid => assert.equal(pid, 'p1');
+  for (const key of keys) {
+    profile.tool_configs.agent = Object.fromEntries(keys.map(k => [k, true]));
+    model.profiles = [JSON.parse(JSON.stringify(profile))];
+    await model.saveToolConfig('agent', { [key]: null }, model.selectedProfileId);
+    const patch = calls.at(-2);
+    assert.equal(patch.url, 'http://fixture.test/api/profiles/p1/tool_configs');
+    assert.deepEqual(JSON.parse(patch.options.body), { tool_id: 'agent', config: { [key]: null } });
+    assert.equal(model.getProfileAgentPermission(key), null);
+    for (const other of keys.filter(k => k !== key)) assert.equal(model.getProfileAgentPermission(other), true);
+    assert.equal(model.toolsSaving.agent, false);
+  }
+});
+
+test('persona template reuses labeled tri-toggles and only locks for saving or no profile', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  const card = html.slice(html.indexOf('<div v-if="profileSubTab === \'tools\'"'))
+    .split('<div v-if="toolsLoading"')[0];
+  const rows = [...card.matchAll(/<fieldset\b[^>]*class="param-row"[^>]*>([\s\S]*?)<\/fieldset>/g)];
+  assert.equal(rows.length, 3, 'two masters and one loop for the five capabilities');
+  for (const row of rows) {
+    assert.match(row[0], /:disabled="toolsSaving.agent \|\| !selectedProfileId"/);
+    assert.match(row[1], /class="param-label"/);
+    assert.match(row[1], /<tri-toggle\s+:model-value="getProfileAgentPermission\(/);
+    assert.match(row[1], /@update:model-value="saveToolConfig\('agent',/);
+    assert.match(row[1], /selectedProfileId\)"/);
+    assert.doesNotMatch(row[0], /agentSettingsForm|agentSettingsBusy|agentSettingsLoaded|:disabled="[^"]*getProfileAgentPermission/);
+  }
+  assert.match(rows[0][1], /t\('agentProfileToolsEnable'\)/);
+  assert.match(rows[1][1], /t\('agentAutonomyProfileEnable'\)/);
+  assert.match(rows[2][0], /v-for="capability in agentCapabilities"/);
+  assert.match(rows[2][1], /t\('agentCapability_' \+ capability\)/);
+  assert.doesNotMatch(card, /<toggle-row[^>]*getProfileAgentPermission/);
+  assert.match(card, /<toggle-row v-for="tool in toolsList.filter\(tw => tw.tool_id === 'timer'/);
+});
+
+test('both locales describe global defaults, explicit overrides and shared caps', () => {
+  const { model } = harness();
+  for (const locale of ['en', 'zh']) {
+    model.locale = locale;
+    const defaults = locale === 'en' ? /default/i : /默认/;
+    for (const key of ['agentEnable', 'agentAutonomyEnable', 'agentDefaultLabel', 'agentEnableHint',
+      'agentAutonomyHint', 'agentCapabilityHint', 'agentProfileHint', 'agentProfileNativeHint']) {
+      assert.match(model.t(key), defaults, key);
+    }
+    for (const key of ['agentEnableHint', 'agentAutonomyHint', 'agentCapabilityHint', 'agentProfileHint', 'agentProfileNativeHint']) {
+      assert.match(model.t(key), locale === 'en' ? /overrid/i : /覆盖/, key);
+      assert.match(model.t(key), locale === 'en' ? /even.*off/i : /即使.*关闭/, key);
+    }
+    assert.match(model.t('agentAutonomyProfileHint'), locale === 'en' ? /effective tool/i : /工具.*实际生效/);
+    for (const key of ['agentLimitsHint', 'agentAutonomyBudgetHint']) {
+      assert.match(model.t(key), locale === 'en' ? /shared/i : /共用/);
+    }
+    assert.doesNotMatch(model.t('agentCapabilityHint') + model.t('agentProfileHint') + model.t('agentProfileNativeHint'),
+      /only restrict|must also be enabled globally|只能限制|全局 AI 工具及对应能力也需开启/);
+  }
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  assert.match(html, /:label="t\('agentDefaultLabel'\) \+ t\('agentCapability_' \+ capability\)"/);
+});
+
+test('rendered persona controls show raw states and emit on/off/inherit even with defaults and tools off', () => {
+  const { model } = harness();
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  const card = html.slice(html.indexOf('<div v-if="profileSubTab === \'tools\'"'))
+    .split('<div v-if="toolsLoading"')[0];
+  const rows = [...card.matchAll(/<fieldset\b[^>]*class="param-row"[^>]*>[\s\S]*?<\/fieldset>/g)].map(row => row[0]).join('');
+  assert.ok(rows, 'permission rows must use native disabled fieldsets');
+  const components = { window: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../static/js/components.js'), 'utf8'), components);
+  const node = (type, text = '') => ({ type, text, props: {}, children: [] });
+  const renderer = realVue.createRenderer({
+    createElement: type => node(type), createText: text => node('#text', text), createComment: text => node('#comment', text),
+    setText: (el, text) => { el.text = text; }, setElementText: (el, text) => { el.text = text; },
+    patchProp: (el, key, _old, value) => { el.props[key] = value; },
+    insert: (el, parent) => { parent.children.push(el); }, remove() {}, parentNode() {}, nextSibling() {},
+  });
+  model.selectedProfileId = 'p1';
+  const keys = ['enabled', 'autonomy_enabled', ...model.agentCapabilities];
+  const saves = [];
+  model.saveToolConfig = (...args) => saves.push(args);
+  for (const globalDefault of [false, true]) {
+    Object.assign(model.agentSettingsForm, Object.fromEntries(keys.map(key => [key, globalDefault])));
+    for (const value of [undefined, null, true, false]) {
+      model.profiles = [{ profile_id: 'p1', tool_configs: { agent: value === undefined ? {} : Object.fromEntries(keys.map(key => [key, value])) } }];
+      for (const lock of ['none', 'saving', 'no-profile']) {
+        model.toolsSaving.agent = lock === 'saving';
+        model.selectedProfileId = lock === 'no-profile' ? '' : 'p1';
+        const root = node('root');
+        const app = renderer.createApp({ render: realVue.compile(`<div>${rows}</div>`), setup: () => model });
+        app.component('tri-toggle', components.window.SK_COMPONENTS['tri-toggle']);
+        app.provide('gt', key => model.t(key));
+        app.mount(root);
+        const descendants = el => [el, ...el.children.flatMap(descendants)];
+        const fieldsets = descendants(root).filter(el => el.type === 'fieldset');
+        assert.equal(fieldsets.length, 7);
+        fieldsets.forEach((fieldset, index) => {
+          assert.equal(Boolean(fieldset.props.disabled), lock !== 'none');
+          const buttons = descendants(fieldset).filter(el => el.type === 'button');
+          assert.equal(buttons.length, 3, 'reuse the existing three-button layout');
+          const raw = lock === 'no-profile' ? null : value ?? null;
+          assert.deepEqual(buttons.map(button => button.props.class.includes('active')), [raw === null, raw === true, raw === false]);
+          if (lock === 'none') buttons.forEach((button, i) => {
+            button.props.onClick();
+            assert.deepEqual(JSON.parse(JSON.stringify(saves.at(-1))), ['agent', { [keys[index]]: [null, true, false][i] }, 'p1']);
+          });
+        });
+        app.unmount();
+      }
+    }
+  }
 });
 
 test('older profile list cannot overwrite newly loaded character permissions', async () => {

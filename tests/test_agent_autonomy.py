@@ -59,6 +59,7 @@ class AutonomyTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 normalize_settings(value)
         self.config.agent['autonomy_enabled'] = False
+        self.profiles['a']['tool_configs']['agent']['autonomy_enabled'] = None
         self.assertFalse(await self.runner.start(self.current, 'write a note', 'cycle-1'))
         self.config.agent['autonomy_enabled'] = True
         self.profiles['a']['tool_configs']['agent']['autonomy_enabled'] = False

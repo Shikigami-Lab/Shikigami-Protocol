@@ -541,12 +541,12 @@ test('workspace mutation preflight failure and view change send no mutation', as
   assert.equal(posts, 0); assert.equal(model.agentWorkspaceMutationBusy, false);
 });
 
-test('profile restrictions inherit and PATCH only the chosen capability', async () => {
+test('profile overrides inherit and PATCH only the chosen capability', async () => {
   const requests = [];
   const { model } = harness(async (url, options) => { requests.push([url, options]); return { ok: true, json: async () => ({ ok: true }) }; });
   model.selectedProfileId = 'p1'; model.profiles = [{ profile_id: 'p1', tool_configs: { agent: { web_enabled: false } } }];
   assert.equal(model.getProfileAgentPermission('web_enabled'), false);
-  assert.equal(model.getProfileAgentPermission('workspace_enabled'), true);
+  assert.equal(model.getProfileAgentPermission('workspace_enabled'), null);
   model.loadProfiles = async () => {}; model.loadToolsConfig = async () => {};
   await model.saveToolConfig('agent', { web_enabled: true }, 'p1');
   assert.equal(requests[0][0], 'http://fixture.test/api/profiles/p1/tool_configs');

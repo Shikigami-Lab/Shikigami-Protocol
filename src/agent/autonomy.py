@@ -20,15 +20,9 @@ class AutonomyRunner:
 
     def enabled(self, session):
         runtime = self.runtime
-        settings = runtime.settings
-        if self.group_view or runtime._closed or not settings['enabled'] or not settings['autonomy_enabled']:
+        if self.group_view or runtime._closed or not runtime.autonomy_allowed(session.profile_id):
             return False
         if session.id != session.profile_id:
-            return False
-        profile = runtime.profile_loader(session.profile_id) or {}
-        if not runtime.tools_allowed(session.profile_id):
-            return False
-        if ((profile.get('tool_configs') or {}).get('agent') or {}).get('autonomy_enabled') is not True:
             return False
         manager = getattr(runtime.app.state, 'session_manager', None)
         current = manager.get_current() if manager else None

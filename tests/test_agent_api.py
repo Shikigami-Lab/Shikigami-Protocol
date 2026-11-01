@@ -147,7 +147,7 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
     async def test_disabling_autonomy_cancels_only_reflection_tasks(self):
         self.sm.get_current = lambda: self.sm.sessions['alpha']
         self.config.agent.update(autonomy_enabled=True, workspace_enabled=True)
-        self.runtime.profile_loader = lambda p: {'tool_configs': {'agent': {'autonomy_enabled': True}}}
+        self.runtime.profile_loader = lambda p: {'tool_configs': {'agent': {'autonomy_enabled': None}}}
         auto = self.runtime.prepare(self.sm.sessions['alpha'], deepcopy(MESSAGES), dict(PRESET), origin='reflection')
         user = self.prepare('beta')
         response = await self.request('PATCH', '/settings', json={'autonomy_enabled': False})
@@ -155,6 +155,39 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(auto.stopped.is_set())
         self.assertEqual(self.runtime.store.get_run(auto.id)['state'], 'cancelled')
         self.assertFalse(user.stopped.is_set())
+
+    async def test_global_defaults_off_do_not_stop_explicit_persona_on(self):
+        self.sm.get_current = lambda: self.sm.sessions['alpha']
+        self.config.agent.update(enabled=True, autonomy_enabled=True, workspace_enabled=True)
+        self.runtime.profile_loader = lambda p: {'tool_configs': {'agent': {
+            'enabled': True, 'autonomy_enabled': True, 'workspace_enabled': True}}}
+        run = self.runtime.prepare(self.sm.sessions['alpha'], deepcopy(MESSAGES), dict(PRESET), origin='reflection')
+        response = await self.request('PATCH', '/settings', json={
+            'enabled': False, 'autonomy_enabled': False, 'workspace_enabled': False})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(run.stopped.is_set())
+        self.runtime._authorize(run)
+        status = await self.request('GET', '/status')
+        self.assertFalse(status.json()['enabled'])
+        self.assertTrue(status.json()['effective_enabled'])
+        self.assertEqual(status.json()['state'], 'ready')
+
+    async def test_persona_null_roundtrip_inherits_global_and_rechecks_running_task(self):
+        import json
+        from src.api.tools import router as tools_router
+        self.app.include_router(tools_router)
+        folder = self.root/'tri-state-profiles';folder.mkdir()
+        path = folder/'alpha.json'
+        path.write_text(json.dumps({'tool_configs': {'agent': {'enabled': True, 'autonomy_enabled': True}}}))
+        self.runtime.profile_loader = lambda p: json.loads(path.read_text()) if p == 'alpha' else {}
+        self.config.agent['enabled'] = False
+        run = self.prepare('alpha')
+        with patch('src.api.tools._PROFILES_DIR', str(folder)):
+            response = await self.client.patch('/api/profiles/alpha/tool_configs', json={
+                'tool_id': 'agent', 'config': {'enabled': None, 'autonomy_enabled': None}})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(json.loads(path.read_text())['tool_configs']['agent']['enabled'])
+        self.assertTrue(run.stopped.is_set())
 
     async def test_autonomy_settings_bounds_and_strict_types(self):
         for body in ({'autonomy_enabled': 1}, {'autonomy_interval_seconds': 59},
@@ -191,6 +224,7 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         folder = self.root / 'fixture-profiles'
         folder.mkdir()
         (folder / 'alpha.json').write_text(json.dumps({'tool_configs': {'agent': {'autonomy_enabled': True}}}))
+        self.runtime.profile_loader = lambda p: json.loads((folder/(p+'.json')).read_text()) if (folder/(p+'.json')).exists() else {}
         with patch('src.api.tools._PROFILES_DIR', str(folder)):
             response = await self.client.patch('/api/profiles/alpha/tool_configs', json={
                 'tool_id': 'agent', 'config': {'autonomy_enabled': False}})
@@ -206,6 +240,7 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         folder = self.root / 'fixture-profiles'
         folder.mkdir()
         (folder / 'alpha.json').write_text(json.dumps({'tool_configs': {'agent': {'enabled': True}}}))
+        self.runtime.profile_loader = lambda p: json.loads((folder/(p+'.json')).read_text()) if (folder/(p+'.json')).exists() else {}
         with patch('src.api.tools._PROFILES_DIR', str(folder)):
             response = await self.client.patch('/api/profiles/alpha/tool_configs', json={
                 'tool_id': 'agent', 'config': {'enabled': False}})

@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261102workspace2" />
-  <link rel="stylesheet" href="css/settings.css?v=20261102todo2" />
+  <link rel="stylesheet" href="css/styles.css?v=20261102tri1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261102tri1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261102workspace2"></script>
+  <script src="js/i18n.js?v=20261102tri1"></script>
 </head>
 <body>
 
@@ -3933,17 +3933,27 @@
                 <div v-if="!toolsLoading" class="s-card">
                   <div class="s-card-title">{{ t('agentProfilePermissions') }}</div>
                   <p class="form-hint">{{ t('agentProfileHint') }}</p>
-                  <toggle-row :label="t('agentProfileToolsEnable')" :model-value="getProfileAgentPermission('enabled')"
-                    :disabled="toolsSaving.agent || !selectedProfileId"
-                    @update:model-value="saveToolConfig('agent', {enabled: $event}, selectedProfileId)"></toggle-row>
-                  <toggle-row :label="t('agentAutonomyProfileEnable')" :model-value="getProfileAgentPermission('autonomy_enabled')"
-                    :disabled="toolsSaving.agent || !selectedProfileId || !getProfileAgentPermission('enabled')"
-                    @update:model-value="saveToolConfig('agent', {autonomy_enabled: $event}, selectedProfileId)"></toggle-row>
+                  <fieldset class="param-row" style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.agent || !selectedProfileId" aria-labelledby="agent-profile-tools-label">
+                    <span id="agent-profile-tools-label" class="param-label" style="flex:1;width:auto;">{{ t('agentProfileToolsEnable') }}</span>
+                    <tri-toggle :model-value="getProfileAgentPermission('enabled')"
+                      @update:model-value="saveToolConfig('agent', {enabled: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
+                  <fieldset class="param-row" style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.agent || !selectedProfileId" aria-labelledby="agent-profile-autonomy-label">
+                    <span id="agent-profile-autonomy-label" class="param-label" style="flex:1;width:auto;">{{ t('agentAutonomyProfileEnable') }}</span>
+                    <tri-toggle :model-value="getProfileAgentPermission('autonomy_enabled')"
+                      @update:model-value="saveToolConfig('agent', {autonomy_enabled: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
                   <p class="form-hint">{{ t('agentAutonomyProfileHint') }}</p>
-                  <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentCapability_' + capability)"
-            :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''"
-                    :model-value="getProfileAgentPermission(capability)" :disabled="toolsSaving.agent || !selectedProfileId"
-                    @update:model-value="saveToolConfig('agent', {[capability]: $event}, selectedProfileId)"></toggle-row>
+                  <fieldset v-for="capability in agentCapabilities" :key="capability" class="param-row"
+                    style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.agent || !selectedProfileId" :aria-labelledby="'agent-profile-' + capability + '-label'"
+                    :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''">
+                    <span :id="'agent-profile-' + capability + '-label'" class="param-label" style="flex:1;width:auto;">{{ t('agentCapability_' + capability) }}</span>
+                    <tri-toggle :model-value="getProfileAgentPermission(capability)"
+                      @update:model-value="saveToolConfig('agent', {[capability]: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
                   <p class="form-hint">{{ t('agentProfileNativeHint') }}</p>
                   <toggle-row v-for="tool in toolsList.filter(tw => tw.tool_id === 'timer' && tw.agent_capable === true)" :key="tool.tool_id"
                     :label="t('agentTimerPermission')" :model-value="tool.config?.enabled !== false" :disabled="toolsSaving.timer"
@@ -4227,7 +4237,7 @@
           <p class="form-hint">{{ t('agentAutonomyBudgetHint') }}</p>
           <button type="button" class="s-btn s-btn-secondary" :disabled="agentSettingsBusy || !agentSettingsLoaded"
                   @click="saveAgentSettings({autonomy_interval_seconds: agentSettingsForm.autonomy_interval_seconds, autonomy_max_requests_per_hour: agentSettingsForm.autonomy_max_requests_per_hour})">{{ t('agentSaveLimits') }}</button>
-          <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentCapability_' + capability)"
+          <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentDefaultLabel') + t('agentCapability_' + capability)"
             :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''"
             :model-value="agentSettingsForm[capability]"
             :disabled="agentSettingsBusy || !agentSettingsLoaded || (capability === 'code_enabled' && !agentSettingsForm.workspace_enabled)"
@@ -5541,10 +5551,10 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261102workspace2"></script>
-<script src="js/components.js?v=20261102workspace2"></script>
-<script src="js/settings.js?v=20261102workspace1"></script>
-<script src="js/agent-ui.js?v=20261102workspace2"></script>
-<script src="js/app.js?v=20261102workspace2"></script>
+<script src="js/api-paths.js?v=20261102tri1"></script>
+<script src="js/components.js?v=20261102tri1"></script>
+<script src="js/settings.js?v=20261102tri1"></script>
+<script src="js/agent-ui.js?v=20261102tri1"></script>
+<script src="js/app.js?v=20261102tri1"></script>
 </body>
 </html>

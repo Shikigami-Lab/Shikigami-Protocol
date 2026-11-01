@@ -79,6 +79,7 @@ class ReflectionResultTests(unittest.IsolatedAsyncioTestCase):
         store.add('Synthetic unfinished fox drawing', owner='ai')
         self.runtime.access_for = mock.Mock(return_value={'todo_enabled': True})
         self.runtime.settings = {'enabled': True}
+        self.runtime.tools_allowed = mock.Mock(return_value=True)
         await self.reflect()
         system = self.provider.chat.call_args.args[0][0]['content']
         self.assertIn('Synthetic unfinished fox drawing', system)
@@ -91,6 +92,7 @@ class ReflectionResultTests(unittest.IsolatedAsyncioTestCase):
         TodoStore(self.session.storage_root).add('Synthetic ongoing project', owner='ai')
         self.runtime.access_for = mock.Mock(return_value={'todo_enabled': True})
         self.runtime.settings = {'enabled': True}
+        self.runtime.tools_allowed = mock.Mock(return_value=True)
         await self.reflect()
         self.provider.chat.assert_awaited_once()
         self.assertIn('Synthetic ongoing project', self.provider.chat.call_args.args[0][0]['content'])

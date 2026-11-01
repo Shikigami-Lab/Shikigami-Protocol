@@ -105,8 +105,8 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Req
     cfg = body.config
     if tool_id == 'agent':
         from src.agent.capabilities import KEYS
-        if any(key not in (*KEYS, 'enabled', 'autonomy_enabled') or type(value) is not bool for key, value in cfg.items()):
-            raise HTTPException(status_code=422, detail='Agent permissions must be known boolean capability fields')
+        if any(key not in (*KEYS, 'enabled', 'autonomy_enabled') or (value is not None and type(value) is not bool) for key, value in cfg.items()):
+            raise HTTPException(status_code=422, detail='Agent settings must be known boolean or null (inherit) fields')
     if tool_id in ('timer', 'todo') and 'enabled' in cfg and type(cfg['enabled']) is not bool:
         raise HTTPException(status_code=422, detail='Tool permission must be a boolean')
 
@@ -123,11 +123,8 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Req
     if tool_id == 'agent' or (tool_id == 'todo' and cfg.get('enabled') is False):
         runtime = getattr(request.app.state, 'agent_runtime', None)
         if runtime:
-            revoked = [key for key, value in cfg.items() if value is False]
             for run in list(runtime._runs.values()):
-                if run.profile_id == profile_id and not run.terminal and ((tool_id == 'todo' and run.access.get('todo_enabled')) or
-                        (tool_id == 'agent' and 'enabled' in revoked) or any(run.access.get(key) for key in revoked)
-                        or ('autonomy_enabled' in revoked and run.envelope.get('origin') == 'reflection')):
+                if run.profile_id == profile_id and not run.terminal and not runtime.permissions_valid(run):
                     await runtime.cancel(run.id, profile_id)
     return {"ok": True}
 

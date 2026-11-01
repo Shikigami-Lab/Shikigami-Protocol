@@ -59,7 +59,6 @@ async def view_state(request: Request, body: ViewState):
 @router.patch("/settings")
 async def patch_settings(request: Request, body: SettingsPatch):
     runtime = _runtime(request)
-    previous = runtime.settings
     changes = body.model_dump(exclude_unset=True)
     try:
         value = normalize_settings({**runtime.settings, **changes})
@@ -67,14 +66,10 @@ async def patch_settings(request: Request, body: SettingsPatch):
         raise HTTPException(422, str(error)) from None
     save_settings(runtime.root / "config" / "app.yaml", value)
     request.app.state.config.agent = value
-    revoked = [key for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled')
-               if previous.get(key) and not value[key]]
-    autonomy_revoked = previous['autonomy_enabled'] and not value['autonomy_enabled']
-    if not value['enabled'] or revoked or autonomy_revoked:
-        for run in list(runtime._runs.values()):
-            if not run.terminal and (not value['enabled'] or any(run.access.get(key) for key in revoked)
-                    or (autonomy_revoked and run.envelope.get('origin') == 'reflection')):
-                await runtime.cancel(run.id, run.profile_id)
+    # Defaults may change without revoking a persona's explicit opt-in.
+    for run in list(runtime._runs.values()):
+        if not run.terminal and not runtime.permissions_valid(run):
+            await runtime.cancel(run.id, run.profile_id)
     return value
 
 

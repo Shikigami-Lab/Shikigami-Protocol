@@ -90,8 +90,21 @@ class AgentRuntime:
         return normalize_settings(getattr(self.app.state.config, "agent", {}))
 
     def tools_allowed(self, profile_id):
+        from src.agent.capabilities import resolve_setting
         profile = self.profile_loader(profile_id) or {}
-        return ((profile.get('tool_configs') or {}).get('agent') or {}).get('enabled', True) is True
+        return resolve_setting(self.settings, profile, 'enabled')
+
+    def autonomy_allowed(self, profile_id):
+        from src.agent.capabilities import resolve_setting
+        return self.tools_allowed(profile_id) and resolve_setting(self.settings, self.profile_loader(profile_id), 'autonomy_enabled')
+
+    def permissions_valid(self, run):
+        if not self.tools_allowed(run.profile_id):
+            return False
+        if run.envelope.get('origin') == 'reflection' and not self.autonomy_allowed(run.profile_id):
+            return False
+        current = self.access_for(run.profile_id)
+        return not any(value and not current.get(key) for key, value in run.access.items())
 
     def timer_allowed(self, profile_id):
         profile = self.profile_loader(profile_id) or {}
@@ -109,23 +122,17 @@ class AgentRuntime:
             for r in getattr(self, '_runs', {}).values()))
 
     def workspace_context(self, profile_id):
-        if not self.settings['enabled'] or not self.access_for(profile_id)['workspace_enabled']:
+        if not self.tools_allowed(profile_id) or not self.access_for(profile_id)['workspace_enabled']:
             return ''
         return self.catalog.context(profile_id)
 
     def _authorize(self, run, *, timer=False):
-        if (self._closed or run.stopped.is_set() or run.terminal or not self.settings["enabled"] or not self.tools_allowed(run.profile_id)
+        if (self._closed or run.stopped.is_set() or run.terminal
                 or not self.context_valid(run)):
             raise ValueError("Task stopped or context changed")
         if timer and (not run.timer_enabled or not self.timer_allowed(run.profile_id)):
             raise ValueError("Timer use is disabled for this character")
-        current = self.access_for(run.profile_id)
-        if run.envelope.get('origin') == 'reflection':
-            profile = self.profile_loader(run.profile_id) or {}
-            if (not self.settings['autonomy_enabled'] or
-                    ((profile.get('tool_configs') or {}).get('agent') or {}).get('autonomy_enabled') is not True):
-                raise ValueError('Autonomous activity is disabled for this character')
-        if any(value and not current.get(key) for key, value in run.access.items()):
+        if not self.permissions_valid(run):
             raise ValueError('Task permissions changed; start a new task')
 
     def context_valid(self, run):
@@ -135,8 +142,6 @@ class AgentRuntime:
     def prepare(self, session, messages, preset, *, client_id="", request_id="", continue_run_id="", origin="user"):
         """Reserve authority before chat storage/streaming; never infer identity from model text."""
         limits = self.settings
-        if not limits["enabled"]:
-            raise ValueError("AI tools are disabled")
         if session.id != session.profile_id:
             raise ValueError('Harness group chat is not enabled in this phase')
         if not self.tools_allowed(session.profile_id):
@@ -186,8 +191,11 @@ class AgentRuntime:
         if refresh or self._health is None or time.monotonic() - self._health_at > 10:
             self._health = await asyncio.to_thread(self._probe, preset)
             self._health_at = time.monotonic()
-        return {**settings, **self._health, "model": preset.get("model", ""),
-                "state": "disabled" if not settings["enabled"] else ("ready" if self._health["available"] else "unavailable")}
+        manager = getattr(self.app.state, 'session_manager', None)
+        current = manager.get_current() if callable(getattr(manager, 'get_current', None)) else None
+        effective = self.tools_allowed(current.profile_id) if current is not None else settings['enabled']
+        return {**settings, **self._health, "model": preset.get("model", ""), 'effective_enabled': effective,
+                "state": "disabled" if not effective else ("ready" if self._health["available"] else "unavailable")}
 
     def _probe(self, preset):
         try:

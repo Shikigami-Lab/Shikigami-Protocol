@@ -119,7 +119,7 @@ def execute_todo(runtime, run, name, arguments, request_id):
 
 def reflection_plan_context(runtime, session):
     """Read a small live plan summary; independent of chat reminder cooldown."""
-    if not runtime.settings.get('enabled') or not runtime.access_for(session.profile_id).get('todo_enabled'):
+    if not runtime.tools_allowed(session.profile_id) or not runtime.access_for(session.profile_id).get('todo_enabled'):
         return ''
     from src.tools.todo.store import TodoStore
     pending = TodoStore(session.storage_root).get_pending(owner='ai')

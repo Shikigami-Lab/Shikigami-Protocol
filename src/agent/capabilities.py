@@ -2,9 +2,18 @@
 KEYS = ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled')
 
 
+def resolve_setting(settings, profile, key):
+    """Persona bool overrides the application default; missing/null inherits."""
+    overrides = ((profile or {}).get('tool_configs') or {}).get('agent') or {}
+    value = overrides.get(key)
+    return settings.get(key) is True if value is None else value is True
+
+
 def capabilities(settings, profile):
     restrictions = ((profile or {}).get('tool_configs') or {}).get('agent') or {}
-    result = {key: restrictions.get('enabled', True) is True and settings.get(key) is True and restrictions.get(key, True) is True for key in KEYS}
+    # Availability is configured independently from the master default. The
+    # runtime checks effective master authority before routing or executing.
+    result = {key: restrictions.get('enabled') is not False and resolve_setting(settings, profile, key) for key in KEYS}
     result['code_enabled'] &= result['workspace_enabled']
     result['todo_enabled'] &= (((profile or {}).get('tool_configs') or {}).get('todo') or {}).get('enabled', True) is True
     return result
