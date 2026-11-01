@@ -472,7 +472,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
-  for (const file of ['api-paths.js', 'i18n.js', 'agent-ui.js', 'settings.js', 'app.js']) {
+  for (const file of ['api-paths.js', 'i18n.js', 'agent-ui.js', 'settings.js', 'compose-assist.js', 'app.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/js', file), 'utf8'), sandbox);
   }
   const rawModel = Object.assign({}, ...app.mixins.map(m => m.data()), {
