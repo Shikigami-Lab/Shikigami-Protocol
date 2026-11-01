@@ -156,6 +156,10 @@ class LinkStore:
             self._db.execute("PRAGMA synchronous=FULL")
             with self._transaction(write=True) as db:
                 for statement in (
+                    """CREATE TABLE IF NOT EXISTS autonomy_admissions (
+                        admission_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+                        intent_hash TEXT NOT NULL, created_at REAL NOT NULL,
+                        request_limit INTEGER NOT NULL)""",
                     """CREATE TABLE IF NOT EXISTS profiles (
                         profile_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0)""",
                     """CREATE TABLE IF NOT EXISTS runs (
@@ -243,6 +247,36 @@ class LinkStore:
         result["events"] = [dict(json.loads(event["payload"]), seq=event["seq"])
                             for event in reversed(events)]
         return result
+
+    def claim_autonomy(self, admission_id, profile_id, goal, interval, hourly_limit, request_limit):
+        """Atomically reserve a rolling-hour request allowance before any work.
+
+        Failed/unused reservations are conservative: not refunded on crashes.
+        Keep only intent hashes, never a second copy of private reflections.
+        """
+        _id(admission_id)
+        _id(profile_id)
+        if not isinstance(goal, str) or not 0 < len(goal.strip()) <= 1000:
+            raise ValueError('Invalid autonomous goal')
+        for value, low, high in ((interval, 60, 86400), (hourly_limit, 1, 128), (request_limit, 1, 32)):
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError('Invalid autonomous limit')
+        digest = hashlib.sha256(' '.join(goal.casefold().split()).encode()).hexdigest()
+        now = time.time()
+        with self._transaction(write=True) as db:
+            if db.execute('SELECT 1 FROM autonomy_admissions WHERE admission_id=?', (admission_id,)).fetchone():
+                return 0
+            latest = db.execute('SELECT max(created_at) FROM autonomy_admissions WHERE profile_id=?', (profile_id,)).fetchone()[0]
+            if latest is not None and now - latest < interval:
+                return 0
+            if db.execute('SELECT 1 FROM autonomy_admissions WHERE profile_id=? AND intent_hash=? AND created_at>?',
+                          (profile_id, digest, now - 86400)).fetchone():
+                return 0
+            spent = db.execute('SELECT coalesce(sum(request_limit),0) FROM autonomy_admissions WHERE created_at>?', (now - 3600,)).fetchone()[0]
+            allowance = min(request_limit, max(0, hourly_limit - spent))
+            if allowance:
+                db.execute('INSERT INTO autonomy_admissions VALUES (?,?,?,?,?)', (admission_id, profile_id, digest, now, allowance))
+            return allowance
 
     def begin_run(self, run_id, profile_id, session_id, origin="user"):
         for name, value in (("run_id", run_id), ("profile_id", profile_id), ("session_id", session_id)):
@@ -455,7 +489,7 @@ class LinkStore:
             db.execute("UPDATE runs SET last_seq=?,updated_at=? WHERE run_id=?", (seq, time.time(), run_id))
             return dict(json.loads(payload), seq=seq)
 
-    def finish_run(self, run_id, state, error=None, *, publish_result=False, model_requests=0):
+    def finish_run(self, run_id, state, error=None, *, publish_result=False, model_requests=0, outcome=None):
         """Finish a run, optionally publishing its bounded summary atomically."""
         _id(run_id, "run_id")
         if not isinstance(state, str) or state not in _TERMINAL:
@@ -465,6 +499,8 @@ class LinkStore:
             raise ValueError("model_requests must be a nonnegative integer")
         if publish_result:
             result = {"state": state, "model_requests": model_requests}
+            if outcome is not None:
+                result['outcome'] = outcome
             if error is not None:
                 result["error"] = error
             payload = _json({"tool": "agent_task", "result": result})

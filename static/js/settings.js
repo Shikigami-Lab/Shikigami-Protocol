@@ -212,7 +212,9 @@ const SettingsMixin = {
       toolsLoading: false,
       toolsSaving: {},          // { tool_id: bool }
       toolsLoadSequence: 0,
-      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null },
+      profilesLoadSequence: 0,
+      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null,
+        autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12 },
       agentRuntime: null,
       agentSettingsLoaded: false,
       agentSettingsBusy: false,
@@ -1818,9 +1820,11 @@ const SettingsMixin = {
     /* ─────────────── Profiles ─────────────── */
 
     async loadProfiles() {
+      const sequence = ++this.profilesLoadSequence, selected = this.selectedProfileId;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.profiles());
         const data = await res.json();
+        if (!res.ok || sequence !== this.profilesLoadSequence || selected !== this.selectedProfileId) return;
         this.profiles = data.profiles || [];
         if (this.profiles.length && !this.selectedProfileId) {
           this.selectProfile(this.profiles[0].profile_id);
@@ -1953,6 +1957,15 @@ const SettingsMixin = {
       document.addEventListener('pointercancel', onUp);
     },
     selectProfile(profileId) {
+      if (profileId !== this.selectedProfileId) {
+        // Invalidate immediately, including a switch away and back before Vue's watchers run.
+        this.profilesLoadSequence++;
+        this.toolsLoadSequence++;
+        this.toolsList = [];
+        this.toolsLoading = false;
+        this.trendStatus = { unused_count: 0, total_count: 0, last_fetched_at: null };
+        this.weatherStatus = { available: false };
+      }
       this._profileFormLoaded = false;
       this.selectedProfileId = profileId;
       const p = this.profiles.find(x => x.profile_id === profileId);
@@ -5121,7 +5134,8 @@ const SettingsMixin = {
       this.agentSettingsError = '';
       try {
         const settings = await this.agentFetch(API_PATHS.agentSettings());
-        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, ...settings };
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false,
+          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
         this.agentSettingsLoaded = true;
         this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
       } catch (error) {
@@ -5137,13 +5151,20 @@ const SettingsMixin = {
         this.agentSettingsError = this.t('agentLimitsInvalid');
         return;
       }
+      if (('autonomy_enabled' in patch && typeof patch.autonomy_enabled !== 'boolean') ||
+          ('autonomy_interval_seconds' in patch && (!Number.isInteger(patch.autonomy_interval_seconds) || patch.autonomy_interval_seconds < 60 || patch.autonomy_interval_seconds > 86400)) ||
+          ('autonomy_max_requests_per_hour' in patch && (!Number.isInteger(patch.autonomy_max_requests_per_hour) || patch.autonomy_max_requests_per_hour < 1 || patch.autonomy_max_requests_per_hour > 128))) {
+        this.agentSettingsError = this.t('agentAutonomyLimitsInvalid');
+        return;
+      }
       this.agentSettingsBusy = true;
       this.agentSettingsError = '';
       try {
         const settings = await this.agentFetch(API_PATHS.agentSettings(), {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
-        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, ...settings };
+        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false,
+          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
         this.agentRuntime = await this.agentFetch(API_PATHS.agentStatus());
         this.showToast(this.t('savedOk'), 'success');
       } catch (error) {
@@ -5166,10 +5187,11 @@ const SettingsMixin = {
         this.toolsList = data.tools || [];
         if (pid) {
           await this.loadTrendStatus(pid);
+          if (sequence !== this.toolsLoadSequence || selected !== this.selectedProfileId || tab !== this.activeTab) return;
           await this.loadWeatherStatus(pid);
         }
       } catch (e) {
-        if (sequence === this.toolsLoadSequence) {
+        if (sequence === this.toolsLoadSequence && selected === this.selectedProfileId && tab === this.activeTab) {
           this.toolsList = [];
           this.showToast(this.t('errLoadTools'), 'error');
         }
@@ -5181,6 +5203,8 @@ const SettingsMixin = {
     async saveToolConfig(toolId, config, profileId) {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
+      const sequence = this.toolsLoadSequence;
+      const isCurrent = () => pid === this.selectedProfileId && sequence === this.toolsLoadSequence;
       this.toolsSaving = { ...this.toolsSaving, [toolId]: true };
       try {
         const res = await fetch(getBaseUrl() + `/api/profiles/${encodeURIComponent(pid)}/tool_configs`, {
@@ -5190,13 +5214,13 @@ const SettingsMixin = {
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.detail || this.t('errSave'));
-        if (pid === this.selectedProfileId) {
+        if (isCurrent()) {
           this.showToast(this.t('savedOk'), 'success');
           if (toolId === 'agent') await this.loadProfiles();
-          if (pid === this.selectedProfileId) await this.loadToolsConfig(pid);
+          if (isCurrent()) await this.loadToolsConfig(pid);
         }
       } catch (e) {
-        this.showToast(this.t('errSave'), 'error');
+        if (isCurrent()) this.showToast(this.t('errSave'), 'error');
       } finally {
         this.toolsSaving = { ...this.toolsSaving, [toolId]: false };
       }
@@ -5204,6 +5228,7 @@ const SettingsMixin = {
 
     getProfileAgentPermission(key) {
       const profile = this.profiles.find(p => p.profile_id === this.selectedProfileId);
+      if (key === 'autonomy_enabled') return profile?.tool_configs?.agent?.[key] === true;
       return profile?.tool_configs?.agent?.[key] !== false;
     },
 
@@ -5215,9 +5240,11 @@ const SettingsMixin = {
     async loadTrendStatus(profileId) {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
+      const sequence = this.toolsLoadSequence;
       try {
         const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/status`);
-        this.trendStatus = await res.json();
+        const data = await res.json();
+        if (res.ok && pid === this.selectedProfileId && sequence === this.toolsLoadSequence) this.trendStatus = data;
       } catch (e) { /* silent */ }
     },
 
@@ -5279,9 +5306,11 @@ const SettingsMixin = {
     async loadWeatherStatus(profileId) {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
+      const sequence = this.toolsLoadSequence;
       try {
         const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/weather/status`);
-        this.weatherStatus = await res.json();
+        const data = await res.json();
+        if (res.ok && pid === this.selectedProfileId && sequence === this.toolsLoadSequence) this.weatherStatus = data;
       } catch (e) { /* silent */ }
     },
   },

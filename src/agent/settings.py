@@ -4,17 +4,19 @@ import os
 import tempfile
 
 DEFAULTS = {"enabled": False, "max_model_requests": 6, "timeout_seconds": 120}
+DEFAULTS.update(autonomy_enabled=False, autonomy_interval_seconds=900, autonomy_max_requests_per_hour=12)
 DEFAULTS.update({key: False for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled')})
 
 
 def normalize_settings(raw=None):
     value = {**DEFAULTS, **(raw or {})}
-    for key in ('enabled', 'workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled'):
+    for key in ('enabled', 'workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'autonomy_enabled'):
         if type(value[key]) is not bool:
             raise ValueError(f"{key} must be a boolean")
     if value['code_enabled'] and not value['workspace_enabled']:
         raise ValueError('Code execution requires the workspace')
-    for name, minimum, maximum in (("max_model_requests", 1, 32), ("timeout_seconds", 10, 600)):
+    for name, minimum, maximum in (("max_model_requests", 1, 32), ("timeout_seconds", 10, 600),
+            ('autonomy_interval_seconds', 60, 86400), ('autonomy_max_requests_per_hour', 1, 128)):
         if type(value[name]) is not int or not minimum <= value[name] <= maximum:
             raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
     return {key: value[key] for key in DEFAULTS}

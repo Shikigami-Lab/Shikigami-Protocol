@@ -23,6 +23,7 @@
       session_id: event.session_id, created_at: event.created_at || new Date().toISOString(),
       state: 'running', events: [], approval: null, ...old, sequence: event.sequence,
       request_id: old?.request_id || event.request_id };
+    if (event.origin === 'reflection' || event.origin === 'user') run.origin = event.origin;
     run.events = [...run.events, event];
     if (typeof event.workspace_warning === 'string') run.workspace_warning = event.workspace_warning;
     if (Array.isArray(event.artifacts)) run.artifacts = event.artifacts;
@@ -84,13 +85,13 @@
       currentAgentRuns() {
         // Presentation only: retain every run in agentRuns for stop ownership/status.
         return this.currentGroupId ? [] : visibleRuns(this.agentRuns, this.currentSessionId, this.currentSessionId)
-          .filter(run => (!terminal(run.state) && !this.agentRunIsAttached(run)) || run.state === 'failed' || (run.state === 'cancelled' && run.user_message_id != null) || run.artifacts?.length || run.parent_run_id || run.workspace_warning || run.error || (run.events || [])
+          .filter(run => run.origin === 'reflection' || (!terminal(run.state) && !this.agentRunIsAttached(run)) || run.state === 'failed' || (run.state === 'cancelled' && run.user_message_id != null) || run.artifacts?.length || run.parent_run_id || run.workspace_warning || run.error || (run.events || [])
             .some(event => ['tool_call', 'approval_requested', 'failed'].includes(event.type)));
       },
     },
     watch: {
-      currentSessionId() { this.agentViewChanged(); },
-      currentGroupId() { this.agentViewChanged(); },
+      currentSessionId() { this.syncAgentView(true); this.agentViewChanged(); },
+      currentGroupId() { this.syncAgentView(true); this.agentViewChanged(); },
     },
     mounted() {
       if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
@@ -102,10 +103,12 @@
         this.agentDrawerNarrow = this._agentDrawerMedia.matches;
         this._agentDrawerMedia.addEventListener('change', this._agentDrawerMediaChanged);
       }
+      this.syncAgentView(true);
       this.refreshAgentRuns();
-      this.agentPollTimer = setInterval(() => this.refreshAgentRuns(), 2500);
+      this.agentPollTimer = setInterval(() => { this.syncAgentView(); this.refreshAgentRuns(); }, 2500);
     },
     unmounted() {
+      if (this._agentViewSync) this._agentViewSync.closed = true;
       clearInterval(this.agentPollTimer);
       this._agentDrawerMedia?.removeEventListener('change', this._agentDrawerMediaChanged);
       this.closeAgentWorkspace({ restoreFocus: false });
@@ -113,8 +116,40 @@
     methods: {
       agentTerminal: terminal,
       agentRunKey: keyOf,
+      async syncAgentView(force = false) {
+        const state = this._agentViewSync || (this._agentViewSync = {
+          desired: null, confirmed: null, busy: false, version: 0, closed: false,
+        });
+        state.desired = !!this.currentGroupId;
+        // app.js restores groups asynchronously after loading the server profile.
+        // Its group-exit/invalid-group paths clear this persisted selection.
+        if (!state.desired) {
+          try { state.desired = !!localStorage.getItem('currentGroupId'); } catch (_) { /* storage may be unavailable */ }
+        }
+        state.version++;
+        if (state.closed || state.busy) return;
+        if (force) state.confirmed = null;
+        if (state.confirmed === state.desired) return;
+        state.busy = true;
+        try {
+          // One POST at a time: an old response cannot overwrite a newer view.
+          while (!state.closed && state.confirmed !== state.desired) {
+            const groupChat = state.desired, version = state.version;
+            // A failed response may still have changed the server's gate.
+            state.confirmed = null;
+            try {
+              await this.agentFetch(API_PATHS.agentView(), { method: 'POST',
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_chat: groupChat }) });
+              state.confirmed = groupChat;
+            } catch (_) {
+              // Retry only for a newer view/poll trigger; otherwise wait for one.
+              if (state.version === version) break;
+            }
+          }
+        } finally { state.busy = false; }
+      },
       agentMessageOwner(run) {
-        if (this.currentGroupId || run.profile_id !== this.currentSessionId || run.session_id !== this.currentSessionId) return null;
+        if (run.origin === 'reflection' || this.currentGroupId || run.profile_id !== this.currentSessionId || run.session_id !== this.currentSessionId) return null;
         const id = run.run_id || run.id;
         const messages = this.messages.filter(message => message.session_id === run.profile_id);
         const assistant = (run.assistant_message_id != null && messages.find(message =>
@@ -155,7 +190,7 @@
       agentRunIsAttached(run) {
         const context = this.agentChatContext;
         // A detached run needs its own Stop control, even before its first tool call.
-        return !!(this.isStreaming && context && this.agentChatIsVisible(context) &&
+        return !!(run.origin !== 'reflection' && this.isStreaming && context && this.agentChatIsVisible(context) &&
           ((context.boundRunKey === keyOf(run) && context.boundRequestId === context.requestId) ||
             (typeof run.request_id === 'string' && run.request_id === context.requestId)) &&
           run.session_id === context.sessionId && run.profile_id === context.sessionId);
@@ -195,7 +230,7 @@
         // Never infer an event's ownership from the currently selected profile.
         if (context && (event.session_id !== context.sessionId || event.profile_id !== context.sessionId)) return;
         this.agentRuns = reduceEvent(this.agentRuns, event);
-        if (context && event.run_id) {
+        if (context && event.run_id && this.agentRuns[keyOf(event)]?.origin !== 'reflection') {
           context.runKey = keyOf(event);
           // Only a context from the owning HTTP stream has a client nonce.
           // Native event request_id may instead be the server's run UUID.
@@ -237,6 +272,7 @@
         return this.t(key) === key ? (name || '') : this.t(key);
       },
       agentRunLabel(run) {
+        if (run.origin === 'reflection') return this.t('agentReflectionTask') + ' · ' + this.agentStateLabel(run);
         const fallback = this.agentStateLabel(run);
         if (run.state !== 'completed' || this.agentRunHadToolError(run)) return fallback;
         const events = run.events || [];
@@ -335,7 +371,7 @@
                 const key = keyOf(snapshot);
                 if (!this.agentRuns[key]) continue;
                 const metadata = {};
-                for (const field of ['user_message_id', 'assistant_message_id', 'parent_run_id', 'artifacts', 'request_id', 'workspace_warning', 'error']) {
+                for (const field of ['origin', 'user_message_id', 'assistant_message_id', 'parent_run_id', 'artifacts', 'request_id', 'workspace_warning', 'error']) {
                   if (snapshot[field] != null) metadata[field] = snapshot[field];
                 }
                 this.updateAgentRun(key, metadata);
@@ -404,9 +440,15 @@
         this.selectAgentContinuation({ id: message.agent_run_id, profile_id: message.session_id,
           session_id: message.session_id, state: message.generation_status });
       },
+      agentCanContinueRun(run) {
+        const stored = this.agentRuns[keyOf(run)];
+        // Until polling confirms the origin, a terminal event might be autonomous.
+        return (stored?.origin || run.origin) === 'user' && run.origin !== 'reflection' && !this.currentGroupId &&
+          !this.isStreaming && !this.agentOwnTaskActive && terminal(run.state) &&
+          run.profile_id === this.currentSessionId && run.session_id === this.currentSessionId;
+      },
       selectAgentContinuation(run) {
-        if (this.currentGroupId || this.isStreaming || this.agentOwnTaskActive || !terminal(run.state) ||
-            run.profile_id !== this.currentSessionId || run.session_id !== this.currentSessionId) return;
+        if (!this.agentCanContinueRun(run)) return;
         this.agentContinueRunId = run.run_id || run.id || '';
         if (this.agentWorkspaceOpen) this.closeAgentWorkspace({ restoreFocus: false });
         this.$nextTick(() => this.$refs?.chatTextarea?.focus());
