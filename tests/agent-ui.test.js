@@ -14,6 +14,414 @@ const event = (sequence, type = 'status', extra = {}) => ({
 });
 
 test('task lifecycle helper is available', () => assert.equal(typeof api.reduceEvent, 'function'));
+
+const flushViewSync = () => new Promise(resolve => setImmediate(resolve));
+
+test('agent view mount syncs a restored group silently and polling skips acknowledged values', async () => {
+  const calls = [];
+  const { model, sandbox } = harness(async (url, options) => {
+    calls.push({ url, method: options.method, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  let poll;
+  sandbox.setInterval = callback => { poll = callback; return 1; };
+  model.currentSessionId = null; model.currentGroupId = 'stored-group';
+  model.statusText = 'Group ready';
+  model.receiveAgentEvent(event(1, 'started', { origin: 'reflection' }));
+  const runs = model.agentRuns;
+  sandbox.AgentUIMixin.mounted.call(model);
+  await flushViewSync();
+  assert.deepEqual(calls, [{ url: 'http://fixture.test/api/agent/view', method: 'POST', body: { group_chat: true } }]);
+  poll(); poll();
+  await flushViewSync();
+  assert.equal(calls.length, 1);
+  assert.equal(model.agentRuns, runs, 'view synchronization must not cancel existing tasks');
+  assert.equal(model.statusText, 'Group ready');
+  assert.equal(model.messages.length, 0);
+  assert.equal(model.spoken.length, 0);
+  sandbox.AgentUIMixin.unmounted.call(model);
+});
+
+test('agent view sends single-chat mount and session changes through the same contract', async () => {
+  const calls = [];
+  const { model, sandbox } = harness(async (_url, options) => {
+    calls.push(JSON.parse(options.body).group_chat);
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.AgentUIMixin.mounted.call(model);
+  await flushViewSync();
+  model.currentSessionId = 'p2';
+  sandbox.AgentUIMixin.watch.currentSessionId.call(model);
+  await flushViewSync();
+  assert.deepEqual(calls, [false, false]);
+  sandbox.AgentUIMixin.unmounted.call(model);
+});
+
+test('agent view honors persisted group selection before asynchronous restoration and clears an invalid saved group on polling', async () => {
+  const calls = [];
+  let savedGroup = 'saved-group', poll;
+  const { model, sandbox } = harness(async (_url, options) => {
+    calls.push(JSON.parse(options.body).group_chat);
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.localStorage.getItem = key => key === 'currentGroupId' ? savedGroup : null;
+  sandbox.setInterval = callback => { poll = callback; return 1; };
+  model.currentSessionId = null;
+  sandbox.AgentUIMixin.mounted.call(model);
+  await flushViewSync();
+  assert.deepEqual(calls, [true], 'mount must sync saved group before app.js restores it');
+  model.currentSessionId = 'p1';
+  sandbox.AgentUIMixin.watch.currentSessionId.call(model);
+  await flushViewSync();
+  assert.deepEqual(calls, [true, true], 'loading the backend profile must not unblock admissions during group restoration');
+  savedGroup = null; // app.js removed a saved group which no longer exists
+  poll();
+  await flushViewSync();
+  assert.deepEqual(calls, [true, true, false]);
+  sandbox.AgentUIMixin.unmounted.call(model);
+});
+
+test('agent view serializes group-to-single changes behind the old request', async () => {
+  const calls = [], pending = [];
+  let serverGroup = false;
+  const { model, sandbox } = harness(async (_url, options) => {
+    const value = JSON.parse(options.body).group_chat;
+    calls.push(value);
+    await new Promise(resolve => pending.push(resolve));
+    serverGroup = value;
+    return { ok: true, json: async () => ({ ok: true }) };
+  }, { reactive: true });
+  model.currentGroupId = 'g1';
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  model.currentGroupId = null; model.currentSessionId = 'p2';
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  sandbox.AgentUIMixin.watch.currentSessionId.call(model);
+  assert.deepEqual(calls, [true]);
+  pending.shift()();
+  await flushViewSync();
+  assert.deepEqual(calls, [true, false]);
+  assert.equal(serverGroup, true);
+  pending.shift()();
+  await flushViewSync();
+  assert.equal(serverGroup, false);
+});
+
+test('agent view skips superseded pending groups and ignores a stale successful value', async () => {
+  const calls = [], pending = [];
+  const { model, sandbox } = harness(async (_url, options) => {
+    calls.push(JSON.parse(options.body).group_chat);
+    await new Promise(resolve => pending.push(resolve));
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.AgentUIMixin.mounted.call(model); // single-chat request remains in flight
+  model.currentGroupId = 'g1';
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  model.currentGroupId = null;
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  pending.shift()();
+  await flushViewSync();
+  assert.deepEqual(calls, [false], 'the obsolete pending group value must never be sent');
+  model.currentGroupId = 'g2';
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  assert.deepEqual(calls, [false, true]);
+  pending.shift()();
+  await flushViewSync();
+  sandbox.AgentUIMixin.unmounted.call(model);
+});
+
+test('agent view failures stay silent and retry only on polling or a view change', async () => {
+  for (const failure of ['network', 'http']) {
+    const calls = [];
+    let fail = true, poll;
+    const { model, sandbox } = harness(async (_url, options) => {
+      calls.push(JSON.parse(options.body).group_chat);
+      if (fail && failure === 'network') throw new Error('offline');
+      return { ok: !fail, status: 503, json: async () => fail ? { detail: 'unavailable' } : { ok: true } };
+    });
+    model.currentGroupId = 'g1'; model.statusText = 'Group ready';
+    sandbox.setInterval = callback => { poll = callback; return 1; };
+    sandbox.AgentUIMixin.mounted.call(model);
+    await flushViewSync(); await flushViewSync();
+    assert.deepEqual(calls, [true], 'failure must not spin retries');
+    poll();
+    await flushViewSync();
+    assert.deepEqual(calls, [true, true]);
+    fail = false;
+    model.currentGroupId = null;
+    sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+    await flushViewSync();
+    assert.deepEqual(calls, [true, true, false]);
+    poll();
+    await flushViewSync();
+    assert.equal(calls.length, 3);
+    assert.equal(model.statusText, 'Group ready');
+    assert.equal(model.agentRunErrors.p1, undefined);
+    sandbox.AgentUIMixin.unmounted.call(model);
+  }
+});
+
+test('agent view retries the latest value after an uncertain failed stale request', async () => {
+  const calls = [];
+  let rejectGroup;
+  const { model, sandbox } = harness(async (_url, options) => {
+    const value = JSON.parse(options.body).group_chat;
+    calls.push(value);
+    if (value) await new Promise((_resolve, reject) => { rejectGroup = reject; });
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.AgentUIMixin.mounted.call(model);
+  await flushViewSync(); // confirmed single chat
+  model.currentGroupId = 'g1';
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  model.currentGroupId = null;
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  rejectGroup(new Error('response lost after server applied group view'));
+  await flushViewSync();
+  assert.deepEqual(calls, [false, true, false], 'old single-chat acknowledgement cannot survive an uncertain group request');
+  sandbox.AgentUIMixin.unmounted.call(model);
+});
+
+test('agent view unmount prevents late responses from sending queued updates', async () => {
+  const calls = [];
+  let finish;
+  const { model, sandbox } = harness(async (_url, options) => {
+    calls.push(JSON.parse(options.body).group_chat);
+    await new Promise(resolve => { finish = resolve; });
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  sandbox.AgentUIMixin.mounted.call(model);
+  model.currentGroupId = 'g1';
+  sandbox.AgentUIMixin.watch.currentGroupId.call(model);
+  sandbox.AgentUIMixin.unmounted.call(model);
+  finish();
+  await flushViewSync();
+  assert.deepEqual(calls, [false]);
+});
+
+test('reflection snapshots stay in the drawer without message ownership or continuation', async () => {
+  const { model, sandbox } = harness();
+  model.messages = [{ id: 10, role: 'user', session_id: 'p1' },
+    { id: 11, role: 'assistant', session_id: 'p1', agent_run_id: 'r1' }];
+  model.agentFetch = async () => ({ runs: [{ id: 'r1', profile_id: 'p1', session_id: 'p1',
+    origin: 'reflection', state: 'completed', user_message_id: 10, assistant_message_id: 11,
+    events: [event(1, 'started'), event(2, 'completed')] }] });
+  await sandbox.AgentUIMixin.methods.refreshAgentRuns.call(model);
+  const run = model.currentAgentRuns[0];
+  assert.ok(run, 'even a reflection task with no tool calls is visible');
+  assert.equal(run.origin, 'reflection');
+  assert.match(model.agentRunLabel(run), /Reflection/);
+  assert.equal(model.agentMessageOwner(run), null);
+  assert.equal(model.messageAgentRuns(model.messages[1]).length, 0);
+  assert.equal(model.agentCanContinueRun(run), false);
+  model.selectAgentContinuation(run);
+  model.continueAgentMessage({ ...model.messages[1], generation_status: 'completed' });
+  assert.equal(model.agentContinueRunId, '');
+  assert.equal(model.messages.length, 2);
+  assert.equal(model.spoken.length, 0);
+});
+
+test('reflection event origin survives later events and never binds to a user stream', () => {
+  const { model } = harness();
+  const context = { sessionId: 'p1', viewVersion: 0, requestId: 'client' };
+  model.agentChatContext = context; model.isStreaming = true; model.statusText = 'User reply';
+  model.receiveAgentEvent(event(1, 'started', { origin: 'reflection', request_id: 'client' }), context);
+  model.receiveAgentEvent(event(2, 'completed'));
+  const run = Object.values(model.agentRuns)[0];
+  assert.equal(run.origin, 'reflection');
+  assert.equal(context.runKey, undefined);
+  assert.equal(model.agentRunIsAttached(run), false);
+  assert.equal(model.statusText, 'User reply');
+});
+
+test('continuation waits for a confirmed user origin before passing a task to chat', () => {
+  const { model } = harness();
+  const run = { id: 'r1', profile_id: 'p1', session_id: 'p1', state: 'completed' };
+  const message = { agent_run_id: 'r1', session_id: 'p1', generation_status: 'completed' };
+  model.agentRuns = { [api.keyOf(run)]: run };
+  model.selectAgentContinuation(run); model.continueAgentMessage(message);
+  assert.equal(model.agentCanContinueRun(run), false);
+  assert.equal(model.agentContinueRunId, '');
+  model.agentRuns[api.keyOf(run)] = { ...run, origin: 'user' };
+  model.continueAgentMessage(message);
+  assert.equal(model.agentContinueRunId, 'r1');
+});
+
+test('late reflection polling remains scoped after profile and group switches', async () => {
+  let resolve;
+  const { model, sandbox } = harness();
+  model.agentFetch = () => new Promise(r => { resolve = r; });
+  const polling = sandbox.AgentUIMixin.methods.refreshAgentRuns.call(model);
+  model.currentSessionId = 'p2'; model.currentGroupId = 'g1'; model.agentViewChanged();
+  model.messages = [{ role: 'user', content: 'Group chat', session_id: 'group:g1' }];
+  model.statusText = 'Group ready';
+  resolve({ runs: [{ id: 'r1', profile_id: 'p1', session_id: 'p1', origin: 'reflection',
+    state: 'approval_requested', events: [event(1, 'approval_requested', { approval_id: 'a1' })] }] });
+  await polling;
+  assert.equal(model.currentAgentRuns.length, 0);
+  assert.equal(model.agentActiveTaskCount, 0);
+  assert.equal(model.agentOwnTaskActive, false);
+  assert.equal(model.messages.length, 1);
+  assert.equal(model.statusText, 'Group ready');
+  assert.equal(model.spoken.length, 0);
+  model.currentGroupId = null;
+  assert.equal(model.currentAgentRuns.length, 0);
+  model.currentSessionId = 'p1';
+  assert.equal(model.currentAgentRuns[0].origin, 'reflection');
+  assert.equal(model.currentAgentRuns[0].approval.approval_id, 'a1');
+});
+
+test('autonomy settings default off with contract defaults, including older responses', async () => {
+  const { model } = harness();
+  for (const form of [model.agentSettingsForm]) {
+    assert.equal(form.autonomy_enabled, false);
+    assert.equal(form.autonomy_interval_seconds, 900);
+    assert.equal(form.autonomy_max_requests_per_hour, 12);
+  }
+  model.agentFetch = async () => ({ enabled: true });
+  await model.loadAgentSettings();
+  assert.equal(model.agentSettingsForm.autonomy_enabled, false);
+  assert.equal(model.agentSettingsForm.autonomy_interval_seconds, 900);
+  assert.equal(model.agentSettingsForm.autonomy_max_requests_per_hour, 12);
+});
+
+test('autonomy validates integer ranges without making requests and saves valid limits', async () => {
+  const { model } = harness();
+  model.agentSettingsLoaded = true;
+  const calls = [];
+  model.agentFetch = async (url, options) => {
+    calls.push({ url, options });
+    return options ? JSON.parse(options.body) : {};
+  };
+  for (const patch of [{ autonomy_interval_seconds: 59 }, { autonomy_interval_seconds: 86401 },
+    { autonomy_interval_seconds: 60.5 }, { autonomy_interval_seconds: '900' },
+    { autonomy_max_requests_per_hour: 0 }, { autonomy_max_requests_per_hour: 129 },
+    { autonomy_max_requests_per_hour: NaN }, { autonomy_enabled: 'true' }]) {
+    await model.saveAgentSettings(patch);
+    assert.equal(calls.length, 0);
+    assert.ok(model.agentSettingsError);
+  }
+  for (const [interval, cap] of [[60, 1], [86400, 128]]) {
+    const patch = { autonomy_enabled: true, autonomy_interval_seconds: interval, autonomy_max_requests_per_hour: cap };
+    await model.saveAgentSettings(patch);
+    assert.deepEqual(JSON.parse(calls.at(-2).options.body), patch);
+    assert.equal(model.agentSettingsForm.autonomy_max_requests_per_hour, cap);
+  }
+});
+
+test('character autonomy requires explicit opt-in and PATCH stays profile scoped', async () => {
+  const calls = [];
+  const { model } = harness(async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  model.profiles = [{ profile_id: 'p1', tool_configs: { agent: { autonomy_enabled: true } } },
+    { profile_id: 'p2', tool_configs: { agent: {} } }];
+  model.selectedProfileId = 'p1';
+  assert.equal(model.getProfileAgentPermission('autonomy_enabled'), true);
+  model.selectedProfileId = 'p2';
+  assert.equal(model.getProfileAgentPermission('autonomy_enabled'), false);
+  model.loadProfiles = model.loadToolsConfig = async () => {};
+  await model.saveToolConfig('agent', { autonomy_enabled: true }, 'p2');
+  assert.match(calls[0].url, /\/p2\/tool_configs$/);
+  assert.deepEqual(calls[0].body, { tool_id: 'agent', config: { autonomy_enabled: true } });
+});
+
+test('older profile list cannot overwrite newly loaded character permissions', async () => {
+  const pending = [];
+  const { model } = harness(() => new Promise(resolve => pending.push(resolve)));
+  model.selectedProfileId = 'p1';
+  const first = model.loadProfiles();
+  model.selectedProfileId = 'p2';
+  const second = model.loadProfiles();
+  pending[1]({ ok: true, json: async () => ({ profiles: [{ profile_id: 'p2', tool_configs: { agent: { autonomy_enabled: false } } }] }) });
+  await second;
+  pending[0]({ ok: true, json: async () => ({ profiles: [{ profile_id: 'p2', tool_configs: { agent: { autonomy_enabled: true } } }] }) });
+  await first;
+  assert.equal(model.getProfileAgentPermission('autonomy_enabled'), false);
+});
+
+test('profile list started before a switch is ignored even without another list request', async () => {
+  let resolve;
+  const { model } = harness(() => new Promise(r => { resolve = r; }));
+  model.selectedProfileId = 'p1';
+  const loading = model.loadProfiles();
+  model.selectedProfileId = 'p2';
+  model.profiles = [{ profile_id: 'p2', tool_configs: { agent: { autonomy_enabled: false } } }];
+  resolve({ ok: true, json: async () => ({ profiles: [] }) });
+  await loading;
+  assert.equal(model.profiles.length, 1);
+});
+
+test('settings selection invalidates pending profile and tool loads across A-B-A', async () => {
+  const pending = [];
+  const { model } = harness(() => new Promise(resolve => pending.push(resolve)));
+  model.selectedProfileId = 'p1'; model.activeTab = 'profiles'; model.profiles = [];
+  model.loadTrendStatus = model.loadWeatherStatus = async () => {};
+  const profiles = model.loadProfiles(), tools = model.loadToolsConfig('p1');
+  model.selectProfile('p2'); model.selectProfile('p1');
+  model.profiles = [{ profile_id: 'p1', tool_configs: { agent: { autonomy_enabled: false } } }];
+  model.toolsList = [{ tool_id: 'current' }];
+  pending[0]({ ok: true, json: async () => ({ profiles: [] }) });
+  pending[1]({ ok: true, json: async () => ({ tools: [{ tool_id: 'stale' }] }) });
+  await Promise.all([profiles, tools]);
+  assert.equal(model.profiles.length, 1);
+  assert.equal(model.toolsList[0].tool_id, 'current');
+});
+
+test('group send remains on the group endpoint without autonomous task continuation or tools', async () => {
+  const calls = [];
+  const { model } = harness(async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return streamResponse([{ agent_event: event(1, 'started', { origin: 'reflection' }) }, { done: true }]);
+  });
+  model.currentGroupId = 'g1'; model.agentContinueRunId = 'autonomous-task';
+  model.agentSettingsForm.autonomy_enabled = true;
+  await model.sendMessage();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/groups\/g1\/chat$/);
+  assert.deepEqual(Object.keys(calls[0].body).sort(), ['client_id', 'message']);
+  assert.equal(Object.keys(model.agentRuns).length, 0);
+  assert.equal(model.currentAgentRuns.length, 0);
+});
+
+test('late tool-load and save errors are silent after a character switch', async () => {
+  for (const action of ['load', 'save']) {
+    let reject;
+    const { model } = harness(() => new Promise((_, r) => { reject = r; }));
+    model.selectedProfileId = 'p1'; model.activeTab = 'profiles';
+    model.toolsList = [{ tool_id: 'new-profile-tool' }];
+    const toasts = []; model.showToast = (...args) => toasts.push(args);
+    const loading = action === 'load' ? model.loadToolsConfig('p1') : model.saveToolConfig('agent', { autonomy_enabled: true });
+    model.selectedProfileId = 'p2';
+    reject(new Error('old profile error'));
+    await loading;
+    assert.equal(model.toolsList[0]?.tool_id, 'new-profile-tool');
+    assert.equal(toasts.length, 0);
+  }
+});
+
+test('tool status responses cannot overwrite another character after switching away and back', async () => {
+  for (const [method, field] of [['loadTrendStatus', 'trendStatus'], ['loadWeatherStatus', 'weatherStatus']]) {
+    let resolve;
+    const { model } = harness(() => new Promise(r => { resolve = r; }));
+    model.selectedProfileId = 'p1'; model.profiles = [];
+    const loading = model[method]('p1');
+    model.selectProfile('p2'); model.selectProfile('p1');
+    model[field] = { current: true };
+    resolve({ ok: true, json: async () => ({ stale: true }) });
+    await loading;
+    assert.equal(model[field].current, true);
+  }
+});
+
+test('autonomy controls reuse settings and continuation controls use the origin guard', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  assert.match(html, /saveAgentSettings\(\{autonomy_enabled: \$event\}\)/);
+  assert.match(html, /getProfileAgentPermission\('autonomy_enabled'\)/);
+  assert.match(html, /id="agent-autonomy-interval"[^>]*min="60"[^>]*max="86400"/);
+  assert.match(html, /id="agent-autonomy-hourly-cap"[^>]*min="1"[^>]*max="128"/);
+  assert.equal((html.match(/:can-continue="agentCanContinueRun\(run\)"/g) || []).length, 2);
+});
 test('duplicate and out-of-order events cannot regress a run', () => {
   let runs = api.reduceEvent({}, event(1, 'started'));
   runs = api.reduceEvent(runs, event(3, 'tool_call', { call_id: 'c1', tool_name: 'timer', arguments: '{}' }));
@@ -805,6 +1213,7 @@ test('actual switchSession detaches a known native single-chat run and switches 
   const requests = [];
   const { model, sandbox } = harness(async (url, options) => {
     requests.push({ url, method: options?.method, body: options?.body ? JSON.parse(options.body) : undefined });
+    if (url.endsWith('/api/agent/view')) return { ok: true, json: async () => ({ ok: true }) };
     if (url.endsWith('/sessions/switch')) return { ok: true, json: async () => ({ ok: true, display_name: 'Two' }) };
     if (url.includes('/sessions/p2/history')) return { ok: true, json: async () => ({ messages: [{ id: 60, role: 'assistant', content: 'Profile B history' }] }) };
     throw new Error('Unexpected request: ' + url);
@@ -828,7 +1237,9 @@ test('actual switchSession detaches a known native single-chat run and switches 
     assert.equal(requests[0].url, 'http://fixture.test/sessions/switch');
     assert.equal(requests[0].method, 'POST');
     assert.deepEqual(requests[0].body, { session_id: 'p2' });
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
+    assert.deepEqual(requests.find(request => request.url.endsWith('/api/agent/view')),
+      { url: 'http://fixture.test/api/agent/view', method: 'POST', body: { group_chat: false } });
     assert.equal(model.currentSessionId, 'p2');
     assert.equal(model.currentSessionName, 'Two');
     assert.equal(model.currentSessionAvatar, 'two.png');

@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261031drawer1" />
+  <link rel="stylesheet" href="css/styles.css?v=20261101autonomy1" />
   <link rel="stylesheet" href="css/settings.css?v=20261030a" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261031drawer1"></script>
+  <script src="js/i18n.js?v=20261101autonomy1"></script>
 </head>
 <body>
 
@@ -584,7 +584,7 @@
               :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
               :event-label="agentEventLabel" :event-text="agentEventText"
               :terminal="agentTerminal(run.state)" :artifact-path="agentArtifactPath"
-              :can-continue="!isStreaming && !agentOwnTaskActive"
+              :can-continue="agentCanContinueRun(run)"
               :can-detach="agentCanDetach && agentChatContext?.runKey === agentRunKey(run)" :has-timers="agentHasTimerEvents(run)"
               @cancel="cancelAgentRun(run)" @continue="selectAgentContinuation(run)"
               @approve="answerAgentApproval(run, $event)" @artifact="openAgentArtifact"
@@ -597,7 +597,7 @@
               <button @click="rewriteMessage(i)" :title="t('rewriteBtnTitle')">↺</button>
               <button v-if="msg.agent_run_id && agentTerminal(msg.generation_status)" type="button"
                       :title="t('agentContinue')" :aria-label="t('agentContinue')"
-                      :disabled="isStreaming || agentOwnTaskActive" @click="continueAgentMessage(msg)"><span aria-hidden="true">↪</span></button>
+                      :disabled="!agentCanContinueRun({id: msg.agent_run_id, profile_id: msg.session_id, session_id: msg.session_id, state: msg.generation_status})" @click="continueAgentMessage(msg)"><span aria-hidden="true">↪</span></button>
               <button @click="toggleCollapse(i)" :title="msg.collapsed ? t('expandBtnTitle') : t('collapseBtnTitle')">{{ msg.collapsed ? '⊞' : '⊟' }}</button>
               <button v-if="!msg.partial" @click="replayTTS(i)" :title="t('replayTTSTitle')">▶</button>
               <button @click="stopTTSPlayback()" :title="t('stopTTSTitle')"
@@ -938,7 +938,7 @@
               :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
               :event-label="agentEventLabel" :event-text="agentEventText" :time-label="agentRunTime(run.created_at)"
               :terminal="agentTerminal(run.state)" :artifact-path="agentArtifactPath"
-              :can-continue="!isStreaming && !agentOwnTaskActive"
+              :can-continue="agentCanContinueRun(run)"
               :can-detach="agentCanDetach && agentChatContext?.runKey === agentRunKey(run)" :has-timers="agentHasTimerEvents(run)"
               @cancel="cancelAgentRun(run)" @continue="selectAgentContinuation(run)"
               @approve="answerAgentApproval(run, $event)" @artifact="openAgentArtifact"
@@ -3923,6 +3923,13 @@
                 <div v-if="!toolsLoading" class="s-card">
                   <div class="s-card-title">{{ t('agentProfilePermissions') }}</div>
                   <p class="form-hint">{{ t('agentProfileHint') }}</p>
+                  <toggle-row :label="t('agentProfileToolsEnable')" :model-value="getProfileAgentPermission('enabled')"
+                    :disabled="toolsSaving.agent || !selectedProfileId"
+                    @update:model-value="saveToolConfig('agent', {enabled: $event}, selectedProfileId)"></toggle-row>
+                  <toggle-row :label="t('agentAutonomyProfileEnable')" :model-value="getProfileAgentPermission('autonomy_enabled')"
+                    :disabled="toolsSaving.agent || !selectedProfileId || !getProfileAgentPermission('enabled')"
+                    @update:model-value="saveToolConfig('agent', {autonomy_enabled: $event}, selectedProfileId)"></toggle-row>
+                  <p class="form-hint">{{ t('agentAutonomyProfileHint') }}</p>
                   <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentCapability_' + capability)"
             :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''"
                     :model-value="getProfileAgentPermission(capability)" :disabled="toolsSaving.agent || !selectedProfileId"
@@ -4196,6 +4203,20 @@
           <toggle-row :label="t('agentEnable')" :model-value="agentSettingsForm.enabled" :disabled="agentSettingsBusy || !agentSettingsLoaded"
                       @update:model-value="saveAgentSettings({enabled: $event})"></toggle-row>
           <p class="form-hint">{{ t('agentEnableHint') }}</p>
+          <toggle-row :label="t('agentAutonomyEnable')" :model-value="agentSettingsForm.autonomy_enabled" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                      @update:model-value="saveAgentSettings({autonomy_enabled: $event})"></toggle-row>
+          <p class="form-hint">{{ t('agentAutonomyHint') }}</p>
+          <div class="form-field">
+            <label class="form-label" for="agent-autonomy-interval">{{ t('agentAutonomyInterval') }}</label>
+            <input id="agent-autonomy-interval" class="form-input" type="number" min="60" max="86400" step="1" v-model.number="agentSettingsForm.autonomy_interval_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="agent-autonomy-hourly-cap">{{ t('agentAutonomyHourlyCap') }}</label>
+            <input id="agent-autonomy-hourly-cap" class="form-input" type="number" min="1" max="128" step="1" v-model.number="agentSettingsForm.autonomy_max_requests_per_hour" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+          </div>
+          <p class="form-hint">{{ t('agentAutonomyBudgetHint') }}</p>
+          <button type="button" class="s-btn s-btn-secondary" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                  @click="saveAgentSettings({autonomy_interval_seconds: agentSettingsForm.autonomy_interval_seconds, autonomy_max_requests_per_hour: agentSettingsForm.autonomy_max_requests_per_hour})">{{ t('agentSaveLimits') }}</button>
           <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentCapability_' + capability)"
             :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''"
             :model-value="agentSettingsForm[capability]"
@@ -5510,10 +5531,10 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261031search1"></script>
-<script src="js/components.js?v=20261031drawer1"></script>
-<script src="js/settings.js?v=20261031search1"></script>
-<script src="js/agent-ui.js?v=20261031search1"></script>
-<script src="js/app.js?v=20261031search1"></script>
+<script src="js/api-paths.js?v=20261101autonomy1"></script>
+<script src="js/components.js?v=20261101autonomy1"></script>
+<script src="js/settings.js?v=20261101autonomy1"></script>
+<script src="js/agent-ui.js?v=20261101autonomy1"></script>
+<script src="js/app.js?v=20261101autonomy1"></script>
 </body>
 </html>

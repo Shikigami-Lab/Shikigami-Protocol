@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { installControls } from './controls.mjs';
 import { buildHistorySeed } from './history.mjs';
 import { workspaceGuard, installWebBridge } from './native-access.mjs';
+import { installCharacterPrompt } from './prompt-context.mjs';
 export const name = 'shikigami-agent';
 export const inject = ['agents', 'tools', 'systemPrompt', 'approval', 'web'];
 export function apply(ctx) {
@@ -38,9 +39,7 @@ export function apply(ctx) {
           setup(agentCtx) {
             // Keep the existing character prompt authoritative, and advertise
             // only the actual scoped MCP schemas, not the SDK coding persona.
-            agentCtx.systemPrompt.section({ name: 'shikigami:complete', order: 0, complete: true,
-              text: envelope.messages[0].content, interpolate: false });
-            agentCtx.systemPrompt.suppressRuntimeContext();
+            installCharacterPrompt(agentCtx, envelope.messages[0].content);
             agentCtx.tools.restrict({ allow: tools });
             agentCtx.tools.guard(workspaceGuard);
           },

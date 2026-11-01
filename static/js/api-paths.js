@@ -31,6 +31,7 @@ window.API_PATHS = {
   agentWorkspaceRestore: () => '/api/agent/workspace/restore',
   agentWorkspaceUpload: () => '/api/agent/workspace/upload',
   agentSettings: () => '/api/agent/settings',
+  agentView: () => '/api/agent/view',
   agentStatus: () => '/api/agent/status',
   agentCheck: () => '/api/agent/check',
   agentRuns: (profileId) => `/api/agent/runs?profile_id=${encodeURIComponent(profileId)}`,

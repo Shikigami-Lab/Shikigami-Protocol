@@ -109,7 +109,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 app=request.app,
                 out_extras=build_extras,
             )
-            use_agent = bool(agent_runtime and agent_runtime.settings['enabled'] and not user_msg.startswith('/') and not body.conversation_only)
+            use_agent = bool(agent_runtime and agent_runtime.settings['enabled'] and agent_runtime.tools_allowed(session.profile_id) and not user_msg.startswith('/') and not body.conversation_only)
             if body.continue_run_id and not use_agent:
                 raise ValueError('Enable AI tools to continue a task')
             if not user_msg.startswith('/'):

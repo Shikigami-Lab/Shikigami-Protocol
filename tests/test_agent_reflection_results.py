@@ -72,6 +72,50 @@ class ReflectionResultTests(unittest.IsolatedAsyncioTestCase):
     async def reflect(self):
         await self.engine._reflect(self.session, {})
 
+    async def test_saved_reflection_starts_real_runtime_and_result_does_not_loop(self):
+        from src.agent.runtime import AgentRuntime
+        self.session.id = self.session.profile_id
+        self.app.state.session_manager = SimpleNamespace(get_current=lambda: self.session)
+        self.app.state.config.agent = {'enabled': True, 'workspace_enabled': True,
+            'autonomy_enabled': True, 'autonomy_interval_seconds': 60}
+        self.app.state.config.get_active_llm_preset = lambda: {'base_url': 'http://localhost:9999/v1', 'model': 'fake'}
+        actual = AgentRuntime(self.app, root=self.root, profile_loader=lambda p: {
+            'tool_configs': {'agent': {'autonomy_enabled': True}}})
+        self.app.state.agent_runtime = actual
+        self.provider.chat.return_value = json.dumps({'thought': 'Make a note', 'action': 'write a note'})
+        started = []
+
+        async def drive(run):
+            started.append(run.profile_id)
+            (actual.workspaces.directory(run.profile_id) / 'reflection.txt').write_text('synthetic note')
+            await actual._publish(run, {'type': 'tool_call', 'tool_name': 'write', 'arguments': '{}'})
+            await actual._publish(run, {'type': 'completed'})
+            await run.queue.put(None)
+
+        with mock.patch.object(actual.autonomy, '_build_messages', return_value=[
+                {'role': 'system', 'content': 'Synthetic character'}, {'role': 'user', 'content': 'Make a note'}]), \
+                mock.patch.object(actual, '_drive', side_effect=drive):
+            try:
+                await self.reflect()
+                import asyncio
+                await asyncio.gather(*list(actual.autonomy.tasks))
+                self.assertEqual(started, [self.session.profile_id])
+                self.assertEqual(actual.store.list_runs(self.session.profile_id)[0]['origin'], 'reflection')
+                self.assertTrue(actual.reflection_results(self.session.profile_id))
+                await self.reflect()
+                self.assertEqual(started, [self.session.profile_id])
+                self.assertEqual(actual.reflection_results(self.session.profile_id), [])
+            finally:
+                await actual.close()
+
+    async def test_failed_reflection_save_cannot_launch_action(self):
+        autonomy = SimpleNamespace(enabled=lambda session: True, start=mock.AsyncMock())
+        self.runtime.autonomy = autonomy
+        self.provider.chat.return_value = json.dumps({'thought': 'Make a note', 'action': 'write a note'})
+        with mock.patch.object(self.session, 'save_runtime_state', return_value=None):
+            await self.reflect()
+        autonomy.start.assert_not_awaited()
+
     async def test_results_are_system_facts_and_ack_follows_persistence(self):
         await self.reflect()
         self.runtime.reflection_results.assert_called_once_with("profile-a")

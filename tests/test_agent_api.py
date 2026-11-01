@@ -113,6 +113,75 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json(), {**DEFAULTS, "enabled": True})
         self.assertEqual(self.runtime._runs, {})
 
+    async def test_disabling_autonomy_cancels_only_reflection_tasks(self):
+        self.sm.get_current = lambda: self.sm.sessions['alpha']
+        self.config.agent.update(autonomy_enabled=True, workspace_enabled=True)
+        self.runtime.profile_loader = lambda p: {'tool_configs': {'agent': {'autonomy_enabled': True}}}
+        auto = self.runtime.prepare(self.sm.sessions['alpha'], deepcopy(MESSAGES), dict(PRESET), origin='reflection')
+        user = self.prepare('beta')
+        response = await self.request('PATCH', '/settings', json={'autonomy_enabled': False})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(auto.stopped.is_set())
+        self.assertEqual(self.runtime.store.get_run(auto.id)['state'], 'cancelled')
+        self.assertFalse(user.stopped.is_set())
+
+    async def test_autonomy_settings_bounds_and_strict_types(self):
+        for body in ({'autonomy_enabled': 1}, {'autonomy_interval_seconds': 59},
+                     {'autonomy_max_requests_per_hour': 129}, {'autonomy_max_requests_per_hour': True}):
+            response = await self.request('PATCH', '/settings', json=body)
+            self.assertEqual(response.status_code, 422)
+        response = await self.request('PATCH', '/settings', json={
+            'autonomy_enabled': True, 'autonomy_interval_seconds': 60, 'autonomy_max_requests_per_hour': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['autonomy_max_requests_per_hour'], 1)
+
+    async def test_group_view_blocks_admission_without_changing_task_owner(self):
+        self.sm.get_current = lambda: self.sm.sessions['alpha']
+        self.config.agent['autonomy_enabled'] = True
+        self.runtime.profile_loader = lambda p: {'tool_configs': {'agent': {'autonomy_enabled': True}}}
+        auto = self.runtime.prepare(self.sm.sessions['alpha'], deepcopy(MESSAGES), dict(PRESET), origin='reflection')
+        response = await self.request('POST', '/view', json={'group_chat': True})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.runtime.autonomy.enabled(self.sm.sessions['alpha']))
+        self.runtime._authorize(auto)
+        response = await self.request('POST', '/view', json={'group_chat': False})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.runtime.autonomy.enabled(self.sm.sessions['alpha']))
+
+    async def test_per_character_autonomy_revocation_preserves_other_tasks(self):
+        import json
+        from src.api.tools import router as tools_router
+        self.app.include_router(tools_router)
+        self.sm.get_current = lambda: self.sm.sessions['alpha']
+        self.config.agent['autonomy_enabled'] = True
+        self.runtime.profile_loader = lambda p: {'tool_configs': {'agent': {'autonomy_enabled': True}}}
+        auto = self.runtime.prepare(self.sm.sessions['alpha'], deepcopy(MESSAGES), dict(PRESET), origin='reflection')
+        user = self.prepare('beta')
+        folder = self.root / 'fixture-profiles'
+        folder.mkdir()
+        (folder / 'alpha.json').write_text(json.dumps({'tool_configs': {'agent': {'autonomy_enabled': True}}}))
+        with patch('src.api.tools._PROFILES_DIR', str(folder)):
+            response = await self.client.patch('/api/profiles/alpha/tool_configs', json={
+                'tool_id': 'agent', 'config': {'autonomy_enabled': False}})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(auto.stopped.is_set())
+        self.assertFalse(user.stopped.is_set())
+
+    async def test_per_character_tool_master_revokes_only_its_own_task(self):
+        import json
+        from src.api.tools import router as tools_router
+        self.app.include_router(tools_router)
+        first, other = self.prepare('alpha'), self.prepare('beta')
+        folder = self.root / 'fixture-profiles'
+        folder.mkdir()
+        (folder / 'alpha.json').write_text(json.dumps({'tool_configs': {'agent': {'enabled': True}}}))
+        with patch('src.api.tools._PROFILES_DIR', str(folder)):
+            response = await self.client.patch('/api/profiles/alpha/tool_configs', json={
+                'tool_id': 'agent', 'config': {'enabled': False}})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(first.stopped.is_set())
+        self.assertFalse(other.stopped.is_set())
+
     async def test_settings_patch_preserves_unrelated_yaml_values_and_comments(self):
         response = await self.request("PATCH", "/settings", json={"max_model_requests": 8})
         self.assertEqual(response.status_code, 200)

@@ -1,10 +1,24 @@
 import unittest
 from types import SimpleNamespace
 from src.agent.settings import normalize_settings
-from src.agent.capabilities import capabilities, native_tools
+from src.agent.capabilities import capabilities, native_tools, business_tools, capability_context
 
 
 class CapabilityTests(unittest.TestCase):
+    def test_character_tool_master_switch_restricts_all_capabilities(self):
+        settings = normalize_settings(dict.fromkeys(('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled'), True))
+        profile = {'tool_configs': {'agent': {'enabled': False}}}
+        self.assertFalse(any(capabilities(settings, profile).values()))
+
+    def test_prompt_uses_registered_mcp_names(self):
+        access = dict.fromkeys(('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled'), True)
+        prompt = capability_context(access)
+        catalog = prompt.split('Available capabilities: ', 1)[1].split('. ', 1)[0].split(', ')
+        self.assertEqual(catalog, native_tools(access) + [
+            'mcp__shikigami__' + name for name in business_tools(access)])
+        self.assertIn('use mcp__shikigami__task_context before acting', prompt)
+        self.assertNotIn('use task_context before acting', prompt)
+
     def test_new_access_is_opt_in_and_code_requires_workspace(self):
         settings = normalize_settings({'enabled': True})
         self.assertFalse(settings['workspace_enabled'])

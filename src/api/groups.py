@@ -343,6 +343,7 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
                 session.load_runtime_state()
             n_turns = get_effective_max_history_turns(request.app, profile_id)
             extra_system = f"当前群聊参与者：{', '.join(all_names)}。你是 {display_name}，请以 {display_name} 的身份回复。"
+            extra_system += '\n[Tool availability]\nNo tools are enabled in group chat. Do not claim to have executed operations.'
             if system_hint:
                 extra_system = system_hint + "\n\n" + extra_system
             last_override = None

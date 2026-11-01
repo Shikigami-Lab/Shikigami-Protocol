@@ -182,7 +182,7 @@ const streamResponse = frames => {
 test('continue selects a terminal task without sending and sends its ID only on the next manual reply', async () => {
   const sent = [];
   const { model } = harness(async (url, options) => { sent.push(JSON.parse(options.body)); return streamResponse([{ done: true }]); });
-  const run = { id: 'r1', profile_id: 'p1', session_id: 'p1', state: 'cancelled' };
+  const run = { id: 'r1', profile_id: 'p1', session_id: 'p1', state: 'cancelled', origin: 'user' };
   model.selectAgentContinuation(run);
   assert.equal(sent.length, 0);
   assert.equal(model.agentContinueRunId, 'r1');
@@ -400,7 +400,7 @@ test('profile restrictions inherit and PATCH only the chosen capability', async 
 
 test('terminal snapshot metadata survives event reduction and enables continuation from history', async () => {
   const { model, sandbox } = harness();
-  model.agentFetch = async () => ({ runs: [{ id: 'r1', profile_id: 'p1', session_id: 'p1', state: 'completed',
+  model.agentFetch = async () => ({ runs: [{ id: 'r1', profile_id: 'p1', session_id: 'p1', state: 'completed', origin: 'user',
     user_message_id: 1, assistant_message_id: 2, parent_run_id: 'r0', artifacts: [{ path: 'report.txt' }],
     events: [event(1, 'started'), event(2, 'completed')] }] });
   await sandbox.AgentUIMixin.methods.refreshAgentRuns.call(model);

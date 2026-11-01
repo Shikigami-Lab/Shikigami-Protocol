@@ -30,6 +30,9 @@ class SettingsPatch(BaseModel):
     code_enabled: Optional[bool] = Field(default=None, strict=True)
     web_enabled: Optional[bool] = Field(default=None, strict=True)
     history_enabled: Optional[bool] = Field(default=None, strict=True)
+    autonomy_enabled: Optional[bool] = Field(default=None, strict=True)
+    autonomy_interval_seconds: Optional[int] = Field(default=None, strict=True, ge=60, le=86400)
+    autonomy_max_requests_per_hour: Optional[int] = Field(default=None, strict=True, ge=1, le=128)
     max_model_requests: Optional[int] = Field(default=None, strict=True, ge=1, le=32)
     timeout_seconds: Optional[int] = Field(default=None, strict=True, ge=10, le=600)
 
@@ -37,6 +40,19 @@ class SettingsPatch(BaseModel):
 @router.get("/settings")
 async def settings(request: Request):
     return _runtime(request).settings
+
+
+class ViewState(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    group_chat: bool = Field(strict=True)
+
+
+@router.post('/view')
+async def view_state(request: Request, body: ViewState):
+    # Like session selection, the most recently selected view is app-wide.
+    # Only new background admission is gated; captured tasks keep their owner.
+    _runtime(request).autonomy.group_view = body.group_chat
+    return {'group_chat': body.group_chat}
 
 
 @router.patch("/settings")
@@ -52,9 +68,11 @@ async def patch_settings(request: Request, body: SettingsPatch):
     request.app.state.config.agent = value
     revoked = [key for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled')
                if previous.get(key) and not value[key]]
-    if not value['enabled'] or revoked:
+    autonomy_revoked = previous['autonomy_enabled'] and not value['autonomy_enabled']
+    if not value['enabled'] or revoked or autonomy_revoked:
         for run in list(runtime._runs.values()):
-            if not run.terminal and (not value['enabled'] or any(run.access.get(key) for key in revoked)):
+            if not run.terminal and (not value['enabled'] or any(run.access.get(key) for key in revoked)
+                    or (autonomy_revoked and run.envelope.get('origin') == 'reflection')):
                 await runtime.cancel(run.id, run.profile_id)
     return value
 
