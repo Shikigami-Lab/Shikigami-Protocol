@@ -8,10 +8,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- [Tools] **Tool-assisted single chat and persistent character workspaces.** Opt-in file/code tasks, controlled web retrieval/search, original-history lookup and timers use the existing chat UI. The workspace drawer provides **Files**, **Plans** and **Tasks**, with file descriptions, separate user todos / character plans, artifact links and Stop/Continue controls.
+- [Reflection] **Opt-in autonomous tasks.** The selected single-chat character can start enabled tool work through the existing reflection loop; admitted tasks retain their owner after switching. Results return to that character's reflection without background chat messages. Autonomous tasks cannot change user todos or use timers; character on/off/inherit settings override application defaults while shared budgets and time limits remain hard bounds.
+
 ### Fixed
 
 - [Windows] A peer reset during asyncio transport shutdown (WinError 10054) no longer interrupts socket release or floods the server log with cleanup tracebacks. Other transport and application errors remain visible.
-- [Memory] `daily_reinforcement_enabled` shipped as `true` but the feature never ran. The fact ids injected into a prompt are written to `ctx.extras` inside `build_messages`, which merges the caller's dict into a new one, so `shown_fact_ids` never reached the chat handler and `used_fact_ids_by_date` was never recorded — every daily run reported `reinforce_count: 0`. The shipped default is now `false` so the config matches actual behaviour; weight decay is unaffected.
+- [Memory] Fixed propagation of shown fact IDs from prompt assembly to the single-chat handler. `build_messages` uses a new extras dict, so writes to `ctx.extras` were not returned through the caller's input dict; the explicit `out_extras` output now carries `shown_fact_ids` for recording in `used_fact_ids_by_date`. `daily_reinforcement_enabled` remains `false` by default. Weight decay is unaffected.
 
 ### Planned
 
