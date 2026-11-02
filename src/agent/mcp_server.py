@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.server import Settings as _FastMCPSettings
 from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -36,6 +37,11 @@ from .business_tools import (
 from .todo_tools import (TODO_TOOLS, Content, TodoId, NotePath, Priority, Owner,
                          TodoListArgs, TodoAddArgs, TodoUpdateArgs)
 from .workspace_catalog import FileDescription
+
+# SDK 1.26 defines Settings before FastMCP, leaving its lifespan annotation
+# unresolved. Complete it after the SDK import, before settings sources inspect
+# the fields on the first server construction. Do not suppress the warning.
+_FastMCPSettings.model_rebuild()
 
 BusinessToolCallback = Callable[[str, dict[str, Any], str], Awaitable[dict[str, Any]]]
 TimerToolCallback = BusinessToolCallback  # Existing imports remain supported.

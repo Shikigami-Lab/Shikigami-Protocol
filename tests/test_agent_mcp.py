@@ -1,5 +1,7 @@
 """Official MCP client -> in-process HTTP -> run-bound timer callback tests."""
 import json
+import subprocess
+import sys
 import unittest
 from contextlib import asynccontextmanager
 from unittest.mock import patch
@@ -35,6 +37,27 @@ async def connected(call_tool):
 
 
 class TimerMCPTests(unittest.IsolatedAsyncioTestCase):
+    def test_fresh_adapter_resolves_sdk_lifespan_annotation_without_warning(self):
+        # Use a fresh interpreter: earlier SDK construction can resolve the
+        # forward reference and hide this first-construction regression.
+        code = '''
+import json, sys, warnings
+sys.dont_write_bytecode = True
+sys.path[:] = json.loads(sys.argv[1])
+warnings.simplefilter('error', UserWarning)
+from src.agent.mcp_server import create_timer_mcp_app
+from mcp.server.fastmcp.server import Settings
+async def callback(*args):
+    return {'ok': True}
+adapter = create_timer_mcp_app(callback)
+assert Settings.__pydantic_complete__
+assert getattr(Settings.model_fields['lifespan'], '_complete', True)
+assert adapter.mcp.settings.lifespan is None
+'''
+        result = subprocess.run([sys.executable, '-B', '-c', code, json.dumps(sys.path)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def setUp(self):
         self.calls = []
 

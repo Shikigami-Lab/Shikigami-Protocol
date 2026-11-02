@@ -15,6 +15,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- [Tools] Complete the MCP SDK settings model before first use so its lifespan type resolves without a Pydantic warning.
 - [History] Original-chat search can locate the earliest saved chat day and read it in chronological pages. Results include local dates, paging bounds and an explicit continuation offset.
 - [Windows] A peer reset during asyncio transport shutdown (WinError 10054) no longer interrupts socket release or floods the server log with cleanup tracebacks. Other transport and application errors remain visible.
 - [Memory] Fixed propagation of shown fact IDs from prompt assembly to the single-chat handler. `build_messages` uses a new extras dict, so writes to `ctx.extras` were not returned through the caller's input dict; the explicit `out_extras` output now carries `shown_fact_ids` for recording in `used_fact_ids_by_date`. `daily_reinforcement_enabled` remains `false` by default. Weight decay is unaffected.
