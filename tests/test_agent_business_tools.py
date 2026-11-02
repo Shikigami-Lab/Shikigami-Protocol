@@ -93,6 +93,91 @@ class BusinessToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.call(start_date="2025-01-02"))["messages"][0]["content"], "100-other")
         self.assertEqual((await self.call(query="' OR 1=1 --"))["messages"], [])
 
+    async def test_first_chat_day_discovery_and_full_day_paging_through_mcp(self):
+        day = datetime(2025, 6, 1)
+        # Insert the newest date first: source IDs are not a date substitute.
+        later = self.add("later day", (day + timedelta(days=1)).timestamp())
+        first = self.add("first greeting", day.timestamp())
+        middle = [self.add(f"first day topic {i}", (day + timedelta(hours=12)).timestamp(),
+                           "assistant" if i % 2 else "user") for i in range(41)]
+        last = self.add("first day closing", (day + timedelta(days=1, seconds=-1)).timestamp())
+        self.store.reset_context()  # Clearing prompt context must not hide originals.
+        count = self.store.count_all()
+
+        async def bound_callback(name, args, call_id):
+            return await self.call_business_tool(self.app, self.session, name, args)
+
+        async with business_client(bound_callback, ("history_search", "history_context")) as client:
+            recent = (await client.call_tool("history_search", {"limit": 1})).structuredContent
+            self.assertEqual(recent["messages"][0]["id"], later)
+            oldest = await client.call_tool("history_search", {"order": "oldest", "limit": 1})
+            self.assertFalse(oldest.isError)
+            record = oldest.structuredContent["messages"][0]
+            self.assertEqual(record["id"], first)
+            self.assertEqual(record["local_date"], "2025-06-01")
+            self.assertEqual(datetime.fromisoformat(record["local_datetime"]).timestamp(), day.timestamp())
+            context = (await client.call_tool("history_context", {
+                "message_id": first, "before": 0, "after": 0,
+            })).structuredContent
+            self.assertEqual(context["messages"], [record])
+
+            found, offset, pages = [], 0, 0
+            while True:
+                page = await client.call_tool("history_search", {
+                    "start_date": record["local_date"], "end_date": record["local_date"],
+                    "order": "oldest", "limit": 20, "offset": offset,
+                })
+                self.assertFalse(page.isError)
+                data = page.structuredContent
+                self.assertTrue(all(m["local_date"] == record["local_date"] for m in data["messages"]))
+                found.extend(m["id"] for m in data["messages"])
+                pages += 1
+                self.assertLessEqual(pages, 3, "Pagination did not advance")
+                if not data["has_more"]:
+                    self.assertIsNone(data["next_offset"])
+                    break
+                self.assertGreater(data["next_offset"], offset)
+                offset = data["next_offset"]
+            self.assertEqual(found, [first, *middle, last])
+            self.assertEqual(len(found), len(set(found)))
+        self.assertEqual(self.store.count_all(), count)
+
+    async def test_history_paging_preserves_keyword_and_date_filters(self):
+        day = datetime(2025, 6, 1)
+        self.add("needle outside", (day - timedelta(seconds=1)).timestamp())
+        ids = [self.add("needle match", day.timestamp()) for _ in range(6)]
+        self.add("different topic", day.timestamp())
+        self.add("needle outside", (day + timedelta(days=1)).timestamp())
+        for order, expected in (("oldest", ids), ("newest", list(reversed(ids)))):
+            first = await self.call(query="needle", start_date="2025-06-01", end_date="2025-06-01",
+                                    order=order, limit=3)
+            second = await self.call(query="needle", start_date="2025-06-01", end_date="2025-06-01",
+                                     order=order, limit=3, offset=first["next_offset"])
+            self.assertEqual([m["id"] for m in first["messages"] + second["messages"]], expected)
+            self.assertTrue(first["has_more"])
+            self.assertFalse(second["has_more"])
+            self.assertIsNone(second["next_offset"])
+
+    async def test_history_page_limit_reports_remaining_results_without_an_unusable_offset(self):
+        # Keep the response bounded even at the supported paging boundary.
+        with self.store._conn:
+            self.store._conn.executemany(
+                "INSERT INTO messages(role,content,timestamp,sender) VALUES('user','synthetic',?,'fixture')",
+                [(1000 + i,) for i in range(10023)],
+            )
+        result = await self.call(order="oldest", offset=10000, limit=20)
+        self.assertTrue(result["has_more"])
+        self.assertTrue(result["pagination_limit_reached"])
+        self.assertIsNone(result["next_offset"])
+        self.assertEqual(len(result["messages"]), 20)
+
+    async def test_empty_history_is_not_a_first_day(self):
+        result = await self.call(order="oldest", limit=1)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["messages"], [])
+        self.assertFalse(result["has_more"])
+        self.assertIsNone(result["next_offset"])
+
     async def test_strict_invalid_inputs_do_not_read_history(self):
         cases = [
             {"start_date": "2025-1-01"}, {"start_date": "20250101"},
@@ -101,6 +186,8 @@ class BusinessToolsTests(unittest.IsolatedAsyncioTestCase):
             {"end_date": "9999-12-31"}, {"query": None}, {"query": "x" * 501},
             {"limit": True}, {"limit": "5"}, {"limit": 0}, {"limit": 21},
             {"limit": 1.0}, {"profile_id": "other"}, {"end_date": None},
+            {"order": "ascending"}, {"order": None}, {"order": True},
+            {"offset": -1}, {"offset": 10001}, {"offset": True}, {"offset": "1"},
         ]
         for args in cases:
             with self.subTest(args=args):
@@ -571,7 +658,8 @@ class BusinessMCPTests(unittest.IsolatedAsyncioTestCase):
             for name, args in cases:
                 self.assertFalse((await client.call_tool(name, args)).isError)
             self.assertEqual(callback.await_args_list[0].args[:2],
-                             ("history_search", {"query": "", "start_date": "", "end_date": "", "limit": 5}))
+                             ("history_search", {"query": "", "start_date": "", "end_date": "", "limit": 5,
+                                                 "order": "newest", "offset": 0}))
             self.assertEqual(callback.await_args_list[1].args[:2],
                              ("history_context", {"message_id": 12, "before": 3, "after": 3}))
             self.assertEqual(callback.await_args_list[3].args[:2], ("task_context", {"run_id": ""}))
@@ -581,6 +669,8 @@ class BusinessMCPTests(unittest.IsolatedAsyncioTestCase):
                        ("history_search", {"start_date": "2025-1-1"}),
                        ("history_search", {"start_date": "2025-02-29"}),
                        ("history_search", {"start_date": "2025-02-02", "end_date": "2025-02-01"}),
+                       ("history_search", {"order": "ascending"}),
+                       ("history_search", {"offset": True}), ("history_search", {"offset": -1}),
                        ("history_context", {"message_id": "12"}),
                        ("history_context", {"message_id": 12, "after": 11}),
                        ("web_search", {"query": 1}), ("web_search", {"query": " "}),

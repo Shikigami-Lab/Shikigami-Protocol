@@ -12,12 +12,13 @@ import inspect
 import json
 from pathlib import Path
 import sqlite3
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 MAX_MESSAGES = 20
+MAX_HISTORY_OFFSET = 10000
 MAX_CONTEXT = 10
 MAX_CONTENT = 4000
 MAX_QUERY = 500
@@ -36,6 +37,8 @@ Query = Annotated[str, Field(strict=True, max_length=MAX_QUERY)]
 SearchQuery = Annotated[str, Field(strict=True, min_length=1, max_length=MAX_QUERY)]
 DateText = Annotated[str, Field(strict=True, pattern=r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})?$"), AfterValidator(_date_text)]
 HistoryLimit = Annotated[int, Field(strict=True, ge=1, le=MAX_MESSAGES)]
+HistoryOffset = Annotated[int, Field(strict=True, ge=0, le=MAX_HISTORY_OFFSET)]
+HistoryOrder = Literal["newest", "oldest"]
 MessageId = Annotated[int, Field(strict=True, ge=1, le=9223372036854775807)]
 ContextCount = Annotated[int, Field(strict=True, ge=0, le=MAX_CONTEXT)]
 RunId = Annotated[str, Field(strict=True, max_length=128)]
@@ -70,6 +73,8 @@ class HistorySearchArgs(_Arguments):
     start_date: DateText = ""
     end_date: DateText = ""
     limit: HistoryLimit = 5
+    order: HistoryOrder = "newest"
+    offset: HistoryOffset = 0
 
     @model_validator(mode="after")
     def valid_range(self):
@@ -163,6 +168,13 @@ def _metadata(result, value):
 
 def _message(row) -> dict:
     result = dict(row)
+    try:
+        local_time = datetime.fromtimestamp(result["timestamp"]).astimezone()
+        result["local_datetime"] = local_time.isoformat(timespec="seconds")
+        result["local_date"] = local_time.date().isoformat()
+    except (OverflowError, OSError, TypeError, ValueError):
+        result["local_datetime"] = None
+        result["local_date"] = None
     content = result.get("content") or ""
     result["content"] = content[:MAX_CONTENT]
     result["content_truncated"] = (len(content) > MAX_CONTENT or result["content_offset"] > 0
@@ -228,12 +240,20 @@ def _history_search(session, args: HistorySearchArgs) -> dict:
     with _history_db(session) as db:
         # Keep the first literal match in view, with up to 200 preceding chars.
         content_start = "max(1,instr(lower(content),lower(:excerpt_query))-200)" if args.query else "1"
+        direction = "ASC" if args.order == "oldest" else "DESC"
         rows = db.execute(
             f"SELECT {_projection(db, content_start)} FROM messages WHERE {' AND '.join(clauses) or '1=1'} "
-            "ORDER BY timestamp DESC, id DESC LIMIT :limit", values,
+            f"ORDER BY timestamp {direction}, id {direction} LIMIT :limit OFFSET :offset",
+            {**values, "offset": args.offset},
         ).fetchall()
-    return {"ok": True, "source": "conversation_store", "messages": [_message(r) for r in rows[:args.limit]],
-            "has_more": len(rows) > args.limit}
+    messages = [_message(row) for row in rows[:args.limit]]
+    has_more = len(rows) > args.limit
+    next_offset = args.offset + len(messages)
+    page_limit = has_more and next_offset > MAX_HISTORY_OFFSET
+    return {"ok": True, "source": "conversation_store", "order": args.order, "offset": args.offset,
+            "messages": messages, "has_more": has_more,
+            "next_offset": next_offset if has_more and not page_limit else None,
+            "pagination_limit_reached": page_limit}
 
 
 def _history_context(session, args: HistoryContextArgs) -> dict:

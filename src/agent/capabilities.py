@@ -61,6 +61,15 @@ def capability_context(access, *, origin='user'):
                  'are distinct owners. Use owner=ai for your ideas, exact IDs for changes, and source_path '
                  'to link an existing notebook when useful. Mark done only after actual completion. '
                  'Do not turn every casual remark or notebook sentence into a task.')
+    if access.get('history_enabled'):
+        text += ('\nFor questions about our first/earliest chat day, use '
+                 'mcp__shikigami__history_search with query="", order="oldest", limit=1 to find '
+                 'the earliest saved local_date. Then search that date with start_date and end_date '
+                 'set to it, query="", order="oldest", limit=20. Keep those filters and follow '
+                 'next_offset while has_more and the request budget permit. Use original messages '
+                 'as evidence. Empty results are not proof of no past conversation; truncated content, '
+                 'paging limits or an exhausted budget mean partial evidence, not the whole day. '
+                 'The earliest saved date cannot establish that earlier deleted or missing chats never existed.')
     if access.get('workspace_enabled'):
         text += ('\nWhen useful, describe the purpose of lasting notes or artifacts with '
                  'mcp__shikigami__workspace_describe. Temporary files need no description. '
