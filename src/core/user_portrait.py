@@ -32,6 +32,7 @@ from src.config.profile_loader import DEFAULT_USER_PORTRAIT_CONFIG
 from src.config.prompt_loader import get_prompt, get_locale
 from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response, log_error
 from src.utils.paths import get_project_root
+from src.utils.memory_time import has_floating_date, write_time_context
 
 logger = logging.getLogger(__name__)
 
@@ -607,7 +608,10 @@ def _format_conversation(turns: List[Dict[str, Any]], user_label: str) -> str:
 
 def _get_recent_conversation_text(storage_root: str, max_turns: int, user_label: str = "用户") -> str:
     """Last max_turns rounds from ConversationStore as "label: content" lines."""
-    return _format_conversation(_get_recent_turns(storage_root, max_turns), user_label)
+    turns = [turn for turn in _get_recent_turns(storage_root, max_turns)
+             if str(turn.get('content') or '').strip()]
+    conversation = _format_conversation(turns, user_label)
+    return conversation + '\n\n' + write_time_context(turns, get_locale()) if conversation else ''
 
 
 def _get_recent_day_summaries_text(storage_root: str, n_days: int = 7) -> str:
@@ -829,6 +833,7 @@ async def trigger_portrait_refresh(
         "Update the three-layer portrait. Output only the JSON object, with no prefix or explanation."
     )
 
+    system_text += '\n\n' + write_time_context([], locale)
     messages = [
         {"role": "system", "content": system_text},
         {"role": "user", "content": user_text},
@@ -846,6 +851,11 @@ async def trigger_portrait_refresh(
     parsed = _parse_portrait_payload(raw)
     if not parsed:
         logger.warning("[UserPortrait] LLM 返回的三层画像无法解析，保留旧画像 profile=%s", profile_id)
+        return None
+    temporal_text = '\n'.join([parsed['content'], parsed['recent_context'],
+                               *(item['summary'] for item in parsed['contextual_details'])])
+    if has_floating_date(temporal_text):
+        logger.warning('[UserPortrait] Unresolved relative event date; keeping previous portrait profile=%s', profile_id)
         return None
 
     # ── 写入 ────────────────────────────────────────────────────────────────

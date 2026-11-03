@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest import mock
 
@@ -270,6 +271,36 @@ class AddressFormRefreshTests(_TempProfileTest):
 
 
 class PortraitRefreshTests(_TempProfileTest):
+    def test_portrait_uses_source_dates_and_refuses_floating_dates_without_overwriting(self):
+        self.write_card({'display_name': 'Fixture', 'base_prompt': 'Synthetic',
+                         'user_portrait': {'content': '保留原画像', 'updated_at': 10}})
+        before = self.read_card()
+        source = datetime(2026, 1, 15, 12).timestamp()
+        replies = [json.dumps({'content': '新画像', 'recent_context': '下个礼拜二面试',
+                               'contextual_details': []}, ensure_ascii=False),
+                   json.dumps({'content': '新画像', 'recent_context': '2026-01-20面试',
+                               'contextual_details': []}, ensure_ascii=False)]
+        calls = []
+        async def fake_llm(messages, *args, **kwargs):
+            calls.append(messages)
+            return replies.pop(0)
+        with mock.patch.object(user_portrait, '_get_recent_turns', return_value=[
+                _turn('user', '下个礼拜二面试', source, '小明')]), \
+                mock.patch.object(user_portrait, '_get_recent_day_summaries_text', return_value=''), \
+                mock.patch.object(user_portrait, '_get_facts_text', return_value=''), \
+                mock.patch.object(user_portrait, 'refresh_address_forms', new=mock.AsyncMock(return_value=None)), \
+                mock.patch.object(user_portrait, '_llm_call', side_effect=fake_llm):
+            result = asyncio.run(user_portrait.trigger_portrait_refresh(
+                PROFILE_ID, self.storage_root, _app(), force=True))
+            self.assertIsNone(result)
+            self.assertEqual(before, self.read_card())
+            result = asyncio.run(user_portrait.trigger_portrait_refresh(
+                PROFILE_ID, self.storage_root, _app(), force=True))
+            self.assertIsNotNone(result)
+        self.assertIn('2026-01-15', calls[0][0]['content'])
+        self.assertIn('YYYY-MM-DD', calls[0][0]['content'])
+        self.assertEqual('2026-01-20面试', self.read_card()['user_portrait']['recent_context']['content'])
+
     def test_refresh_keeps_concurrent_edits_and_separates_name_from_address(self):
         self.write_card({
             "display_name": "Mochi",

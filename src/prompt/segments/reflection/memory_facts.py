@@ -8,6 +8,7 @@ conversation seeds, creating the "how did she remember that?" surprise effect.
 from src.prompt.base import PromptSegment, ReflectionBuildContext, SegmentResult
 from src.prompt.registry import register
 from src.config.prompt_loader import get_locale
+from src.utils.memory_time import read_time_notice
 
 
 @register
@@ -48,9 +49,10 @@ class ReflectionMemoryFactsSegment(PromptSegment):
             footer = "如果以上记忆中有值得在此刻自然提起的细节，可将其作为话题出发点，以 memory_recall 为动机开口。"
             weight_label = "权重"
 
-        lines = [header]
+        lines = [header, read_time_notice(locale)]
         for f in facts:
-            lines.append(f"- [{f['date']}] {f['content']} ({weight_label}: {f['weight']})")
+            date_label = 'record updated' if locale == 'en' else '记录更新日'
+            lines.append(f"- [{date_label}: {f['date']}] {f['content']} ({weight_label}: {f['weight']})")
         lines.append("")
         lines.append(footer)
 

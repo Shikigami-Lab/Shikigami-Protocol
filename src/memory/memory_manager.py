@@ -18,6 +18,7 @@ from string import Template
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.config.prompt_loader import get_prompt
+from src.utils.memory_time import write_time_context
 
 from src.memory.long_term_store import LongTermStore
 from src.memory.day_store import DaySummaryStore
@@ -1047,10 +1048,10 @@ class MemoryManager:
             s = (m.get("sender") or "").strip()
             return s == user_name or (not s and m.get("role") == "user")
 
+        source_turns = [m for m in recent_turns if _is_memory_turn(m)]
         conv_text = "\n".join(
             f"{user_label if _is_human(m) else persona_name}: {m.get('content', '')}"
-            for m in recent_turns
-            if _is_memory_turn(m)
+            for m in source_turns
         )
         if not conv_text.strip():
             logger.warning(
@@ -1084,6 +1085,9 @@ class MemoryManager:
                 + _extraction_format_block()
                 + f"\n当前采纳阈值：weight 需大于 {threshold} 才会被采纳（即 weight 小于等于 {threshold} 的事实不会被采纳）。\n"
             )
+
+        from src.config.prompt_loader import get_locale
+        extraction_prompt += '\n\n' + write_time_context(source_turns, get_locale())
 
         try:
             from src.llm.registry import get_provider

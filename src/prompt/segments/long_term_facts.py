@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 from src.utils.paths import get_project_root
+from src.utils.memory_time import read_time_notice, source_time
 
 logger = logging.getLogger(__name__)
 
@@ -56,27 +57,6 @@ _CATEGORY_LABELS = {
 
 # 分类显示顺序
 _CATEGORY_ORDER = ["taboo", "relationship", "habit", "preference", "milestone", "location", "ai_insight", "other"]
-
-
-def _relative_time(ts: float) -> str:
-    diff = time.time() - ts
-    if diff < 120:
-        return "刚刚"
-    minutes = int(diff / 60)
-    if diff < 3600:
-        return f"{minutes}分钟前"
-    hours = int(diff / 3600)
-    if diff < 86400:
-        return f"{hours}小时前"
-    if diff < 2 * 86400:
-        return "昨天"
-    days = int(diff / 86400)
-    if days < 30:
-        return f"{days}天前"
-    months = int(days / 30)
-    if months < 12:
-        return f"约{months}个月前"
-    return "很久以前"
 
 
 def _get_current_emotion(profile_id: str) -> str:
@@ -242,7 +222,7 @@ class LongTermFactsSegment(PromptSegment):
                 seen_labels.add(label)
             for f in groups[cat]:
                 note = getattr(f, "emotional_note", "")
-                time_str = _relative_time(f.updated_at)
+                time_str = '记录更新于 ' + source_time(f.updated_at)
                 suffix = f"（{note}，{time_str}）" if note else f"（{time_str}）"
                 lines.append(f"{idx}. {f.content}{suffix}")
                 idx += 1
@@ -253,7 +233,7 @@ class LongTermFactsSegment(PromptSegment):
                 continue
             for f in facts:
                 note = getattr(f, "emotional_note", "")
-                time_str = _relative_time(f.updated_at)
+                time_str = '记录更新于 ' + source_time(f.updated_at)
                 suffix = f"（{note}，{time_str}）" if note else f"（{time_str}）"
                 lines.append(f"{idx}. {f.content}{suffix}")
                 idx += 1
@@ -264,7 +244,7 @@ class LongTermFactsSegment(PromptSegment):
             if has_emotional
             else "【长期认知与记忆】以下是与你当前最相关的记忆："
         )
-        content = header + "\n" + "\n".join(lines)
+        content = header + "\n" + read_time_notice() + "\n" + "\n".join(lines)
         return SegmentResult(messages=[{"role": "system", "content": content}])
 
 

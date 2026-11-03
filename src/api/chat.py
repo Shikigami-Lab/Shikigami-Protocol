@@ -659,9 +659,9 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
     if merge_enabled:
         from src.memory.merged_history import get_merged_recent_messages, get_merged_messages_for_date
         merged_recent = get_merged_recent_messages(session, app, profile, freq, cap=None)
-        recent_turns = [{"role": m.get("role"), "content": m.get("content"), "sender": m.get("sender")} for m in merged_recent]
+        recent_turns = [dict(m) for m in merged_recent]
     else:
-        recent_turns = store.get_recent(freq)
+        recent_turns = store.get_recent_with_ts(freq)
     # 用局部变量固定 lambda 闭包（避免循环/重用时变量逸出）
     _turns, _profile, _app, _ec = recent_turns, profile, app, emotion_context
     asyncio.create_task(_fire_task(

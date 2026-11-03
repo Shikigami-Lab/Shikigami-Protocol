@@ -7,6 +7,7 @@
 """
 from src.prompt.base import PromptSegment, ReflectionBuildContext, SegmentResult
 from src.prompt.registry import register
+from src.utils.memory_time import read_time_notice
 
 
 @register
@@ -45,6 +46,7 @@ class ReflectionUserPersonaSegment(PromptSegment):
         if portrait_text:
             lines.append("")
             lines.append("【你对他的整体印象】")
+            lines.append(read_time_notice(getattr(ctx, 'locale', None) or 'zh'))
             lines.append(portrait_text)
 
         return SegmentResult(

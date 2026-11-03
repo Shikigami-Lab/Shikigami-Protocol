@@ -13,6 +13,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import List, Optional
+from src.utils.memory_time import has_floating_date
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,9 @@ class LongTermStore:
         updated_at: 可选，合并摘要时传入被合并事实的最旧时间以保持 recency 语义。"""
         content = content.strip()
         if not content:
+            return None
+        if source != 'manual' and has_floating_date(content):
+            logger.warning('[LongTermStore] Auto fact has an unresolved relative date; keeping existing memories')
             return None
         if self._is_duplicate(content):
             logger.debug("[LongTermStore] 跳过重复事实: %.40s", content)

@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict
 
 from src.config.prompt_loader import get_locale
+from src.utils.memory_time import read_time_notice
 from src.core.user_portrait import (
     extract_style_address_form,
     format_mutual_address_facts,
@@ -145,6 +146,8 @@ class UserPersonaSegment(PromptSegment):
             lines.append(introduction)
         if address_line:
             lines.append(address_line)
+        if portrait_text or recent_context or contextual_details:
+            lines.append(read_time_notice(locale))
 
         if portrait_text:
             lines.append("")

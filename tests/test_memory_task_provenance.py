@@ -8,6 +8,8 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from unittest.mock import AsyncMock
+import asyncio
 
 from src.memory.conversation_store import ConversationStore, Message
 from src.memory.merged_history import get_merged_messages_for_date, get_merged_recent_messages
@@ -192,6 +194,53 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.manager._extract_facts_llm(self.store.get_recent(), {}, self.app), [])
         self.provider.assert_not_called()
         self.assertEqual(self.calls, [])
+
+    async def test_fact_extraction_keeps_original_dates_with_custom_prompts(self):
+        rows = [{"role": "user", "content": "下个礼拜二有面试", "timestamp": TS, "sender": "Human"},
+                {"role": "assistant", "content": "一起准备", "timestamp": TS + 86400}]
+        self.manager._cfg['extraction_prompt'] = 'Custom rules: {conversation}'
+        self.response = '[]'
+        await self.manager._extract_facts_llm(rows, {}, self.app)
+        prompt = self.calls[-1][0]['content']
+        self.assertIn('2026-01-15', prompt)
+        self.assertIn('2026-01-16', prompt)
+        self.assertIn('下个礼拜二有面试', prompt)
+        self.assertIn('YYYY-MM-DD', prompt)
+
+    async def test_chat_background_memory_task_preserves_source_timestamps(self):
+        from src.api.chat import _fire_memory_tasks
+        self.populate()
+        self.manager._cfg['day_summary_enabled'] = False
+        expected = {row['content']: row for store in (self.store, self.group)
+                    for row in store.get_all_with_id()}
+        for merged in (False, True):
+            jobs = []
+            def capture(coro):
+                jobs.append(coro)
+            with patch('src.api.chat.asyncio.create_task', side_effect=capture), \
+                    patch('src.config.profile_loader.ProfileLoader.load', return_value={
+                        'memory_config': {'group_chat_merge_into_history': merged}}), \
+                    patch('src.api.memory.get_or_create_manager_for_session', return_value=self.manager), \
+                    patch.object(self.manager, 'auto_extract', new=AsyncMock()) as extract:
+                _fire_memory_tasks(self.session, self.store, self.app)
+                await asyncio.gather(*jobs)
+                rows = extract.call_args.args[0]
+                self.assertTrue(all('timestamp' in row for row in rows))
+                for row in rows:
+                    self.assertEqual(row['timestamp'], expected[row['content']]['timestamp'])
+                    self.assertEqual(row['generation_status'], expected[row['content']]['generation_status'])
+
+    async def test_unresolved_relative_fact_is_not_saved_or_old_facts_deleted(self):
+        previous = self.manager.facts.add('用户有一条应当保持原样的长期事实', source='manual')
+        self.response = json.dumps([
+            {'content': '用户下个礼拜二需要参加重要面试', 'weight': 1.2},
+            {'content': '用户将于2026-01-20参加公司面试', 'weight': 1.2},
+        ], ensure_ascii=False)
+        await self.manager.auto_extract([{'role': 'user', 'content': '下个礼拜二有面试', 'timestamp': TS}], {}, self.app)
+        contents = [f.content for f in self.manager.facts.get_all()]
+        self.assertIn(previous.content, contents)
+        self.assertIn('用户将于2026-01-20参加公司面试', contents)
+        self.assertNotIn('用户下个礼拜二需要参加重要面试', contents)
 
     async def test_legacy_messages_remain_eligible_and_quiet_summary_still_works(self):
         rows = [{"role": "user", "content": "LEGACY_USER", "timestamp": TS},
