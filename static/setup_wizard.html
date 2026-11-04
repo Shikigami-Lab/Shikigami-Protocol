@@ -34,6 +34,7 @@
   <link rel="stylesheet" href="css/settings.css" />
   <script src="libs/vue.global.prod.js"></script>
   <script src="js/i18n.js"></script>
+  <script src="js/icons.js?v=20261105lucide1"></script>
   <script>
     (function initSetupWizardLocale() {
       function inferFromNavigator() {
@@ -209,11 +210,18 @@
       color: var(--text-secondary);
     }
     .setup-wizard-details summary {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      list-style: none;
       cursor: pointer;
       color: var(--accent);
       font-weight: 600;
       margin-bottom: 6px;
     }
+    .setup-wizard-details summary::-webkit-details-marker { display: none; }
+    .setup-wizard-details:not([open]) summary .app-icon { transform: rotate(-90deg); }
+    .setup-wizard-page .setup-quick-dot { display: inline-flex; flex: 0 0 14px; }
     .setup-wizard-substep {
       margin-top: 10px;
       padding-top: 10px;
@@ -242,9 +250,9 @@
     #wiz-pre-vue .setup-wizard-boot-spinner {
       width: 36px;
       height: 36px;
-      border: 3px solid var(--border, #444);
-      border-top-color: var(--accent, #7c9cff);
-      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: var(--accent, #7c9cff);
       animation: setup-wizard-spin 0.85s linear infinite;
     }
     @keyframes setup-wizard-spin {
@@ -262,23 +270,20 @@
     }
     .setup-wizard-inline-spinner {
       flex-shrink: 0;
-      width: 22px;
-      height: 22px;
       margin-top: 2px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
+      color: var(--accent);
       animation: setup-wizard-spin 0.8s linear infinite;
     }
   </style>
 </head>
 <body>
   <div id="wiz-pre-vue" aria-live="polite">
-    <div class="setup-wizard-boot-spinner" aria-hidden="true"></div>
+    <span class="setup-wizard-boot-spinner" data-icon="loader-circle" aria-hidden="true"></span>
     <span id="wiz-pre-vue-msg">…</span>
   </div>
   <script>
     (function () {
+      window.SK_ICONS.hydrate();
       var m = document.getElementById('wiz-pre-vue-msg');
       if (!m) return;
       try {
@@ -297,7 +302,7 @@
     <p v-if="statusError" class="setup-wizard-status-err">{{ statusError }}</p>
 
     <div v-if="statusLoading && !g" class="setup-wizard-loading-panel">
-      <div class="setup-wizard-inline-spinner" aria-hidden="true"></div>
+      <app-icon name="loader-circle" :size="16" class="setup-wizard-inline-spinner"></app-icon>
       <p class="muted" style="margin:0;font-size:13px;line-height:1.5;">{{ tw('setupWizardStatusLoadingHint') }}</p>
     </div>
 
@@ -313,23 +318,23 @@
       <p class="setup-guide-quick-hint muted">{{ tw('onboardingQuickHint') }}</p>
       <div class="setup-quick-grid">
         <div class="setup-quick-item" :class="{ ok: g.llm_preset_configured }">
-          <span class="setup-quick-dot">{{ g.llm_preset_configured ? '✓' : '○' }}</span>
+          <span class="setup-quick-dot" role="img" :aria-label="tw(g.llm_preset_configured ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.llm_preset_configured ? 'check' : 'circle'" :size="14"></app-icon></span>
           <span>{{ tw('onboardingQuickLlmCfg') }}</span>
         </div>
         <div class="setup-quick-item" :class="{ ok: g.profile_count > 0 }">
-          <span class="setup-quick-dot">{{ g.profile_count > 0 ? '✓' : '○' }}</span>
+          <span class="setup-quick-dot" role="img" :aria-label="tw(g.profile_count > 0 ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.profile_count > 0 ? 'check' : 'circle'" :size="14"></app-icon></span>
           <span>{{ tw('onboardingQuickProfiles') }} ({{ g.profile_count }})</span>
         </div>
         <div class="setup-quick-item optional" :class="{ ok: g.chromadb_installed }">
-          <span class="setup-quick-dot">{{ g.chromadb_installed ? '✓' : '–' }}</span>
+          <span class="setup-quick-dot" role="img" :aria-label="tw(g.chromadb_installed ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.chromadb_installed ? 'check' : 'minus'" :size="14"></app-icon></span>
           <span>{{ tw('onboardingQuickChromaDB') }}</span>
         </div>
-        <div class="setup-quick-item optional" :class="{ ok: !g.memory_vector_enabled || g.embedding_provider !== 'local' || g.embedding_local_on_disk || (g.embed_installed && (g.embed_installed.bge_small_zh || g.embed_installed.minilm_en)) }">
-          <span class="setup-quick-dot">{{ (!g.memory_vector_enabled || g.embedding_provider !== 'local' || g.embedding_local_on_disk || (g.embed_installed && (g.embed_installed.bge_small_zh || g.embed_installed.minilm_en))) ? '✓' : '–' }}</span>
+        <div class="setup-quick-item optional" :class="{ ok: quickEmbedReady }">
+          <span class="setup-quick-dot" role="img" :aria-label="tw(quickEmbedReady ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="quickEmbedReady ? 'check' : 'minus'" :size="14"></app-icon></span>
           <span>{{ tw('onboardingQuickEmbed') }}</span>
         </div>
         <div class="setup-quick-item optional" :class="{ ok: g.stt_ready }">
-          <span class="setup-quick-dot">{{ g.stt_ready ? '✓' : '–' }}</span>
+          <span class="setup-quick-dot" role="img" :aria-label="tw(g.stt_ready ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.stt_ready ? 'check' : 'minus'" :size="14"></app-icon></span>
           <span>{{ tw('onboardingQuickStt') }}</span>
         </div>
       </div>
@@ -400,7 +405,7 @@
         <div class="setup-wizard-substep">
           <div class="setup-wizard-substep-title">2. {{ tw('onboardingAiMemoryModels') }}</div>
           <p class="setup-tts-desc">{{ tw('onboardingAiMemoryModelsDesc') }}</p>
-          <p v-if="!g.ai_memory_installed" class="warn" style="font-size:12px;margin:8px 0;">⚠️ {{ tw('onboardingAiMemoryNeedDepsFirst') }}</p>
+          <p v-if="!g.ai_memory_installed" class="warn" style="font-size:12px;margin:8px 0;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ tw('onboardingAiMemoryNeedDepsFirst') }}</p>
           <div v-for="b in memBundles" :key="b.id" class="setup-tts-card" style="margin-top:10px;">
             <div class="setup-tts-head">
               <span class="setup-tts-name">{{ bundleTitle(b) }}</span>
@@ -440,7 +445,7 @@
           <p class="setup-tts-desc">{{ tw('onboardingTtsGptSoVits') }}</p>
           <p class="muted" style="font-size:11px;">{{ g.tts.gpt_sovits_port_open ? tw('onboardingTtsGptSoVitsOpen') : tw('onboardingTtsGptSoVitsClosed') }}</p>
           <details class="setup-wizard-details">
-            <summary>{{ tw('onboardingTtsGptSoVitsHowToGet') }}</summary>
+            <summary><app-icon name="chevron-down" :size="14"></app-icon>{{ tw('onboardingTtsGptSoVitsHowToGet') }}</summary>
             <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">① {{ tw('onboardingTtsGptSoVitsStep1') }}</span><br/>
               <span style="font-size:11px;">{{ tw('onboardingTtsGptSoVitsStep1Hint') }}</span><br/>
               <a href="#" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block;text-decoration:underline;" @click.prevent="openGptsovitsReleases">{{ tw('onboardingTtsGptSoVitsReleaseLinkText') }}</a></p>
@@ -478,8 +483,8 @@
           <div class="setup-wizard-substep" style="margin-top:0;padding-top:0;border-top:none;">
             <div class="setup-wizard-substep-title">1. {{ tw('onboardingKokoroPkgStepTitle') }}</div>
             <p class="muted" style="font-size:11px;line-height:1.5;">
-              {{ g.tts.kokoro_installed ? '✓' : '○' }} {{ g.tts.kokoro_installed ? tw('onboardingTtsKokoroPkg') : tw('onboardingTtsKokoroPkgMissing') }}<br/>
-              {{ g.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ tw('onboardingTtsKokoroMisakiZh') }}
+              <app-icon :name="g.tts.kokoro_installed ? 'check' : 'circle'" :size="14"></app-icon> {{ g.tts.kokoro_installed ? tw('onboardingTtsKokoroPkg') : tw('onboardingTtsKokoroPkgMissing') }}<br/>
+              <span role="img" :aria-label="tw(g.tts.kokoro_misaki_zh ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.tts.kokoro_misaki_zh ? 'check' : 'circle'" :size="14"></app-icon></span> {{ tw('onboardingTtsKokoroMisakiZh') }}
             </p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
               <button type="button" class="s-btn s-btn-small" :disabled="busy" @click="pipInstall(['kokoro-onnx','misaki[zh]'], 'kokoro', '')">{{ tw('onboardingKokoroInstall') }}</button>
@@ -490,7 +495,7 @@
           </div>
           <div class="setup-wizard-substep">
             <div class="setup-wizard-substep-title">2. {{ tw('onboardingKokoroModelStepTitle') }}</div>
-            <p v-if="!g.tts.kokoro_installed" class="warn" style="font-size:12px;margin:0 0 8px;">⚠️ {{ tw('onboardingKokoroNeedPkgFirst') }}</p>
+            <p v-if="!g.tts.kokoro_installed" class="warn" style="font-size:12px;margin:0 0 8px;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ tw('onboardingKokoroNeedPkgFirst') }}</p>
             <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="tw('onboardingKokoroModelsHint')"></p>
             <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="tw('onboardingKokoroModelsSaveTo')"></p>
             <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="tw('onboardingKokoroModelsReleases')"></p>
@@ -507,7 +512,7 @@
               </div>
             </div>
             <p v-if="g.tts.kokoro_installed" class="setup-tts-check" style="font-size:12px;">
-              <span :class="g.tts.kokoro_models_ready ? 'ok' : 'warn'">{{ g.tts.kokoro_models_ready ? '✓' : '○' }} {{ tw('onboardingKokoroModels') }}</span>
+              <span :class="g.tts.kokoro_models_ready ? 'ok' : 'warn'"><span role="img" :aria-label="tw(g.tts.kokoro_models_ready ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.tts.kokoro_models_ready ? 'check' : 'circle'" :size="14"></app-icon></span> {{ tw('onboardingKokoroModels') }}</span>
             </p>
           </div>
         </div>
@@ -524,7 +529,7 @@
           <div class="setup-wizard-substep">
             <div class="setup-wizard-substep-title">1. {{ tw('onboardingQwenTtsPkgStepTitle') }}</div>
             <p class="setup-tts-desc">{{ tw('onboardingQwenTtsPkgDesc') }}</p>
-            <p v-if="g.qwen_tts_installed" class="ok" style="font-size:12px;">✓ {{ tw('onboardingQwenTtsPkgInstalled') }}</p>
+            <p v-if="g.qwen_tts_installed" class="ok" style="font-size:12px;"><app-icon name="check" :size="14"></app-icon> {{ tw('onboardingQwenTtsPkgInstalled') }}</p>
             <p v-if="g.torch_import_ok && g.torch_load && g.torch_load.ok" class="muted" style="font-size:11px;line-height:1.45;">
               <template v-if="g.torch_load.built_with_cuda">
                 {{ tw('onboardingTorchMetaCuda').replace('{version}', g.torch_load.version || '?').replace('{cuda}', g.torch_load.cuda_built_version || '?') }}<span v-if="g.torch_cuda_available">{{ tw('onboardingTorchMetaGpuOn') }}</span><span v-else>{{ tw('onboardingTorchMetaGpuOff') }}</span>
@@ -562,7 +567,7 @@
             <p v-if="g.tts.qwen3_model_ready && g.tts.qwen3_model_path" class="ok" style="font-size:11px;line-height:1.45;margin:0 0 8px;">
               {{ tw('onboardingQwenTtsModelPathReadyLabel') }}<code style="word-break:break-all;">{{ g.tts.qwen3_model_path }}</code>
             </p>
-            <p v-if="!g.qwen_tts_installed" class="warn" style="font-size:12px;">⚠️ {{ tw('onboardingQwenTtsNeedDepsFirst') }}</p>
+            <p v-if="!g.qwen_tts_installed" class="warn" style="font-size:12px;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ tw('onboardingQwenTtsNeedDepsFirst') }}</p>
             <div v-for="b in ttsBundles" :key="b.id" class="setup-tts-card" style="margin-top:8px;">
               <div class="setup-tts-head">
                 <span class="setup-tts-name">{{ bundleTitle(b) }}</span>
@@ -595,7 +600,7 @@
 
           <div class="setup-wizard-substep">
             <div class="setup-wizard-substep-title">1. {{ tw('onboardingSttDepsStepTitle') }}</div>
-            <p v-if="g.sherpa_onnx_installed" class="ok" style="font-size:12px;">✓ sherpa-onnx {{ tw('onboardingInstalled') }}</p>
+            <p v-if="g.sherpa_onnx_installed" class="ok" style="font-size:12px;"><app-icon name="check" :size="14"></app-icon> sherpa-onnx {{ tw('onboardingInstalled') }}</p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
               <button v-if="!g.sherpa_onnx_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipInstall(['sherpa-onnx','soundfile'], 'sherpa_onnx', '')">{{ tw('onboardingSttInstallSherpa') }}</button>
               <button v-if="g.sherpa_onnx_installed" type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="busy" @click="pipUninstall(['sherpa-onnx'])">
@@ -606,10 +611,10 @@
 
           <div class="setup-wizard-substep">
             <div class="setup-wizard-substep-title">2. {{ tw('onboardingSttModelStepTitle') }}</div>
-            <p v-if="!g.sherpa_onnx_installed" class="muted" style="font-size:12px;">⚠️ {{ tw('onboardingSttNeedDepsFirst') }}</p>
+            <p v-if="!g.sherpa_onnx_installed" class="muted" style="font-size:12px;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ tw('onboardingSttNeedDepsFirst') }}</p>
             <template v-else>
               <p class="setup-tts-check" style="font-size:12px;">
-                <span :class="g.sherpa_sense_voice_ready ? 'ok' : 'warn'">{{ g.sherpa_sense_voice_ready ? '✓' : '○' }} {{ tw('onboardingSttModelFiles') }}</span>
+                <span :class="g.sherpa_sense_voice_ready ? 'ok' : 'warn'"><span role="img" :aria-label="tw(g.sherpa_sense_voice_ready ? 'statusReady' : 'onboardingTtsNotReady')"><app-icon :name="g.sherpa_sense_voice_ready ? 'check' : 'circle'" :size="14"></app-icon></span> {{ tw('onboardingSttModelFiles') }}</span>
               </p>
               <div v-if="sttBundle" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
                 <button v-if="sttBundle.repo_id" type="button" class="s-btn s-btn-small" :disabled="busy" @click="doDownload('sherpa_sense_voice', 'hf')">{{ tw('onboardingBtnHfMirror350') }}</button>

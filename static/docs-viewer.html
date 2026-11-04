@@ -38,6 +38,8 @@
     }
     .toolbar a { color: var(--accent); text-decoration: none; }
     .toolbar a:hover { text-decoration: underline; }
+    #btnBack { display: inline-flex; align-items: center; gap: 4px; }
+    #btnBack [data-icon] { display: inline-flex; }
     .toolbar .sep { color: var(--muted); user-select: none; }
     .doc-body { max-width: 48rem; margin: 0 auto; padding: 24px 20px 48px; }
     .doc-body :is(h1, h2, h3) { margin-top: 1.25em; margin-bottom: 0.5em; line-height: 1.3; }
@@ -77,13 +79,15 @@
 </head>
 <body>
   <div class="toolbar">
-    <a href="#" id="btnBack" onclick="window.close(); return false;">← <span id="lblBack">返回应用</span></a>
+    <a href="#" id="btnBack" onclick="window.close(); return false;"><span data-icon="arrow-left" data-icon-size="14" aria-hidden="true"></span><span id="lblBack">返回应用</span></a>
     <span class="sep">|</span>
     <a id="rawLink" href="#"><span id="lblRaw">查看 Markdown 源码</span></a>
   </div>
   <div id="content" class="doc-body loading">…</div>
+  <script src="js/icons.js?v=20261105lucide1"></script>
   <script>
     (function () {
+      window.SK_ICONS.hydrate();
       var STEMS = {
         GETTING_STARTED: 1,
         ARCHITECTURE_REFERENCE: 1,

@@ -173,9 +173,9 @@
   font-weight: 600;
 }
 .canvas-nav-icon {
-  font-size: var(--fs-base);
+  display: inline-flex;
   width: 20px;
-  text-align: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -1002,7 +1002,7 @@ textarea.form-input {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   padding-right: 28px;
@@ -2998,7 +2998,7 @@ textarea.form-input {
     box-sizing: border-box;
     white-space: nowrap;
   }
-  /* Fixed-size icon container so all Unicode glyphs are vertically aligned */
+  /* Fixed-size icon container for narrow navigation */
   .canvas-nav-icon {
     display: flex;
     align-items: center;
@@ -3249,7 +3249,7 @@ textarea.form-input {
 .setup-quick-item.ok { border-color: rgba(80, 160, 100, 0.45); }
 .setup-quick-item.optional { opacity: 0.65; }
 .setup-quick-item.optional.ok { opacity: 1; }
-.setup-quick-dot { font-weight: bold; width: 1.2em; text-align: center; }
+.setup-quick-dot { display: inline-flex; justify-content: center; flex: 0 0 16px; }
 .setup-guide-meta {
   font-size: var(--fs-xs);
   color: var(--text-secondary);
@@ -3910,8 +3910,7 @@ textarea.form-input {
 }
 .adv-toggle-row:hover { color: var(--text-primary); }
 .adv-toggle-arrow {
-  font-size: var(--fs-lg);
-  line-height: 1;
+  display: inline-flex;
   transition: transform var(--transition-mid);
   transform: rotate(0deg);
 }
@@ -4074,6 +4073,10 @@ textarea.form-input {
 .agent-settings-model .form-input { flex: 1; min-width: 120px; }
 .agent-settings-advanced { border-top: 1px solid var(--border); margin-top: var(--space-3); padding-top: var(--space-3); }
 .agent-settings-advanced summary { cursor: pointer; color: var(--text-secondary); font-size: var(--fs-sm); }
+.settings-disclosure { list-style: none; }
+.settings-disclosure::-webkit-details-marker { display: none; }
+.settings-disclosure-icon { transition: transform var(--transition-mid); }
+details[open] > .settings-disclosure .settings-disclosure-icon { transform: rotate(90deg); }
 
 .settings-save-status {
   color: var(--text-primary);

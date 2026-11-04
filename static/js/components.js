@@ -36,13 +36,13 @@ window.SK_COMPONENTS = {
                  :aria-label="t(owner === 'ai' ? 'todosNewPlanPlaceholder' : 'todosNewPlaceholder')"
                  :placeholder="t(owner === 'ai' ? 'todosNewPlanPlaceholder' : 'todosNewPlaceholder')"
                  @keydown.enter="$emit('add')" />
-          <button type="button" class="tp-add-btn" :aria-label="t('todosAdd')" @click="$emit('add')">+</button>
+          <button type="button" class="tp-add-btn" :aria-label="t('todosAdd')" @click="$emit('add')"><app-icon name="plus" :size="16"></app-icon></button>
         </div>
         <div class="tp-list">
           <div v-if="todos.length === 0" class="tp-empty">{{ t(owner === 'ai' ? 'todosPlansEmpty' : 'todosEmpty') }}</div>
           <div v-for="todo in todos" :key="todo.id" class="tp-item" :class="{ done: todo.done }">
             <button type="button" class="tp-check" :aria-label="todo.content" :aria-pressed="!!todo.done"
-                    @click="$emit('toggle', todo.id)">{{ todo.done ? '✓' : '○' }}</button>
+                    @click="$emit('toggle', todo.id)"><app-icon :name="todo.done ? 'circle-check' : 'circle'" :size="16"></app-icon></button>
             <div class="tp-todo-body">
               <span class="tp-text" :title="todo.content">{{ todo.content }}</span>
               <div v-if="artifactPath(todo, 'source_path') || artifactPath(todo, 'evidence_path')" class="tp-todo-links">
@@ -50,7 +50,7 @@ window.SK_COMPONENTS = {
                         :key="field" type="button" class="tp-close" @click="$emit('artifact', todo, field)">{{ t(field === 'source_path' ? 'todosSource' : 'todosEvidence') }}</button>
               </div>
             </div>
-            <button type="button" class="tp-del" :aria-label="t('todosDelete')" @click="$emit('delete', todo.id)">✕</button>
+            <button type="button" class="tp-del" :aria-label="t('todosDelete')" @click="$emit('delete', todo.id)"><app-icon name="x" :size="14"></app-icon></button>
           </div>
         </div>
         <div v-if="todos.some(todo => todo.done)" class="tp-add-row">
@@ -95,7 +95,7 @@ window.SK_COMPONENTS = {
       <article class="agent-task-card" :aria-label="t('agentTaskDetails')">
         <button type="button" class="agent-task-summary" :aria-expanded="expanded"
                 @click="expanded = !expanded">
-          <span class="agent-task-chevron" aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
+          <span class="agent-task-chevron" aria-hidden="true"><app-icon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14"></app-icon></span>
           <span>{{ t('agentTaskDetails') }}</span><span aria-hidden="true">·</span>
           <span class="agent-state" :class="['agent-state-' + run.state, { 'agent-state-tool-warning': toolWarning }]"
                 :title="label || stateLabel">{{ label || stateLabel }}</span>
@@ -169,7 +169,7 @@ window.SK_COMPONENTS = {
       <div class="section-collapsible">
         <button type="button" class="section-collapsible-header" :aria-expanded="isOpen" @click="isOpen = !isOpen">
           {{ title }}
-          <span aria-hidden="true">{{ isOpen ? '▲' : '▼' }}</span>
+          <app-icon :name="isOpen ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
         </button>
         <div v-show="isOpen" class="section-collapsible-body" :class="bodyClass">
           <slot></slot>

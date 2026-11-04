@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261105chatlayout1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261105settings3" />
+  <link rel="stylesheet" href="css/styles.css?v=20261105lucide1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261105lucide1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261105chatlayout1"></script>
+  <script src="js/i18n.js?v=20261105lucide1"></script>
 </head>
 <body>
 
@@ -39,11 +39,11 @@
       <button type="button" ref="sidebarMobileClose" class="sidebar-shortcut sidebar-mobile-close"
               :title="t('headerToggleSidebar')" :aria-label="t('headerToggleSidebar')"
               aria-controls="chat-sidebar" aria-expanded="true" @click="closeSidebar">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        <app-icon name="chevron-left"></app-icon>
       </button>
       <button type="button" ref="sidebarGroupsTrigger" class="sidebar-shortcut" :class="{ on: currentGroupId }"
               :title="t('sidebarGroups')" :aria-label="t('sidebarGroups')" popovertarget="sidebar-groups">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 5a3 3 0 0 1 0 6m5 9v-2a4 4 0 0 0-3-4"/></svg>
+        <app-icon name="users"></app-icon>
       </button>
       <section id="sidebar-groups" ref="sidebarGroups" class="sidebar-groups-popover" popover="auto"
                :aria-label="t('sidebarGroups')">
@@ -58,10 +58,10 @@
             <button type="button" class="group-pin-btn" :class="{ pinned: isGroupPinned(g.group_id) }"
                     :aria-label="t('sidebarPinGroup').replace('{name}', g.display_name || g.group_id)"
                     :aria-pressed="isGroupPinned(g.group_id)" :title="t('sidebarPinGroup').replace('{name}', g.display_name || g.group_id)"
-                    @click="toggleGroupPin(g.group_id)">&#128204;</button>
+                    @click="toggleGroupPin(g.group_id)"><app-icon name="pin" :size="16"></app-icon></button>
           </div>
           <button type="button" class="sidebar-create-group-btn"
-                  @click="$refs.sidebarGroups.hidePopover(); openCreateGroupModal()">{{ t('sidebarCreateGroup') }}</button>
+                  @click="$refs.sidebarGroups.hidePopover(); openCreateGroupModal()"><app-icon name="plus" :size="16"></app-icon> {{ t('sidebarCreateGroup') }}</button>
         </div>
       </section>
       <button v-if="sidebarOpen" type="button" ref="agentWorkspaceOpener" class="sidebar-shortcut agent-workspace-opener"
@@ -69,16 +69,16 @@
               :title="t('agentWorkspace')" :aria-label="t('agentWorkspace')"
               :aria-describedby="agentActiveTaskCount ? 'sidebar-workspace-task-count' : null"
               :aria-expanded="agentWorkspaceOpen" aria-controls="agent-workspace-drawer" @click="toggleAgentWorkspace">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <app-icon name="folder"></app-icon>
         <span v-if="agentActiveTaskCount" id="sidebar-workspace-task-count" class="agent-task-count sidebar-task-count">{{ agentActiveTaskCount }}</span>
       </button>
       <button type="button" class="sidebar-shortcut" :disabled="!!currentGroupId || !currentSessionId"
               :title="t('memSubTabContent')" :aria-label="t('memSubTabContent')" @click="openMemoryPanel">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6a9 9 0 0 0-9-2v15a9 9 0 0 1 9 2 9 9 0 0 1 9-2V4a9 9 0 0 0-9 2zm0 0v15"/></svg>
+        <app-icon name="book-open"></app-icon>
       </button>
       <button v-if="sidebarOpen" type="button" ref="settingsTrigger" class="sidebar-shortcut gear-btn"
               :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')" @click="openSettings">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l.6 2.4 2 .9L20 5.5l2 3.5-1.7 1.8v2.4L22 15l-2 3.5-2.4-.8-2 .9L15 21H9l-.6-2.4-2-.9-2.4.8L2 15l1.7-1.8v-2.4L2 9l2-3.5 2.4.8 2-.9z"/><circle cx="12" cy="12" r="3"/></svg>
+        <app-icon name="settings"></app-icon>
         <span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span>
       </button>
     </nav>
@@ -101,13 +101,13 @@
             </span>
           </button>
           <span class="session-drag-handle" aria-hidden="true" :title="t('sidebarReorderRoles')"
-                @pointerdown.stop="sessionPointerDown($event, session.id)">&#8942;</span>
+                @pointerdown.stop="sessionPointerDown($event, session.id)"><app-icon name="grip-vertical" :size="14"></app-icon></span>
         </div>
       </div>
       <button type="button" class="sidebar-sync-btn" :class="{ 'sync-needed': outOfSyncWithServer && !currentGroupId }"
               :aria-label="t('sidebarSyncTitle')"
               :title="outOfSyncWithServer && !currentGroupId ? t('sidebarOutOfSync') + ' ' + t('sidebarSyncTitle') : t('sidebarSyncTitle')"
-              @click="syncSessionsFromServer">&#8635;</button>
+              @click="syncSessionsFromServer"><app-icon name="refresh-cw"></app-icon></button>
     </div>
   </aside>
 
@@ -117,7 +117,7 @@
        role="dialog" aria-modal="true" :aria-label="t('createGroupTitle')" @keydown.esc.stop="closeCreateGroupModal">
     <div class="create-group-header">
       <span>{{ t('createGroupTitle') }}</span>
-      <button type="button" class="create-group-close" :aria-label="t('createGroupCancel')" @click="closeCreateGroupModal">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('createGroupCancel')" @click="closeCreateGroupModal"><app-icon name="x" :size="14"></app-icon></button>
     </div>
     <div class="create-group-body">
       <label class="create-group-label">{{ t('createGroupNameLabel') }}</label>
@@ -143,7 +143,7 @@
        tabindex="-1" :inert="settingsDialogName !== 'lorebookDelete'">
     <div class="create-group-header">
       <span>{{ t('lorebookDeleteModalTitle') }}</span>
-      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="cancelLorebookDeleteDialog">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="cancelLorebookDeleteDialog"><app-icon name="x" :size="14"></app-icon></button>
     </div>
     <div class="create-group-body">
       <p class="lorebook-delete-modal-text">{{ lorebookDeleteConfirmBody }}</p>
@@ -161,7 +161,7 @@
        tabindex="-1" :inert="settingsDialogName !== 'lorebookCreate'">
     <div class="create-group-header">
       <span>{{ t('btnNewLorebook') }}</span>
-      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="cancelLorebookCreateModal">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="cancelLorebookCreateModal"><app-icon name="x" :size="14"></app-icon></button>
     </div>
     <div class="create-group-body">
       <label class="create-group-label" for="lorebook-create-name-input">{{ t('phNewLorebookName') }}</label>
@@ -180,7 +180,7 @@
   <div class="create-group-modal create-group-modal-settings" :class="{ open: showGroupSettingsModal }" :inert="!!settingsDialogName || !showGroupSettingsModal">
     <div class="create-group-header">
       <span>{{ t('groupSettingsTitle') }}</span>
-      <button type="button" class="create-group-close" @click="showGroupSettingsModal = false">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="showGroupSettingsModal = false"><app-icon name="x" :size="14"></app-icon></button>
     </div>
     <div class="create-group-body">
       <label class="create-group-label">{{ t('groupSettingsNameLabel') }}</label>
@@ -198,8 +198,8 @@
       <div class="create-group-participants">
         <div v-for="(p, pIdx) in groupSettingsParticipants" :key="p.profile_id" class="create-group-participant-row">
           <div class="group-participant-order-btns" role="group" aria-label="调整发言顺序">
-            <button type="button" class="session-move-btn" title="上移" :disabled="pIdx === 0" @click.stop="moveGroupParticipantUp(pIdx)">▲</button>
-            <button type="button" class="session-move-btn" title="下移" :disabled="pIdx === groupSettingsParticipants.length - 1" @click.stop="moveGroupParticipantDown(pIdx)">▼</button>
+            <button type="button" class="session-move-btn" :title="t('sessionMoveUp')" :disabled="pIdx === 0" @click.stop="moveGroupParticipantUp(pIdx)"><app-icon name="arrow-up" :size="14"></app-icon></button>
+            <button type="button" class="session-move-btn" :title="t('sessionMoveDown')" :disabled="pIdx === groupSettingsParticipants.length - 1" @click.stop="moveGroupParticipantDown(pIdx)"><app-icon name="arrow-down" :size="14"></app-icon></button>
           </div>
           <label class="group-participant-mute"><input type="checkbox" v-model="p.muted" /> {{ t('groupSettingsMute') }}</label>
           <span class="group-participant-name">{{ (p.name || '').trim() || sessions.find(s => s.id === p.profile_id)?.display_name || p.profile_id }}</span>
@@ -272,21 +272,21 @@
       <div class="header-left">
         <button type="button" ref="sidebarToggle" class="hamburger-btn" @click.stop="toggleSidebar"
                 :aria-label="t('headerToggleSidebar')" aria-controls="chat-sidebar" :aria-expanded="sidebarOpen" :title="t('headerToggleSidebar')">
-          <span></span><span></span><span></span>
+          <app-icon name="menu"></app-icon>
         </button>
         <div class="header-avatar">
           <img v-if="!isGroupChat && currentSessionAvatar" :src="currentSessionAvatar" class="avatar-img" />
           <span v-else>{{ mainInitial }}</span>
         </div>
         <span class="current-name">{{ mainTitle }}</span>
-        <button v-if="isGroupChat" type="button" class="header-back-single-btn" @click="leaveGroupChat" :title="t('statusGroupLeft')">{{ t('headerBackToSingle') }}</button>
+        <button v-if="isGroupChat" type="button" class="header-back-single-btn" @click="leaveGroupChat" :title="t('statusGroupLeft')"><app-icon name="arrow-left" :size="14"></app-icon> {{ t('headerBackToSingle') }}</button>
       </div>
       <div class="header-right">
         <button v-if="!sidebarOpen && !currentGroupId && currentSessionId" ref="agentWorkspaceOpener" type="button"
                 class="toolbar-btn agent-workspace-opener" :class="{ on: agentWorkspaceOpen }"
                 :title="t('agentWorkspace')" :aria-label="t('agentWorkspace')"
                 :aria-expanded="agentWorkspaceOpen" aria-controls="agent-workspace-drawer" @click="toggleAgentWorkspace">
-          <span aria-hidden="true">📁</span><span v-if="agentActiveTaskCount" class="agent-task-count">{{ agentActiveTaskCount }}</span>
+          <app-icon name="folder"></app-icon><span v-if="agentActiveTaskCount" class="agent-task-count">{{ agentActiveTaskCount }}</span>
         </button>
         <!-- 状态、统计、主动感知（顶栏，工具留在工具栏） -->
         <div class="header-status-row">
@@ -301,7 +301,7 @@
             <div class="status-panel" v-show="showStatusPanel">
               <div class="status-panel-header">
                 <span>{{ statusProfileDisplayName || currentSessionName || t('statusPanelTitle') }} {{ t('statusPanelTitle') }}</span>
-                <button class="status-panel-close" @click="showStatusPanel = false">{{ t('statusPanelClose') }}</button>
+                <button class="status-panel-close" :title="t('statusPanelClose')" @click="showStatusPanel = false"><app-icon name="x" :size="14"></app-icon></button>
               </div>
               <div v-if="isGroupChat && currentGroup && currentGroup.participants && currentGroup.participants.length" class="sp-section">
                 <div class="sp-label">{{ t('statusPanelViewWho') }}</div>
@@ -356,11 +356,11 @@
             </div>
           </div>
           <div class="toolbar-status-wrap header-status-wrap">
-            <button class="toolbar-btn status-btn cadence-icon-btn" @click="toggleCadencePanel" :title="locale === 'en' ? 'Interaction stats with user' : '与用户的互动统计'">💬</button>
+            <button class="toolbar-btn status-btn cadence-icon-btn" @click="toggleCadencePanel" :title="locale === 'en' ? 'Interaction stats with user' : '与用户的互动统计'"><app-icon name="messages-square"></app-icon></button>
             <div class="status-panel cadence-panel" v-show="showCadencePanel">
               <div class="status-panel-header">
                 <span>{{ cadenceProfileDisplayName || currentSessionName || (locale === 'en' ? 'Interaction' : '互动') }} · {{ t('cadencePanelTitle') }}</span>
-                <button class="status-panel-close" @click="showCadencePanel = false">{{ t('statusPanelClose') }}</button>
+                <button class="status-panel-close" :title="t('statusPanelClose')" @click="showCadencePanel = false"><app-icon name="x" :size="14"></app-icon></button>
               </div>
               <div v-if="isGroupChat && currentGroup && currentGroup.participants && currentGroup.participants.length" class="sp-section">
                 <div class="sp-label">{{ t('cadencePanelViewWho') }}</div>
@@ -396,7 +396,7 @@
             <div class="status-panel ase-panel" v-show="showAsePanel" style="width:280px;right:0;left:auto;">
               <div class="status-panel-header">
                 <span>{{ t('asePanelTitle') }}</span>
-                <button class="status-panel-close" @click="showAsePanel = false">{{ t('statusPanelClose') }}</button>
+                <button class="status-panel-close" :title="t('statusPanelClose')" @click="showAsePanel = false"><app-icon name="x" :size="14"></app-icon></button>
               </div>
               <template v-if="aseStatus.ase_enabled">
                 <div class="sp-section">
@@ -408,20 +408,20 @@
                     </span>
                   </div>
                   <div style="font-size:12px;padding:5px 2px 6px;border-bottom:1px solid var(--border);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
-                    <template v-if="aseStatus.overall_status==='disabled'">{{ t('aseStatusDisabled') }}</template>
-                    <template v-else-if="aseStatus.overall_status==='daily_limit'">{{ t('aseStatusDailyLimit') }}</template>
-                    <template v-else-if="aseStatus.overall_status==='consecutive_limit'">{{ t('aseStatusConsecutiveLimit') }}</template>
+                    <template v-if="aseStatus.overall_status==='disabled'"><app-icon name="ban" :size="14"></app-icon> {{ t('aseStatusDisabled') }}</template>
+                    <template v-else-if="aseStatus.overall_status==='daily_limit'"><app-icon name="ban" :size="14"></app-icon> {{ t('aseStatusDailyLimit') }}</template>
+                    <template v-else-if="aseStatus.overall_status==='consecutive_limit'"><app-icon name="ban" :size="14"></app-icon> {{ t('aseStatusConsecutiveLimit') }}</template>
                     <template v-else-if="aseStatus.next_speak_floor > 0">
-                      <span>{{ t('aseStatusFloor').replace('{n}', aseStatus.next_speak_floor) }}</span>
+                      <span><app-icon name="hourglass" :size="14"></app-icon> {{ t('aseStatusFloor').replace('{n}', aseStatus.next_speak_floor) }}</span>
                       <span v-if="aseStatus.overall_status==='waiting_urgency'" style="color:var(--text-secondary);font-size:11px;">{{ t('aseStatusWaitingUrgencySuffix') }}</span>
                     </template>
                     <template v-else-if="aseStatus.overall_status==='waiting_urgency'">
-                      {{ t('aseStatusWaitingUrgencyFull').replace('{cur}', ((aseStatus.urgency||0)*100).toFixed(0)).replace('{thr}', ((aseStatus.urgency_threshold||0)*100).toFixed(0)) }}
+                      <app-icon name="message-circle-more" :size="14"></app-icon> {{ t('aseStatusWaitingUrgencyFull').replace('{cur}', ((aseStatus.urgency||0)*100).toFixed(0)).replace('{thr}', ((aseStatus.urgency_threshold||0)*100).toFixed(0)) }}
                     </template>
                     <template v-else-if="aseStatus.overall_status==='waiting_check'">
-                      {{ t('aseStatusWaitingCheck').replace('{n}', aseStatus.next_check_in) }}
+                      <app-icon name="circle-check" :size="14"></app-icon> {{ t('aseStatusWaitingCheck').replace('{n}', aseStatus.next_check_in) }}
                     </template>
-                    <template v-else>{{ t('aseStatusReady') }}</template>
+                    <template v-else><app-icon name="circle-check" :size="14"></app-icon> {{ t('aseStatusReady') }}</template>
                   </div>
                   <div class="ase-gate-row">
                     <span class="ase-gate-label">{{ t('aseGateTodayCount') }}</span>
@@ -501,7 +501,7 @@
                       }"></div>
                     </div>
                     <span style="font-size:11px;color:var(--text-secondary);white-space:nowrap;">
-                      <span v-if="aseStatus.reflection.is_idle" :title="locale === 'en' ? 'User idle, using longer idle interval' : '用户空闲中，使用较长的空闲间隔'">{{ t('aseReflectionIdle') }}</span>
+                      <span v-if="aseStatus.reflection.is_idle" :title="locale === 'en' ? 'User idle, using longer idle interval' : '用户空闲中，使用较长的空闲间隔'"><app-icon name="moon" :size="14"></app-icon></span>
                       {{ t('aseReflectionNextIn').replace('{n}', aseStatus.reflection.next_in) }}
                     </span>
                   </div>
@@ -522,7 +522,7 @@
             </div>
           </div>
         </div>
-        <button v-if="!sidebarOpen" ref="settingsTrigger" class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
+        <button v-if="!sidebarOpen" ref="settingsTrigger" class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')"><app-icon name="settings"></app-icon><span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
       </div>
     </header>
 
@@ -532,7 +532,7 @@
       <span v-for="(p, idx) in currentGroup.participants" :key="p.profile_id" class="group-participant-tag">
         {{ (p.name || '').trim() || sessions.find(s => s.id === p.profile_id)?.display_name || p.profile_id }}{{ idx < currentGroup.participants.length - 1 ? '、' : '' }}
       </span>
-      <button type="button" class="group-settings-btn" @click="openGroupSettings" :title="t('groupSettingsTitle')">{{ t('headerGroupSettings') }}</button>
+      <button type="button" class="group-settings-btn" @click="openGroupSettings" :title="t('groupSettingsTitle')"><app-icon name="settings" :size="14"></app-icon> {{ t('headerGroupSettings') }}</button>
     </div>
     <!-- Messages -->
     <div class="messages-area" ref="messagesArea" @scroll="handleMessagesScroll">
@@ -540,21 +540,21 @@
       <!-- Empty state -->
       <div v-if="!hasMessages" class="empty-state">
         <template v-if="!currentSessionId && !currentGroupId">
-          <div class="empty-icon">🪄</div>
+          <div class="empty-icon"><app-icon name="wand-sparkles"></app-icon></div>
           <div class="empty-hint">{{ t('emptyStateNoProfile') }}</div>
           <button class="s-btn s-btn-primary" @click="openSettings(); activeTab = 'profiles'">
             {{ t('emptyStateGoToProfiles') }}
           </button>
         </template>
         <template v-else>
-          <div class="empty-icon">💬</div>
+          <div class="empty-icon"><app-icon name="message-circle"></app-icon></div>
           <div class="empty-hint">{{ t('emptyStateHint') }}</div>
         </template>
       </div>
 
       <!-- Load more banner -->
       <div v-if="hasMoreHistory" class="load-more-banner" @click="loadMoreHistory">
-        {{ t('loadMoreBanner').replace('{n}', messages.length - msgDisplayCount) }}
+        <app-icon name="chevron-up" :size="14"></app-icon> {{ t('loadMoreBanner').replace('{n}', messages.length - msgDisplayCount) }}
       </div>
 
       <!-- Conversation bubbles -->
@@ -581,38 +581,33 @@
           <!-- 系统提示（如历史截断提示） -->
           <div v-if="msg.role === 'system_notice'" class="system-notice-bubble">{{ msg.content }}</div>
           <!-- 计时器到期通知 -->
-          <div v-else-if="msg.role === 'timer_notice'" class="system-notice-bubble timer-notice-bubble">{{ msg.content }}</div>
+          <div v-else-if="msg.role === 'timer_notice'" class="system-notice-bubble timer-notice-bubble"><app-icon name="timer" :size="14"></app-icon> {{ msg.content }}</div>
           <!-- 普通消息气泡（群聊时显示 sender） -->
           <template v-else>
             <span v-if="msg.sender" class="msg-sender">{{ msg.sender }}</span>
             <div class="bubble" :class="{ 'cmd-bubble': msg.is_command }">
-              <span v-if="msg.is_command" class="cmd-badge">⌘</span>
+              <span v-if="msg.is_command" class="cmd-badge" aria-hidden="true"><app-icon name="command" :size="14"></app-icon></span>
               <!-- P5-B: collapsed content with fade mask -->
               <div v-html="renderMarkdown(msg.content)"
                    class="bubble-content"
                    :class="{ 'collapsed': msg.collapsed }"></div>
               <button v-if="msg.collapsed" class="expand-btn"
-                      @click.stop="toggleCollapse(i)">{{ t('expandBtn') }}</button>
+                      @click.stop="toggleCollapse(i)">{{ t('expandBtn') }} <app-icon name="chevron-down" :size="14"></app-icon></button>
               <!-- 复制按钮（hover 显示） -->
               <button class="copy-btn" @click.stop="copyMessage(msg.content)" :title="t('copyBtnTitle')">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
+                <app-icon name="copy" :size="14"></app-icon>
               </button>
             </div>
             <button v-for="path in messageAgentArtifacts(msg)" :key="'artifact:' + path" type="button"
                     class="agent-output-card" :title="path" @click="openAgentArtifact(path)">
               <span class="agent-output-icon" aria-hidden="true">
-                <svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.2">
-                  <path d="M3 1.5h6l4 4v11H3z M9 1.5v4h4 M5.3 9h5.5 M5.3 12h5.5" />
-                </svg>
+                <app-icon name="file-text" :size="16"></app-icon>
               </span>
               <span class="agent-output-label">
                 <strong>{{ path.split('/').at(-1) }}</strong>
                 <small v-if="path.includes('/')">{{ path.slice(0, path.lastIndexOf('/')) }}</small>
               </span>
-              <span class="agent-output-action">{{ t('agentArtifactPreview') }} <span aria-hidden="true">›</span></span>
+              <span class="agent-output-action">{{ t('agentArtifactPreview') }} <app-icon name="chevron-right" :size="14"></app-icon></span>
             </button>
             <agent-task-card v-for="run in messageAgentRuns(msg)" :key="agentRunKey(run)"
               :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
@@ -628,19 +623,19 @@
             <span v-if="msg.partial" class="msg-time">{{ ['cancelled', 'failed'].includes(msg.generation_status) ? t('agentGeneration_' + msg.generation_status) : t('agentPartialReply') }}</span>
             <!-- P5-B: Message action bar -->
             <div v-if="msg.role === 'assistant'" class="msg-actions">
-              <button @click="rewriteMessage(i)" :title="t('rewriteBtnTitle')">↺</button>
+              <button @click="rewriteMessage(i)" :title="t('rewriteBtnTitle')"><app-icon name="rotate-ccw" :size="14"></app-icon></button>
               <button v-if="msg.agent_run_id && agentTerminal(msg.generation_status)" type="button"
                       :title="t('agentContinue')" :aria-label="t('agentContinue')"
-                      :disabled="!agentCanContinueRun({id: msg.agent_run_id, profile_id: msg.session_id, session_id: msg.session_id, state: msg.generation_status})" @click="continueAgentMessage(msg)"><span aria-hidden="true">↪</span></button>
-              <button @click="toggleCollapse(i)" :title="msg.collapsed ? t('expandBtnTitle') : t('collapseBtnTitle')">{{ msg.collapsed ? '⊞' : '⊟' }}</button>
-              <button v-if="!msg.partial" @click="replayTTS(i)" :title="t('replayTTSTitle')">▶</button>
+                      :disabled="!agentCanContinueRun({id: msg.agent_run_id, profile_id: msg.session_id, session_id: msg.session_id, state: msg.generation_status})" @click="continueAgentMessage(msg)"><app-icon name="corner-up-right" :size="14"></app-icon></button>
+              <button @click="toggleCollapse(i)" :title="msg.collapsed ? t('expandBtnTitle') : t('collapseBtnTitle')"><app-icon :name="msg.collapsed ? 'square-plus' : 'square-minus'" :size="14"></app-icon></button>
+              <button v-if="!msg.partial" @click="replayTTS(i)" :title="t('replayTTSTitle')"><app-icon name="play" :size="14"></app-icon></button>
               <button @click="stopTTSPlayback()" :title="t('stopTTSTitle')"
-                      :style="isPlayingAudio ? 'color:var(--accent);opacity:1' : 'opacity:0.4'">■</button>
-              <button @click="deleteMessage(i)" :title="t('deleteMsgTitle')">✕</button>
+                      :style="isPlayingAudio ? 'color:var(--accent);opacity:1' : 'opacity:0.4'"><app-icon name="square" :size="14"></app-icon></button>
+              <button @click="deleteMessage(i)" :title="t('deleteMsgTitle')"><app-icon name="x" :size="14"></app-icon></button>
             </div>
             <div v-if="msg.role === 'user'" class="msg-actions user-actions">
-              <button @click="editMessage(i)" :title="t('editMsgTitle')">✎</button>
-              <button @click="deleteMessage(i)" :title="t('deleteMsgTitle')">✕</button>
+              <button @click="editMessage(i)" :title="t('editMsgTitle')"><app-icon name="pencil" :size="14"></app-icon></button>
+              <button @click="deleteMessage(i)" :title="t('deleteMsgTitle')"><app-icon name="x" :size="14"></app-icon></button>
             </div>
           </template>
         </div>
@@ -676,7 +671,7 @@
            class="toolbar-btn tts-toggle" :class="{ on: ttsEnabled }"
            @click="ttsEnabled = !ttsEnabled"
            :title="ttsEnabled ? t('ttsDisableTitle') : t('ttsEnableTitle')">
-        <span>{{ ttsEnabled ? '🔊' : '🔇' }}</span>
+        <app-icon :name="ttsEnabled ? 'volume-2' : 'volume-x'"></app-icon>
       </div>
 
       <!-- 语音输入（STT，方案 B：服务端 faster-whisper） -->
@@ -684,7 +679,7 @@
               class="toolbar-btn voice-input-btn" :class="{ on: voiceRecording }"
               @click="toggleVoiceInput"
               :title="voiceRecording ? t('voiceInputRecording') : t('voiceInputIdle')">
-        <span>{{ voiceRecording ? '⏹' : '🎤' }}</span>
+        <app-icon :name="voiceRecording ? 'square' : 'mic'"></app-icon>
       </button>
 
       <!-- 对话模式（连续 VAD + Barge-in） -->
@@ -693,8 +688,8 @@
               :class="{ on: voiceConversationMode, recording: voiceConversationMode && voiceRecording, speaking: voiceConversationMode && isPlayingAudio }"
               @click="toggleConversationMode"
               :title="voiceConversationMode ? t('convModeOff') : t('convModeOn')">
-        <span class="conv-mode-icon">{{ voiceConversationMode ? (voiceRecording ? '🔴' : (isPlayingAudio ? '🔵' : '💬')) : '💬' }}</span>
-        <span v-if="voiceConversationMode" class="conv-mode-dot"
+        <app-icon :name="voiceConversationMode && voiceRecording ? 'mic' : (voiceConversationMode && isPlayingAudio ? 'volume-2' : 'audio-lines')"></app-icon>
+        <span v-if="voiceConversationMode" class="conv-mode-dot" aria-hidden="true"
               :class="{ 'dot-listening': !voiceRecording && !isPlayingAudio && !isStreaming,
                         'dot-recording': voiceRecording,
                         'dot-thinking': isStreaming,
@@ -704,31 +699,31 @@
       <!-- Screenshot — Electron only -->
       <button v-if="isElectron && toolbarConfig.screenshot.enabled"
               class="toolbar-btn screenshot-btn"
-              @click="takeScreenshot" :title="t('screenshotTitle')">📷</button>
+              @click="takeScreenshot" :title="t('screenshotTitle')"><app-icon name="camera"></app-icon></button>
 
       <!-- Screen share — browser path for ASE proactive screenshots -->
       <button v-if="!isElectron && toolbarConfig.screenShare && toolbarConfig.screenShare.enabled"
               class="toolbar-btn" :class="{ on: screenShareActive }"
               @click="toggleScreenCapture"
               :title="screenShareActive ? t('screenShareOn') : t('screenShareOff')">
-        {{ screenShareActive ? '🖥️' : '📺' }}
+        <app-icon name="monitor-up"></app-icon>
       </button>
 
       <!-- Upload image — for chat VLM (same as screenshot, but from file) -->
       <label v-if="toolbarConfig.uploadImage && toolbarConfig.uploadImage.enabled"
              class="toolbar-btn upload-image-btn" :title="t('uploadImageTitle')" :class="{ on: pendingScreenshot }">
-        📁
+        <app-icon name="image-plus"></app-icon>
         <input type="file" accept="image/*" style="display:none" ref="uploadImageInput" @change="onUploadImage" />
       </label>
 
       <!-- 待办事项 button + panel（群聊下隐藏） -->
       <div v-if="toolbarConfig.todos.enabled && !currentGroupId" class="toolbar-panel-wrap">
         <button class="toolbar-btn" :class="{ on: showTodosPanel }"
-                @click="toggleTodosPanel" :title="t('todosTitle')">📋</button>
+                @click="toggleTodosPanel" :title="t('todosTitle')"><app-icon name="list-todo"></app-icon></button>
         <div class="toolbar-panel tp-todos" v-show="showTodosPanel">
           <div class="tp-header">
             <span>{{ t('todosPanelTitle') }}</span>
-            <button class="tp-close" @click="showTodosPanel = false">✕</button>
+            <button class="tp-close" :title="t('statusPanelClose')" @click="showTodosPanel = false"><app-icon name="x" :size="14"></app-icon></button>
           </div>
           <todo-list :t="t" :owner="todoOwner" :todos="visibleTodos" v-model:draft="newTodoText"
                      :artifact-path="todoArtifactPath" @update:owner="selectTodoOwner" @add="addTodo"
@@ -740,24 +735,24 @@
       <!-- 计时器 button + panel（群聊下隐藏） -->
       <div v-if="(toolbarConfig.timer.enabled || showTimerPanel) && !currentGroupId" class="toolbar-panel-wrap">
         <button class="toolbar-btn" :class="{ on: showTimerPanel }"
-                @click="toggleTimerPanel" :title="t('timerTitle')">⏱</button>
+                @click="toggleTimerPanel" :title="t('timerTitle')"><app-icon name="timer"></app-icon></button>
         <div class="toolbar-panel" v-show="showTimerPanel">
           <div class="tp-header">
             <span>{{ t('timerPanelTitle') }}</span>
-            <button class="tp-close" @click="showTimerPanel = false">✕</button>
+            <button class="tp-close" :title="t('statusPanelClose')" @click="showTimerPanel = false"><app-icon name="x" :size="14"></app-icon></button>
           </div>
           <div class="tp-add-row">
             <input class="tp-input tp-timer-label" v-model="newTimerLabel" :placeholder="t('timerLabelPlaceholder')" />
             <input class="tp-input tp-timer-secs" v-model.number="newTimerSeconds"
                    type="number" min="1" :placeholder="t('timerSecsPlaceholder')" />
-            <button class="tp-add-btn" @click="createTimer">+</button>
+            <button class="tp-add-btn" :title="t('timerAdd')" @click="createTimer"><app-icon name="plus" :size="14"></app-icon></button>
           </div>
           <div class="tp-list">
             <div v-if="timerList.length === 0" class="tp-empty">{{ t('timerEmpty') }}</div>
-            <div v-for="t in timerList" :key="t.id" class="tp-item tp-timer-item">
-              <span class="tp-timer-remain" :class="{ expired: t.remaining === 0 }">{{ fmtRemaining(t.remaining) }}</span>
-              <span class="tp-text">{{ t.label }}</span>
-              <button class="tp-del" @click="cancelTimer(t.id)">✕</button>
+            <div v-for="timer in timerList" :key="timer.id" class="tp-item tp-timer-item">
+              <span class="tp-timer-remain" :class="{ expired: timer.remaining === 0 }">{{ fmtRemaining(timer.remaining) }}</span>
+              <span class="tp-text">{{ timer.label }}</span>
+              <button class="tp-del" :title="t('timerCancel')" @click="cancelTimer(timer.id)"><app-icon name="x" :size="14"></app-icon></button>
             </div>
           </div>
         </div>
@@ -766,11 +761,11 @@
       <!-- Command 一览 button + panel -->
       <div v-if="toolbarConfig.commands.enabled" class="toolbar-panel-wrap">
         <button class="toolbar-btn" :class="{ on: showCommandsPanel }"
-                @click="toggleCommandsPanel" :title="t('commandsTitle')">⌘</button>
+                @click="toggleCommandsPanel" :title="t('commandsTitle')"><app-icon name="command"></app-icon></button>
         <div class="toolbar-panel tp-commands" v-show="showCommandsPanel">
           <div class="tp-header">
             <span>{{ t('commandsPanelTitle') }}</span>
-            <button class="tp-close" @click="showCommandsPanel = false">✕</button>
+            <button class="tp-close" :title="t('statusPanelClose')" @click="showCommandsPanel = false"><app-icon name="x" :size="14"></app-icon></button>
           </div>
           <div class="tp-cmd-list">
             <p v-if="currentGroupId" class="tp-cmd-hint">{{ t('commandsGroupOnly') }}</p>
@@ -785,7 +780,7 @@
                    @click="c.run ? runCommandNow(c) : insertCommand(c.insert)">
                 <span class="tp-cmd-name">{{ c.labelKey ? t(c.labelKey) : c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
                 <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
-                <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
+                <span v-if="c.run" class="tp-cmd-run"><app-icon name="play" :size="14"></app-icon> {{ t('cmdRunNow') }}</span>
               </div>
             </template>
 
@@ -799,8 +794,8 @@
                    @click="c.composeAssistMode ? openComposeAssist(c.composeAssistMode) : (c.run ? runCommandNow(c) : insertCommand(c.insert))">
                 <span class="tp-cmd-name">{{ c.labelKey ? t(c.labelKey) : c.insert.trim() }}<span v-if="c.argKey" class="slash-arg"> {{ t(c.argKey) }}</span></span>
                 <span class="tp-cmd-desc">{{ t(c.descKey) }}</span>
-                <span v-if="c.run" class="tp-cmd-run">▶ {{ t('cmdRunNow') }}</span>
-                <span v-else-if="c.composeAssistMode" class="tp-cmd-run">↗ {{ t('cmdOpenAction') }}</span>
+                <span v-if="c.run" class="tp-cmd-run"><app-icon name="play" :size="14"></app-icon> {{ t('cmdRunNow') }}</span>
+                <span v-else-if="c.composeAssistMode" class="tp-cmd-run"><app-icon name="arrow-up-right" :size="14"></app-icon> {{ t('cmdOpenAction') }}</span>
               </div>
             </template>
 
@@ -816,31 +811,31 @@
       <!-- 工具栏配置 gear -->
       <div class="toolbar-panel-wrap">
         <button class="toolbar-btn toolbar-gear" :class="{ on: showToolbarConfig }"
-                @click="showToolbarConfig = !showToolbarConfig" :title="t('toolbarConfigTitle')">⚙</button>
+                @click="showToolbarConfig = !showToolbarConfig" :title="t('toolbarConfigTitle')"><app-icon name="sliders-horizontal"></app-icon></button>
         <div class="toolbar-panel tp-config" v-show="showToolbarConfig">
           <div class="tp-header">
             <span>{{ t('toolbarConfigPanelHeader') }}</span>
-            <button class="tp-close" @click="showToolbarConfig = false">✕</button>
+            <button class="tp-close" :title="t('statusPanelClose')" @click="showToolbarConfig = false"><app-icon name="x" :size="14"></app-icon></button>
           </div>
           <div class="tp-config-list">
             <label v-for="(btn, key) in toolbarConfig" :key="key" class="tp-config-row"
                    v-show="(!btn.electronOnly || isElectron) && (!btn.webOnly || !isElectron) && (!btn.sttRequired || (sttConfig && sttConfig.enabled))">
               <input type="checkbox" :checked="btn.enabled"
                      @change="toggleToolbarBtn(key)" />
-              <span>{{ btn.icon }} {{ btn.label }}</span>
+              <span><app-icon :name="btn.icon" :size="16"></app-icon> {{ btn.label }}</span>
             </label>
           </div>
         </div>
       </div>
 
       <button v-if="agentCanDetach" type="button" class="toolbar-btn" :title="t('agentBackground')"
-              :aria-label="t('agentBackground')" @click="detachAgentChat"><span aria-hidden="true">↗</span></button>
+              :aria-label="t('agentBackground')" @click="detachAgentChat"><app-icon name="arrow-up-right"></app-icon></button>
       <span v-if="agentContinueRunId && !currentGroupId" class="agent-continue-selection" :title="t('agentContinueSelected')" role="status">
-        <span aria-hidden="true">↪</span><span>{{ t('agentContinueContext') }}</span>
-        <button type="button" class="agent-continue-clear" :title="t('agentContinueClear')" :aria-label="t('agentContinueClear')" @click="agentContinueRunId = ''">✕</button>
+        <app-icon name="corner-up-right" :size="14"></app-icon><span>{{ t('agentContinueContext') }}</span>
+        <button type="button" class="agent-continue-clear" :title="t('agentContinueClear')" :aria-label="t('agentContinueClear')" @click="agentContinueRunId = ''"><app-icon name="x" :size="14"></app-icon></button>
       </span>
       <span class="toolbar-status" role="status" :class="{ 'agent-warning': engineWarning && statusText === t('statusReady') }"
-            :title="engineWarning && statusText === t('statusReady') ? engineWarning : statusText">{{ engineWarning && statusText === t('statusReady') ? '⚠ ' + engineWarning : statusText }}</span>
+            :title="toolbarStatus.text"><app-icon v-if="toolbarStatus.icon" :name="toolbarStatus.icon" :size="14"></app-icon> {{ toolbarStatus.text }}</span>
 
     </div>
 
@@ -851,7 +846,7 @@
            @keydown.esc.stop.prevent="closeComposeAssist">
         <div class="compose-assist-heading">
           <strong>{{ composeAssistMode === 'continue' ? t('cmdAiContinueLabel') : t('cmdAiReplyLabel') }}</strong>
-          <button type="button" class="tp-close" :title="t('composeAssistClose')" @click="closeComposeAssist">✕</button>
+          <button type="button" class="tp-close" :title="t('composeAssistClose')" @click="closeComposeAssist"><app-icon name="x" :size="14"></app-icon></button>
         </div>
         <textarea v-if="composeAssistMode === 'reply'" ref="composeAssistInstruction" v-model="composeAssistInstruction" rows="2"
                   class="compose-assist-instruction" :placeholder="t('composeAssistInstructionPlaceholder')"
@@ -878,7 +873,7 @@
         <div class="slash-foot">{{ slashSuggest.mode === 'token' ? t('slashSuggestHint') : t('slashSuggestHintSend') }}</div>
       </div>
       <div v-if="pendingScreenshot" class="pending-image-bar">
-        <span class="pending-image-label">{{ t('pendingImageLabel') }}</span>
+        <span class="pending-image-label"><app-icon name="image" :size="14"></app-icon> {{ t('pendingImageLabel') }}</span>
         <button type="button" class="pending-image-remove s-btn s-btn-secondary" @click="clearPendingImage()" :title="t('pendingImageRemove')">{{ t('pendingImageRemove') }}</button>
       </div>
       <div class="input-row">
@@ -921,7 +916,7 @@
     <div class="agent-workspace-header">
       <h2 id="agent-workspace-title">{{ t('agentWorkspace') }}</h2>
       <button ref="agentWorkspaceClose" type="button" class="toolbar-btn" :title="t('agentWorkspaceClose')"
-              :aria-label="t('agentWorkspaceClose')" @click="closeAgentWorkspace">✕</button>
+              :aria-label="t('agentWorkspaceClose')" @click="closeAgentWorkspace"><app-icon name="x" :size="14"></app-icon></button>
     </div>
     <div class="agent-workspace-tabs" role="tablist" :aria-label="t('agentWorkspace')" @keydown="navigateAgentWorkspaceTabs">
       <button id="agent-files-tab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'files'"
@@ -964,7 +959,7 @@
         </div>
         <div v-else :key="agentWorkspaceSelected.path" class="agent-file-preview">
           <button ref="agentWorkspaceBack" class="agent-file-back" type="button" @click="returnToAgentWorkspaceFiles">
-            <span aria-hidden="true">‹</span> {{ t('agentWorkspaceBackToFiles') }}
+            <app-icon name="chevron-left" :size="14"></app-icon> {{ t('agentWorkspaceBackToFiles') }}
           </button>
           <div class="agent-actions agent-file-title"><h3>{{ agentWorkspaceSelected.path }}</h3>
             <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceSelected.oversized === true" @click="downloadAgentWorkspaceFile">{{ t('agentWorkspaceDownload') }}</button>
@@ -980,7 +975,7 @@
           <p v-if="agentOwnTaskActive" class="form-hint">{{ t('agentWorkspaceLocked') }}</p>
           <p v-else-if="!agentRunsKnown[currentSessionId] || agentRunErrors[currentSessionId]" class="form-hint">{{ t('agentWorkspaceChecking') }}</p>
           <details class="agent-file-disclosure">
-            <summary>{{ t('agentWorkspaceProperties') }}</summary>
+            <summary><app-icon name="chevron-right" :size="14"></app-icon> {{ t('agentWorkspaceProperties') }}</summary>
             <form class="agent-file-metadata" @submit.prevent="saveAgentWorkspaceMetadata">
               <fieldset :disabled="agentWorkspaceLocked">
                 <label for="agent-file-description">{{ t('agentWorkspaceDescription') }}</label>
@@ -995,7 +990,7 @@
             </form>
           </details>
           <details class="agent-file-disclosure">
-            <summary>{{ t('agentWorkspaceVersions') }}<template v-if="agentWorkspaceVersions && !agentWorkspaceVersionError"> · {{ agentWorkspaceVersions.length }}</template></summary>
+            <summary><app-icon name="chevron-right" :size="14"></app-icon> {{ t('agentWorkspaceVersions') }}<template v-if="agentWorkspaceVersions && !agentWorkspaceVersionError"> · {{ agentWorkspaceVersions.length }}</template></summary>
             <p v-if="agentWorkspaceVersionError" class="agent-error" role="alert">{{ agentWorkspaceVersionError }}</p>
             <p v-else-if="!agentWorkspaceVersions" class="form-hint" role="status">{{ t('loading') }}</p>
             <p v-else-if="!agentWorkspaceVersions.length" class="form-hint">{{ t('agentWorkspaceNoVersions') }}</p>
@@ -1047,7 +1042,7 @@
         <div class="canvas-nav-header">
           <span class="canvas-nav-title">{{ t('appName') }}</span>
           <button type="button" class="canvas-close-btn" data-settings-initial-focus
-                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')">✕</button>
+                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')"><app-icon name="x"></app-icon></button>
         </div>
         <button
           v-for="tab in settingsTabs"
@@ -1059,7 +1054,7 @@
           :aria-label="locale === 'en' ? tab.labelEn : tab.labelZh"
           @click="activeTab = tab.id"
         >
-          <span class="canvas-nav-icon">{{ tab.icon }}</span>
+          <span class="canvas-nav-icon"><app-icon :name="tab.icon"></app-icon></span>
           <span class="nav-label-full">{{ locale === 'en' ? tab.labelEn : tab.labelZh }}</span>
           <span class="nav-label-short">{{ locale === 'en' ? (tab.shortEn || tab.labelEn) : tab.labelZh }}</span>
         </button>
@@ -1070,7 +1065,7 @@
         <div class="canvas-content-header">
           <h2>{{ currentTabLabel }}</h2>
           <button type="button" class="canvas-mobile-close" data-settings-initial-focus
-                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')">✕</button>
+                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')"><app-icon name="x" :size="14"></app-icon></button>
         </div>
         <!-- Tab body -->
         <div class="settings-body" ref="settingsBodyScroll">
@@ -1096,7 +1091,7 @@
             <span>{{ t('onboardingShortPathStep2') }}</span>
             <div class="setup-shortpath-actions">
               <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'profiles'">{{ t('onboardingJumpProfiles') }}</button>
-              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openProfileWizard">✦ {{ t('onboardingOpenPersonaWizard') }}</button>
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openProfileWizard"><app-icon name="wand-sparkles" :size="14"></app-icon> {{ t('onboardingOpenPersonaWizard') }}</button>
             </div>
           </li>
           <li>{{ t('onboardingShortPathStep3') }}</li>
@@ -1136,23 +1131,23 @@
           <p class="setup-guide-quick-hint muted">{{ t('onboardingQuickHint') }}</p>
           <div class="setup-quick-grid">
             <div class="setup-quick-item" :class="{ ok: setupGuide.llm_preset_configured }">
-              <span class="setup-quick-dot">{{ setupGuide.llm_preset_configured ? '✓' : '○' }}</span>
+              <span class="setup-quick-dot" role="img" :aria-label="t(setupGuide.llm_preset_configured ? 'onboardingTtsReady' : 'onboardingTtsNotReady')"><app-icon :name="setupGuide.llm_preset_configured ? 'check' : 'circle'" :size="14"></app-icon></span>
               <span>{{ t('onboardingQuickLlmCfg') }}</span>
             </div>
             <div class="setup-quick-item" :class="{ ok: setupGuide.profile_count > 0 }">
-              <span class="setup-quick-dot">{{ setupGuide.profile_count > 0 ? '✓' : '○' }}</span>
+              <span class="setup-quick-dot" role="img" :aria-label="t(setupGuide.profile_count &gt; 0 ? 'onboardingTtsReady' : 'onboardingTtsNotReady')"><app-icon :name="setupGuide.profile_count &gt; 0 ? 'check' : 'circle'" :size="14"></app-icon></span>
               <span>{{ t('onboardingQuickProfiles') }} ({{ setupGuide.profile_count }})</span>
             </div>
             <div class="setup-quick-item optional" :class="{ ok: setupGuide.chromadb_installed }">
-              <span class="setup-quick-dot">{{ setupGuide.chromadb_installed ? '✓' : '–' }}</span>
+              <span class="setup-quick-dot" role="img" :aria-label="t(setupGuide.chromadb_installed ? 'onboardingTtsReady' : 'onboardingTtsNotReady')"><app-icon :name="setupGuide.chromadb_installed ? 'check' : 'minus'" :size="14"></app-icon></span>
               <span>{{ t('onboardingQuickChromaDB') }}</span>
             </div>
             <div class="setup-quick-item optional" :class="{ ok: !setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en)) }">
-              <span class="setup-quick-dot">{{ (!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? '✓' : '–' }}</span>
+              <span class="setup-quick-dot" role="img" :aria-label="t((!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? 'onboardingTtsReady' : 'onboardingTtsNotReady')"><app-icon :name="(!setupGuide.memory_vector_enabled || setupGuide.embedding_provider !== 'local' || setupGuide.embedding_local_on_disk || (setupGuide.embed_installed && (setupGuide.embed_installed.bge_small_zh || setupGuide.embed_installed.minilm_en))) ? 'check' : 'minus'" :size="14"></app-icon></span>
               <span>{{ t('onboardingQuickEmbed') }}</span>
             </div>
             <div class="setup-quick-item optional" :class="{ ok: setupGuide.stt_ready }">
-              <span class="setup-quick-dot">{{ setupGuide.stt_ready ? '✓' : '–' }}</span>
+              <span class="setup-quick-dot" role="img" :aria-label="t(setupGuide.stt_ready ? 'onboardingTtsReady' : 'onboardingTtsNotReady')"><app-icon :name="setupGuide.stt_ready ? 'check' : 'minus'" :size="14"></app-icon></span>
               <span>{{ t('onboardingQuickStt') }}</span>
             </div>
           </div>
@@ -1205,7 +1200,7 @@
             <div class="setup-wizard-substep">
               <div class="setup-wizard-substep-title">2. {{ t('onboardingAiMemoryModels') }}</div>
               <p class="setup-tts-desc">{{ t('onboardingAiMemoryModelsDesc') }}</p>
-              <p v-if="!setupGuide.ai_memory_installed" class="warn" style="font-size:12px;margin:8px 0;">⚠️ {{ t('onboardingAiMemoryNeedDepsFirst') }}</p>
+              <p v-if="!setupGuide.ai_memory_installed" class="warn" style="font-size:12px;margin:8px 0;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ t('onboardingAiMemoryNeedDepsFirst') }}</p>
               <div v-for="b in onboardingMemBundles" :key="b.id" class="setup-tts-card" style="margin-top:10px;">
                 <div class="setup-tts-head">
                   <span class="setup-tts-name">{{ onboardingBundleTitle(b) }}</span>
@@ -1244,7 +1239,7 @@
               <p class="setup-tts-desc">{{ t('onboardingTtsGptSoVits') }}</p>
               <p class="muted" style="font-size:11px;">{{ setupGuide.tts.gpt_sovits_port_open ? t('onboardingTtsGptSoVitsOpen') : t('onboardingTtsGptSoVitsClosed') }}</p>
               <details class="setup-wizard-details">
-                <summary>{{ t('onboardingTtsGptSoVitsHowToGet') }}</summary>
+                <summary class="settings-disclosure"><app-icon name="chevron-right" :size="14" class="settings-disclosure-icon"></app-icon> {{ t('onboardingTtsGptSoVitsHowToGet') }}</summary>
                 <p style="margin:6px 0 4px;"><span style="color:var(--accent);font-weight:600;">① {{ t('onboardingTtsGptSoVitsStep1') }}</span><br/>
                   <span style="font-size:11px;">{{ t('onboardingTtsGptSoVitsStep1Hint') }}</span><br/>
                   <a href="#" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block;text-decoration:underline;" @click.prevent="openUrl('https://github.com/RVC-Boss/GPT-SoVITS/releases/latest')">{{ t('onboardingTtsGptSoVitsReleaseLinkText') }}</a></p>
@@ -1279,19 +1274,19 @@
               <div class="setup-wizard-substep" style="margin-top:0;padding-top:0;border-top:none;">
                 <div class="setup-wizard-substep-title">1. {{ t('onboardingKokoroPkgStepTitle') }}</div>
                 <p class="muted" style="font-size:11px;line-height:1.5;">
-                  {{ setupGuide.tts.kokoro_installed ? '✓' : '○' }} {{ setupGuide.tts.kokoro_installed ? t('onboardingTtsKokoroPkg') : t('onboardingTtsKokoroPkgMissing') }}<br/>
-                  {{ setupGuide.tts.kokoro_misaki_zh ? '✓' : '○' }} {{ t('onboardingTtsKokoroMisakiZh') }}
+                  <app-icon :name="setupGuide.tts.kokoro_installed ? 'check' : 'circle'" :size="14"></app-icon> {{ setupGuide.tts.kokoro_installed ? t('onboardingTtsKokoroPkg') : t('onboardingTtsKokoroPkgMissing') }}<br/>
+                  <app-icon :name="setupGuide.tts.kokoro_misaki_zh ? 'check' : 'circle'" :size="14"></app-icon> {{ t('onboardingTtsKokoroMisakiZh') }}
                 </p>
                 <p class="muted" style="font-size:11px;margin-top:6px;">{{ t('onboardingTutorialDoInLauncher') }}</p>
               </div>
               <div class="setup-wizard-substep">
                 <div class="setup-wizard-substep-title">2. {{ t('onboardingKokoroModelStepTitle') }}</div>
-                <p v-if="!setupGuide.tts.kokoro_installed" class="warn" style="font-size:12px;margin:0 0 8px;">⚠️ {{ t('onboardingKokoroNeedPkgFirst') }}</p>
+                <p v-if="!setupGuide.tts.kokoro_installed" class="warn" style="font-size:12px;margin:0 0 8px;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ t('onboardingKokoroNeedPkgFirst') }}</p>
                 <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="t('onboardingKokoroModelsHint')"></p>
                 <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 6px;" v-html="t('onboardingKokoroModelsSaveTo')"></p>
                 <p class="muted" style="font-size:11px;line-height:1.55;margin:0 0 8px;" v-html="t('onboardingKokoroModelsReleases')"></p>
                 <p v-if="setupGuide.tts.kokoro_installed" class="setup-tts-check" style="font-size:12px;">
-                  <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'">{{ setupGuide.tts.kokoro_models_ready ? '✓' : '○' }} {{ t('onboardingKokoroModels') }}</span>
+                  <span :class="setupGuide.tts.kokoro_models_ready ? 'ok' : 'warn'"><app-icon :name="setupGuide.tts.kokoro_models_ready ? 'check' : 'circle'" :size="14"></app-icon> {{ t('onboardingKokoroModels') }}</span>
                 </p>
               </div>
             </div>
@@ -1307,7 +1302,7 @@
               <div class="setup-wizard-substep">
                 <div class="setup-wizard-substep-title">1. {{ t('onboardingQwenTtsPkgStepTitle') }}</div>
                 <p class="setup-tts-desc">{{ t('onboardingQwenTtsPkgDesc') }}</p>
-                <p v-if="setupGuide.qwen_tts_installed" class="ok" style="font-size:12px;">✓ {{ t('onboardingQwenTtsPkgInstalled') }}</p>
+                <p v-if="setupGuide.qwen_tts_installed" class="ok" style="font-size:12px;"><app-icon name="check" :size="14"></app-icon> {{ t('onboardingQwenTtsPkgInstalled') }}</p>
                 <p v-if="setupGuide.torch_import_ok && setupGuide.torch_load && setupGuide.torch_load.ok" class="muted" style="font-size:11px;line-height:1.45;">
                   <template v-if="setupGuide.torch_load.built_with_cuda">
                     {{ t('onboardingTorchMetaCuda').replace('{version}', setupGuide.torch_load.version || '?').replace('{cuda}', setupGuide.torch_load.cuda_built_version || '?') }}<span v-if="setupGuide.torch_cuda_available">{{ t('onboardingTorchMetaGpuOn') }}</span><span v-else>{{ t('onboardingTorchMetaGpuOff') }}</span>
@@ -1333,7 +1328,7 @@
                 <p v-if="setupGuide.tts.qwen3_model_ready && setupGuide.tts.qwen3_model_path" class="ok" style="font-size:11px;line-height:1.45;margin:0 0 8px;">
                   {{ t('onboardingQwenTtsModelPathReadyLabel') }}<code style="word-break:break-all;">{{ setupGuide.tts.qwen3_model_path }}</code>
                 </p>
-                <p v-if="!setupGuide.qwen_tts_installed" class="warn" style="font-size:12px;">⚠️ {{ t('onboardingQwenTtsNeedDepsFirst') }}</p>
+                <p v-if="!setupGuide.qwen_tts_installed" class="warn" style="font-size:12px;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ t('onboardingQwenTtsNeedDepsFirst') }}</p>
                 <div v-for="b in onboardingTtsBundles" :key="b.id" class="setup-tts-card" style="margin-top:8px;">
                   <div class="setup-tts-head">
                     <span class="setup-tts-name">{{ onboardingBundleTitle(b) }}</span>
@@ -1365,15 +1360,15 @@
               <p class="setup-tts-desc">{{ t('onboardingSttSenseVoiceDesc') }}</p>
               <div class="setup-wizard-substep">
                 <div class="setup-wizard-substep-title">1. {{ t('onboardingSttDepsStepTitle') }}</div>
-                <p v-if="setupGuide.sherpa_onnx_installed" class="ok" style="font-size:12px;">✓ sherpa-onnx {{ t('onboardingInstalled') }}</p>
+                <p v-if="setupGuide.sherpa_onnx_installed" class="ok" style="font-size:12px;"><app-icon name="check" :size="14"></app-icon> sherpa-onnx {{ t('onboardingInstalled') }}</p>
                 <p v-else class="muted" style="font-size:12px;">{{ t('onboardingSttInstallSherpa') }}</p>
               </div>
               <div class="setup-wizard-substep">
                 <div class="setup-wizard-substep-title">2. {{ t('onboardingSttModelStepTitle') }}</div>
-                <p v-if="!setupGuide.sherpa_onnx_installed" class="muted" style="font-size:12px;">⚠️ {{ t('onboardingSttNeedDepsFirst') }}</p>
+                <p v-if="!setupGuide.sherpa_onnx_installed" class="muted" style="font-size:12px;"><app-icon name="triangle-alert" :size="14"></app-icon> {{ t('onboardingSttNeedDepsFirst') }}</p>
                 <template v-else>
                   <p class="setup-tts-check" style="font-size:12px;">
-                    <span :class="setupGuide.sherpa_sense_voice_ready ? 'ok' : 'warn'">{{ setupGuide.sherpa_sense_voice_ready ? '✓' : '○' }} {{ t('onboardingSttModelFiles') }}</span>
+                    <span :class="setupGuide.sherpa_sense_voice_ready ? 'ok' : 'warn'"><app-icon :name="setupGuide.sherpa_sense_voice_ready ? 'check' : 'circle'" :size="14"></app-icon> {{ t('onboardingSttModelFiles') }}</span>
                   </p>
                   <p v-if="onboardingSttBundle" class="muted setup-guide-tutorial-dl-tags" style="font-size:11px;margin-top:6px;">
                     <span v-if="onboardingSttBundle.repo_id" class="setup-bundle-badge">{{ t('onboardingBtnHfMirror350') }}</span>
@@ -1392,7 +1387,7 @@
           <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55;">{{ t('onboardingDownloadHint') }}</p>
           <div class="setup-guide-actions" style="margin-top:16px;">
             <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="activeTab = 'profiles'">{{ t('onboardingJumpProfiles') }}</button>
-            <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openProfileWizard">✦ {{ t('onboardingOpenPersonaWizard') }}</button>
+            <button type="button" class="s-btn s-btn-small s-btn-secondary" @click="openProfileWizard"><app-icon name="wand-sparkles" :size="14"></app-icon> {{ t('onboardingOpenPersonaWizard') }}</button>
           </div>
         </div>
 
@@ -1417,19 +1412,19 @@
               @click="selectPreset(name)"
             >
               <span class="preset-list-name">{{ name }}</span>
-              <span v-if="name === llmActivePreset" class="active-badge">●</span>
+              <span v-if="name === llmActivePreset" class="active-badge" role="img" :aria-label="t('llmCurrentActive')"><app-icon name="circle-check" :size="14"></app-icon></span>
             </div>
 
             <div class="preset-list-actions" style="position:relative;">
               <button ref="llmNewPresetTrigger" type="button" class="preset-action-btn" :title="t('titleAddPreset')"
                       :aria-label="t('titleAddPreset')" :aria-expanded="llmShowNewMenu"
-                      @click="llmShowNewMenu = !llmShowNewMenu">＋</button>
+                      @click="llmShowNewMenu = !llmShowNewMenu"><app-icon name="plus" :size="14"></app-icon></button>
               <button
                 class="preset-action-btn"
                 :title="t('titleDeletePreset')" :aria-label="t('titleDeletePreset')"
                 :disabled="!selectedPresetName || selectedPresetName === llmActivePreset"
                 @click="deleteLLMPreset"
-              >－</button>
+              ><app-icon name="minus" :size="14"></app-icon></button>
 
               <!-- Template popup -->
               <div v-if="llmShowNewMenu" class="template-popup">
@@ -1481,7 +1476,7 @@
                       :placeholder="presetForm.has_key ? t('llmApiKeyExisting') : t('llmApiKeyPlaceholder')"
                     />
                     <button type="button" class="key-toggle" @click="llmShowKey = !llmShowKey"
-                            :aria-label="t(llmShowKey ? 'btnHide' : 'btnShow') + ' ' + t('llmApiKey')">{{ llmShowKey ? '🙈' : '👁' }}</button>
+                            :aria-label="t(llmShowKey ? 'btnHide' : 'btnShow') + ' ' + t('llmApiKey')"><app-icon :name="llmShowKey ? 'eye-off' : 'eye'" :size="16"></app-icon></button>
                   </div>
                 </div>
 
@@ -1587,7 +1582,7 @@
                   <button class="s-btn s-btn-secondary"
                     :disabled="selectedPresetName === llmActivePreset"
                     @click="setActiveLLMPreset">
-                    {{ selectedPresetName === llmActivePreset ? t('btnCurrentActive') : t('btnSetActive') }}
+                    <app-icon name="check" :size="14" v-if="selectedPresetName === llmActivePreset"></app-icon> {{ selectedPresetName === llmActivePreset ? t('btnCurrentActive') : t('btnSetActive') }}
                   </button>
                   <button class="s-btn s-btn-primary" @click="saveLLMPreset">{{ t('btnSaveLLM') }}</button>
                   <button class="s-btn s-btn-secondary" :disabled="!selectedPresetName || llmTestLoading || llmPresetTestDirty"
@@ -1597,8 +1592,8 @@
                   </button>
                   <span v-if="llmPresetTestDirty" class="form-hint">{{ t('llmTestSaveFirst') }}</span>
                   <span v-if="llmTestResult && llmTestResult.presetName === selectedPresetName && !llmPresetTestDirty" class="test-result" style="margin-left:8px;font-size:13px;">
-                    <template v-if="llmTestResult.ok">✓ {{ llmTestResult.latency_ms }}ms</template>
-                    <template v-else>✗ {{ llmTestResult.error }}</template>
+                    <template v-if="llmTestResult.ok"><app-icon name="check" :size="14"></app-icon> {{ llmTestResult.latency_ms }}ms</template>
+                    <template v-else><app-icon name="x" :size="14"></app-icon> {{ llmTestResult.error }}</template>
                   </span>
                 </div>
               </div><!-- end 生成参数 s-card -->
@@ -1882,8 +1877,8 @@
                 {{ t('btnTestEmbedding') }}
               </button>
               <span v-if="embedTestResult" class="test-result" style="margin-left:8px;">
-                <template v-if="embedTestResult.ok">✓ {{ embedTestResult.latency_ms }}ms</template>
-                <template v-else>✗ {{ embedTestResult.error }}</template>
+                <template v-if="embedTestResult.ok"><app-icon name="check" :size="14"></app-icon> {{ embedTestResult.latency_ms }}ms</template>
+                <template v-else><app-icon name="x" :size="14"></app-icon> {{ embedTestResult.error }}</template>
               </span>
             </div>
         </collapsible-section>
@@ -1916,20 +1911,20 @@
               </select>
               <!-- 引擎状态提示 -->
               <div class="form-hint" style="margin-top:6px;" v-if="setupGuide && setupGuide.tts">
-                <span v-if="ttsForm.engine === 'edge_tts'" class="ok">✓ {{ t('ttsStatusAvailable') }}</span>
+                <span v-if="ttsForm.engine === 'edge_tts'" class="ok"><app-icon name="check" :size="14"></app-icon> {{ t('ttsStatusAvailable') }}</span>
                 <template v-else-if="ttsForm.engine === 'gpt_sovits'">
-                  <span v-if="setupGuide.tts.gpt_sovits_port_open" class="ok">✓ {{ t('ttsStatusRunning') }}</span>
-                  <span v-else class="warn">○ {{ t('ttsStatusNotRunning') }}</span>
+                  <span v-if="setupGuide.tts.gpt_sovits_port_open" class="ok"><app-icon name="check" :size="14"></app-icon> {{ t('ttsStatusRunning') }}</span>
+                  <span v-else class="warn"><app-icon name="circle" :size="14"></app-icon> {{ t('ttsStatusNotRunning') }}</span>
                 </template>
                 <template v-else-if="ttsForm.engine === 'kokoro'">
-                  <span v-if="setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready" class="ok">✓ {{ t('ttsStatusInstalled') }}</span>
-                  <span v-else-if="setupGuide.tts.kokoro_installed && !setupGuide.tts.kokoro_models_ready" class="warn">○ {{ t('onboardingKokoroModels') }}</span>
-                  <span v-else class="warn">○ {{ t('ttsStatusNotInstalled') }}</span>
+                  <span v-if="setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready" class="ok"><app-icon name="check" :size="14"></app-icon> {{ t('ttsStatusInstalled') }}</span>
+                  <span v-else-if="setupGuide.tts.kokoro_installed && !setupGuide.tts.kokoro_models_ready" class="warn"><app-icon name="circle" :size="14"></app-icon> {{ t('onboardingKokoroModels') }}</span>
+                  <span v-else class="warn"><app-icon name="circle" :size="14"></app-icon> {{ t('ttsStatusNotInstalled') }}</span>
                 </template>
                 <template v-else-if="ttsForm.engine === 'qwen3_tts'">
-                  <span v-if="setupGuide.tts.qwen3_model_ready" class="ok">✓ {{ t('ttsStatusModelReady') }}</span>
-                  <span v-else-if="setupGuide.qwen_tts_installed" class="warn">○ {{ t('ttsStatusModelNotReady') }}</span>
-                  <span v-else class="warn">○ {{ t('ttsStatusNotInstalled') }}</span>
+                  <span v-if="setupGuide.tts.qwen3_model_ready" class="ok"><app-icon name="check" :size="14"></app-icon> {{ t('ttsStatusModelReady') }}</span>
+                  <span v-else-if="setupGuide.qwen_tts_installed" class="warn"><app-icon name="circle" :size="14"></app-icon> {{ t('ttsStatusModelNotReady') }}</span>
+                  <span v-else class="warn"><app-icon name="circle" :size="14"></app-icon> {{ t('ttsStatusNotInstalled') }}</span>
                 </template>
               </div>
             </div>
@@ -2022,7 +2017,7 @@
               <div class="section-divider" role="button" tabindex="0" :aria-expanded="ttsAdvancedOpen.gptsovits"
                    @click="ttsAdvancedOpen.gptsovits = !ttsAdvancedOpen.gptsovits" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()"
                    style="cursor:pointer;user-select:none;">
-                {{ t('lblTtsAdvanced') }} {{ ttsAdvancedOpen.gptsovits ? '▲' : '▼' }}
+                {{ t('lblTtsAdvanced') }} <app-icon :name="ttsAdvancedOpen.gptsovits ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
               </div>
               <div v-show="ttsAdvancedOpen.gptsovits">
                 <div class="param-row">
@@ -2177,7 +2172,7 @@
               <div class="section-divider" role="button" tabindex="0" :aria-expanded="ttsAdvancedOpen.qwen3"
                    @click="ttsAdvancedOpen.qwen3 = !ttsAdvancedOpen.qwen3" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()"
                    style="cursor:pointer;user-select:none;margin-bottom:0;">
-                {{ t('lblTtsAdvanced') }} {{ ttsAdvancedOpen.qwen3 ? '▲' : '▼' }}
+                {{ t('lblTtsAdvanced') }} <app-icon :name="ttsAdvancedOpen.qwen3 ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
               </div>
               <div v-show="ttsAdvancedOpen.qwen3">
                 <div class="form-field" style="margin-top:10px;">
@@ -2213,11 +2208,11 @@
             <button class="s-btn s-btn-secondary" @click="testTTSVoice"
                     :disabled="ttsTestState === 'loading' || ttsForm.engine === 'none'">
               <span v-if="ttsTestState === 'loading'">{{ t('ttsTestTesting') }}</span>
-              <span v-else-if="ttsTestState === 'ok'">{{ t('ttsTestOk') }}</span>
-              <span v-else-if="ttsTestState === 'error'">{{ t('ttsTestFail') }}</span>
+              <span v-else-if="ttsTestState === 'ok'"><app-icon name="check" :size="14"></app-icon> {{ t('ttsTestOk') }}</span>
+              <span v-else-if="ttsTestState === 'error'"><app-icon name="x" :size="14"></app-icon> {{ t('ttsTestFail') }}</span>
               <span v-else>{{ t('btnTestTts') }}</span>
             </button>
-            <span v-if="ttsSaveState === 'saved'" class="form-hint ok" style="margin-left:8px;">{{ t('ttsAutoSaved') }}</span>
+            <span v-if="ttsSaveState === 'saved'" class="form-hint ok" style="margin-left:8px;"><app-icon name="check" :size="14"></app-icon> {{ t('ttsAutoSaved') }}</span>
             <span v-else-if="ttsSaveState === 'saving'" class="form-hint muted" style="margin-left:8px;">…</span>
             <span v-else-if="ttsSaveState === 'error'" class="form-hint" role="alert">{{ t('settingsSaveFailed') }}</span>
           </div>
@@ -2367,7 +2362,7 @@
                 @dragleave="profileDragOverId = null"
                 @drop.prevent="profileDrop($event, p.profile_id)"
               >
-                <span class="session-drag-handle" :title="t('sessionDragTitle')" @pointerdown.stop="profilePointerDown($event, p.profile_id)">⋮⋮</span>
+                <span class="session-drag-handle" :title="t('sessionDragTitle')" @pointerdown.stop="profilePointerDown($event, p.profile_id)"><app-icon name="grip-vertical" :size="14"></app-icon></span>
                 <div class="session-avatar">
                   <img v-if="p.avatar" :src="p.avatar" class="avatar-img" />
                   <span v-else>{{ (p.display_name || p.profile_id).charAt(0).toUpperCase() }}</span>
@@ -2377,10 +2372,10 @@
               </div>
             </div>
             <div class="preset-list-actions">
-              <button class="preset-action-btn" :title="t('lblProfileNewTitle')" @click="openProfileCreateModal">＋ {{ t('btnProfileNew') }}</button>
-              <button class="preset-action-btn" :title="t('lblProfileWizardHint')" @click="openProfileWizard">✦ {{ t('btnProfileWizard') }}</button>
-              <button class="preset-action-btn" :title="t('lblProfileImportTitle')" :disabled="importingTavern" @click="importTavernCard">{{ importingTavern ? '⋯' : '⤓' }} {{ importingTavern ? t('lblImporting') : t('btnImportTavern') }}</button>
-              <button class="preset-action-btn danger" :title="t('lblProfileDeleteTitle')" :disabled="!selectedProfileId" @click="deleteProfile(selectedProfileId)">－ {{ t('btnProfileDelete') }}</button>
+              <button class="preset-action-btn" :title="t('lblProfileNewTitle')" @click="openProfileCreateModal"><app-icon name="plus" :size="14"></app-icon> {{ t('btnProfileNew') }}</button>
+              <button class="preset-action-btn" :title="t('lblProfileWizardHint')" @click="openProfileWizard"><app-icon name="wand-sparkles" :size="14"></app-icon> {{ t('btnProfileWizard') }}</button>
+              <button class="preset-action-btn" :title="t('lblProfileImportTitle')" :disabled="importingTavern" @click="importTavernCard"><app-icon :name="importingTavern ? 'ellipsis' : 'download'" :size="14"></app-icon> {{ importingTavern ? t('lblImporting') : t('btnImportTavern') }}</button>
+              <button class="preset-action-btn danger" :title="t('lblProfileDeleteTitle')" :disabled="!selectedProfileId" @click="deleteProfile(selectedProfileId)"><app-icon name="minus" :size="14"></app-icon> {{ t('btnProfileDelete') }}</button>
             </div>
           </div>
 
@@ -2473,7 +2468,7 @@
                     {{ t('lblPromptAutofillOverwrite') }}
                   </label>
                   <span style="font-size:11px;color:var(--text-secondary);line-height:1.45;flex:1;min-width:200px;">{{ t('hintPromptAutofillToolbar') }}</span>
-                  <button v-if="promptAutofillErrorRaw" type="button" class="s-btn s-btn-secondary" style="font-size:11px;padding:3px 8px;" @click="promptAutofillShowDebug = !promptAutofillShowDebug">{{ promptAutofillShowDebug ? t('lblSegCollapse') : t('lblSegExpand') }} {{ t('lblPromptAutofillDebug') }}</button>
+                  <button v-if="promptAutofillErrorRaw" type="button" class="s-btn s-btn-secondary" style="font-size:11px;padding:3px 8px;" @click="promptAutofillShowDebug = !promptAutofillShowDebug"><app-icon :name="promptAutofillShowDebug ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon> {{ promptAutofillShowDebug ? t('lblSegCollapse') : t('lblSegExpand') }} {{ t('lblPromptAutofillDebug') }}</button>
                   <!-- Names the model autofill runs on, using the backend's rule: the analysis model when it is
                        enabled and assigned, otherwise the active chat model. Without this, users switch the
                        chat model after a content-filter refusal and nothing changes. -->
@@ -2720,7 +2715,7 @@
                       <span style="flex:1"></span>
                       <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
                       <input type="number" class="seg-num-input" v-model.number="c.priority" min="0" max="200" />
-                      <button class="seg-del-btn" @click="deleteCustomSeg(idx)" :title="t('titleDeleteFact')">✕</button>
+                      <button class="seg-del-btn" @click="deleteCustomSeg(idx)" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                     </div>
                     <div class="seg-row-trigger">
                       <label style="font-size:11px;opacity:0.7;">{{ t('lblCustomSegTrigger') }}</label>
@@ -2864,7 +2859,7 @@
                                 :title="locale === 'en' ? 'times used' : '使用次数'">×{{ f.count }}</span>
                           <button class="portrait-address-del"
                                   :title="locale === 'en' ? 'Remove' : '删除'"
-                                  @click="deleteUserPortraitAddressForm(f.form)">✕</button>
+                                  @click="deleteUserPortraitAddressForm(f.form)"><app-icon name="x" :size="14"></app-icon></button>
                         </span>
                       </div>
                       <p v-else class="form-hint" style="margin:0;">
@@ -2912,7 +2907,7 @@
                             <div v-if="d.keywords.length" class="portrait-detail-keywords">{{ d.keywords.join(' · ') }}</div>
                           </div>
                           <button class="portrait-detail-del" :title="locale === 'en' ? 'Remove' : '删除'"
-                                  @click="deleteUserPortraitContextualDetail(d.summary)">✕</button>
+                                  @click="deleteUserPortraitContextualDetail(d.summary)"><app-icon name="x" :size="14"></app-icon></button>
                         </div>
                       </div>
                       <p v-else class="form-hint" style="margin:0;">{{ locale === 'en' ? 'No topic details yet.' : '暂无按需细节。' }}</p>
@@ -3049,13 +3044,13 @@
                         <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
                             <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
-                            <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;">🔒</span>
+                            <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;"><app-icon name="lock" :size="14"></app-icon></span>
                             <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
                             <span v-if="seg.is_builtin" class="seg-core-badge">{{ t('lblBuiltinBadge') }}</span>
                             <span style="flex:1"></span>
                             <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
                             <input type="number" class="seg-num-input" v-model.number="seg.priority" min="0" max="200" :disabled="seg.is_core" />
-                            <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')">✕</button>
+                            <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                           </div>
                           <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
                           <div class="seg-row-trigger" v-if="!seg.is_core">
@@ -3175,7 +3170,7 @@
                             <span style="flex:1"></span>
                             <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
                             <input type="number" class="seg-num-input" v-model.number="seg.priority" min="0" max="200" :disabled="seg.is_core" />
-                            <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')">✕</button>
+                            <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                           </div>
                           <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
                           <div class="seg-row-trigger">
@@ -3359,15 +3354,15 @@
                 <p class="form-hint" style="margin-bottom:12px;">
                   {{ t('lblTtsEngine') }}：<strong>{{ ttsForm.engine === 'none' ? t('optTtsNone') : ttsForm.engine }}</strong>
                   <span v-if="setupGuide && setupGuide.tts">
-                    <span v-if="ttsForm.engine === 'edge_tts'" class="ok"> ✓</span>
-                    <span v-else-if="ttsForm.engine === 'gpt_sovits'" :class="setupGuide.tts.gpt_sovits_port_open ? 'ok' : 'warn'">
-                      {{ setupGuide.tts.gpt_sovits_port_open ? ' ✓' : ' ○' }}
+                    <span v-if="ttsForm.engine === 'edge_tts'" class="ok" role="img" :aria-label="t('onboardingTtsReady')"><app-icon name="check" :size="14"></app-icon></span>
+                    <span v-else-if="ttsForm.engine === 'gpt_sovits'" :class="setupGuide.tts.gpt_sovits_port_open ? 'ok' : 'warn'" role="img" :aria-label="t(setupGuide.tts.gpt_sovits_port_open ? 'onboardingTtsReady' : 'onboardingTtsNotReady')">
+                      <app-icon :name="setupGuide.tts.gpt_sovits_port_open ? 'check' : 'circle'" :size="14"></app-icon>
                     </span>
-                    <span v-else-if="ttsForm.engine === 'kokoro'" :class="(setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? 'ok' : 'warn'">
-                      {{ (setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? ' ✓' : ' ○' }}
+                    <span v-else-if="ttsForm.engine === 'kokoro'" :class="(setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? 'ok' : 'warn'" role="img" :aria-label="t((setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? 'onboardingTtsReady' : 'onboardingTtsNotReady')">
+                      <app-icon :name="(setupGuide.tts.kokoro_installed && setupGuide.tts.kokoro_models_ready) ? 'check' : 'circle'" :size="14"></app-icon>
                     </span>
-                    <span v-else-if="ttsForm.engine === 'qwen3_tts'" :class="setupGuide.tts.qwen3_model_ready ? 'ok' : 'warn'">
-                      {{ setupGuide.tts.qwen3_model_ready ? ' ✓' : ' ○' }}
+                    <span v-else-if="ttsForm.engine === 'qwen3_tts'" :class="setupGuide.tts.qwen3_model_ready ? 'ok' : 'warn'" role="img" :aria-label="t(setupGuide.tts.qwen3_model_ready ? 'onboardingTtsReady' : 'onboardingTtsNotReady')">
+                      <app-icon :name="setupGuide.tts.qwen3_model_ready ? 'check' : 'circle'" :size="14"></app-icon>
                     </span>
                   </span>
                 </p>
@@ -3551,7 +3546,7 @@
               <div v-if="profileSubTab === 'lorebook'" class="profile-subtab-panel">
                 <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;line-height:1.55;">{{ t('hintLorebookTabIntro') }}</p>
                 <p v-if="!isLorebookSegmentEnabled()" style="font-size:var(--fs-sm);color:var(--warning);margin:0 0 12px;padding:6px 10px;background:var(--warning-bg);border-radius:var(--radius-md);border:1px solid var(--warning-border);">
-                  ⚠ {{ t('hintLorebookSegmentOff') }}
+                  <app-icon name="triangle-alert" :size="14"></app-icon> {{ t('hintLorebookSegmentOff') }}
                 </p>
 
                 <div class="section-divider">{{ t('secLorebookBindProfile') }}</div>
@@ -3702,13 +3697,13 @@
                       <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
                           <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
-                          <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;">🔒</span>
+                          <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;"><app-icon name="lock" :size="14"></app-icon></span>
                           <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
                           <span v-if="seg.is_builtin" class="seg-core-badge">{{ t('lblBuiltinBadge') }}</span>
                           <span style="flex:1"></span>
                           <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
                           <input type="number" class="seg-num-input" v-model.number="seg.priority" min="0" max="200" :disabled="seg.is_core" />
-                          <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')">✕</button>
+                          <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                         </div>
                         <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
                         <div class="seg-row-trigger" v-if="!seg.is_core">
@@ -3828,7 +3823,7 @@
                           <span style="flex:1"></span>
                           <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
                           <input type="number" class="seg-num-input" v-model.number="seg.priority" min="0" max="200" :disabled="seg.is_core" />
-                          <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')">✕</button>
+                          <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                         </div>
                         <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
                         <div class="seg-row-trigger">
@@ -4055,7 +4050,9 @@
                         <span style="font-weight:500;white-space:nowrap;">{{ src.label }}</span>
                         <span style="flex:1;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.6;">{{ src.url || src.query }}</span>
                         <button type="button" class="s-btn s-btn-ghost" style="padding:1px 6px;font-size:11px;flex-shrink:0;"
-                                @click="removeTrendSource(tool.config, idx, selectedProfileId)">✕</button>
+                                :aria-label="t('trendRemoveSource').replace('{name}', src.label || src.url || src.query || '')"
+                                :title="t('trendRemoveSource').replace('{name}', src.label || src.url || src.query || '')"
+                                @click="removeTrendSource(tool.config, idx, selectedProfileId)"><app-icon name="x" :size="14"></app-icon></button>
                       </div>
 
                       <!-- 快速添加预置源 -->
@@ -4067,7 +4064,7 @@
                                 style="font-size:12px;padding:3px 10px;"
                                 :disabled="(tool.config.sources||[]).some(ss => ss.url===p.url)"
                                 @click="addPresetTrendSource(tool.config, p, selectedProfileId)">
-                          {{ p.label }}{{ (tool.config.sources||[]).some(ss => ss.url===p.url) ? ' ✓' : ' +' }}
+                          {{ p.label }} <app-icon :name="(tool.config.sources||[]).some(ss => ss.url===p.url) ? 'check' : 'plus'" :size="14"></app-icon>
                         </button>
                       </div>
                       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">{{ t('trendPresetEnGroup') }}</div>
@@ -4077,7 +4074,7 @@
                                 style="font-size:12px;padding:3px 10px;"
                                 :disabled="(tool.config.sources||[]).some(ss => ss.url===p.url)"
                                 @click="addPresetTrendSource(tool.config, p, selectedProfileId)">
-                          {{ p.label }}{{ (tool.config.sources||[]).some(ss => ss.url===p.url) ? ' ✓' : ' +' }}
+                          {{ p.label }} <app-icon :name="(tool.config.sources||[]).some(ss => ss.url===p.url) ? 'check' : 'plus'" :size="14"></app-icon>
                         </button>
                       </div>
 
@@ -4194,7 +4191,7 @@
           <p v-if="agentStatusError" class="agent-error" role="alert">{{ agentStatusError }}</p>
           <p v-if="agentSettingsError" class="agent-error" role="alert">{{ agentSettingsError }}</p>
           <details class="agent-settings-advanced">
-            <summary>{{ t('agentAdvanced') }}</summary>
+            <summary class="settings-disclosure"><app-icon name="chevron-right" :size="14" class="settings-disclosure-icon"></app-icon> {{ t('agentAdvanced') }}</summary>
             <p class="form-hint">{{ t('agentLimitsHint') }}</p>
             <div class="form-field">
               <label class="form-label" for="agent-request-limit">{{ t('agentMaxRequests') }}</label>
@@ -4265,7 +4262,7 @@
 
             <toggle-row :label="t('lblEnableReflection')" v-model="reflectionForm.reflection_enabled"></toggle-row>
             <div class="hint-block" style="border-left-color: var(--warning); background: var(--warning-bg); margin-top: 10px;">
-              {{ t('hintReflectionApiCost') }}
+              <app-icon name="triangle-alert" :size="14"></app-icon> {{ t('hintReflectionApiCost') }}
             </div>
             <p class="form-hint">{{ t('reflectionToolDistinction') }}</p>
 
@@ -4304,7 +4301,7 @@
               <div class="adv-toggle-row" role="button" tabindex="0" :aria-expanded="reflectionAdvancedOpen"
                    @click="reflectionAdvancedOpen = !reflectionAdvancedOpen" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
                 <span>{{ locale === 'en' ? 'Advanced' : '高级' }}</span>
-                <span class="adv-toggle-arrow" :class="{ open: reflectionAdvancedOpen }">›</span>
+                <span class="adv-toggle-arrow" aria-hidden="true" :class="{ open: reflectionAdvancedOpen }"><app-icon name="chevron-right" :size="14"></app-icon></span>
               </div>
               <div v-show="reflectionAdvancedOpen">
                 <div class="ref-fallback-header">{{ t('secReflectionFallback') }}</div>
@@ -4358,7 +4355,7 @@
                 <div class="adv-toggle-row" role="button" tabindex="0" :aria-expanded="aseAdvancedOpen"
                      @click="aseAdvancedOpen = !aseAdvancedOpen" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
                   <span>{{ locale === 'en' ? 'Advanced' : '高级' }} · {{ {low:t('optAseLow'),medium:t('optAseMedium'),high:t('optAseHigh'),game:t('optAseGame'),focus:t('optAseFocus')}[reflectionForm.ase_mode] || reflectionForm.ase_mode }}</span>
-                  <span class="adv-toggle-arrow" :class="{ open: aseAdvancedOpen }">›</span>
+                  <span class="adv-toggle-arrow" aria-hidden="true" :class="{ open: aseAdvancedOpen }"><app-icon name="chevron-right" :size="14"></app-icon></span>
                 </div>
                 <div v-show="aseAdvancedOpen">
                   <div class="param-row"><span class="param-label">{{ t('lblAseCheckInterval') }}</span><input type="number" class="seg-num-input" min="30" max="3600" style="width:72px;" v-model.number="reflectionForm.ase_modes[reflectionForm.ase_mode].check_interval" :disabled="!reflectionForm.ase_enabled" /></div>
@@ -4373,7 +4370,7 @@
                   <div class="form-hint">{{ t('hintAseMax24h') }}</div>
                   <div class="param-row"><span class="param-label">{{ t('lblAseMaxConsecutive') }}</span><input type="number" class="seg-num-input" min="0" max="100" style="width:72px;" v-model.number="reflectionForm.ase_modes[reflectionForm.ase_mode].max_consecutive_without_response" :disabled="!reflectionForm.ase_enabled" /></div>
                   <div class="form-hint">{{ t('hintAseMaxConsecutive') }}</div>
-                  <div v-if="reflectionForm.ase_mode === 'game'" class="hint-block" style="color:var(--accent);background:var(--active-bg,rgba(120,86,255,0.08));margin:6px 0 8px;">{{ t('hintAseGameMode') }}</div>
+                  <div v-if="reflectionForm.ase_mode === 'game'" class="hint-block" style="color:var(--accent);background:var(--active-bg,rgba(120,86,255,0.08));margin:6px 0 8px;"><app-icon name="lightbulb" :size="14"></app-icon> {{ t('hintAseGameMode') }}</div>
                   <div class="param-row" style="align-items:flex-start;">
                     <span class="param-label" style="padding-top:5px;">{{ t('lblAseExtraBehavior') }}</span>
                     <textarea class="form-input" :rows="textareaRows(reflectionForm.ase_modes[reflectionForm.ase_mode].extra_behavior, 2, 12)" v-model="reflectionForm.ase_modes[reflectionForm.ase_mode].extra_behavior" :disabled="!reflectionForm.ase_enabled" style="resize:vertical;" :placeholder="t('phAseExtraBehavior')"></textarea>
@@ -4436,7 +4433,7 @@
 
             <button type="button" class="section-divider settings-disclosure-btn" style="margin:10px 0 4px;font-size:11px;"
                     :aria-expanded="topicDiscoveryAdvancedOpen" @click="topicDiscoveryAdvancedOpen = !topicDiscoveryAdvancedOpen">
-              <span aria-hidden="true">{{ topicDiscoveryAdvancedOpen ? '▲' : '▼' }}</span> {{ t('lblTopicAdvanced') }}
+              <span aria-hidden="true"><app-icon :name="topicDiscoveryAdvancedOpen ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon></span> {{ t('lblTopicAdvanced') }}
             </button>
             <template v-if="topicDiscoveryAdvancedOpen">
               <div class="param-row">
@@ -4832,7 +4829,7 @@
           <span class="mem-stat-badge">{{ t('memStatSummaries') }} {{ memoryStatus.summary_count }}</span>
           <span class="mem-stat-badge" :class="memoryStatus.vector_ok ? 'mem-stat-ok' : 'mem-stat-off'">
             {{ t('memStatVectors') }} {{ memoryStatus.vector_count }}
-            <span style="font-size:10px;margin-left:3px;">{{ memoryStatus.vector_ok ? t('memVectorReady') : t('memVectorOff') }}</span>
+            <span style="font-size:10px;margin-left:3px;"><app-icon :name="memoryStatus.vector_ok ? 'circle-check' : 'circle'" :size="14"></app-icon> {{ memoryStatus.vector_ok ? t('memVectorReady') : t('memVectorOff') }}</span>
           </span>
           <span v-if="memoryStatus.vector_ok" class="mem-stat-provider">{{ memoryStatus.vector_provider }}</span>
         </div>
@@ -4900,9 +4897,9 @@
                   <span :class="['mem-source-badge', fact.source === 'manual' ? 'manual' : 'auto']">{{ fact.source }}</span>
                   <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null ? Math.round(Number(fact.weight) * 100) / 100 : 1 }}</span>
                   <span style="font-size:11px;color:var(--text-secondary);" :title="new Date(fact.updated_at * 1000).toLocaleString()">{{ new Date(fact.updated_at * 1000).toLocaleDateString() }}</span>
-                  <button :class="['icon-btn', fact.pinned ? 'pinned-active' : '']" :title="fact.pinned ? t('titlePinned') : t('titleNotPinned')" @click="toggleMemoryFactPin(fact)">📌</button>
-                  <button class="icon-btn" :title="t('titleEditFact')" @click="startEditMemoryFact(fact)">✎</button>
-                  <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryFact(fact.id)">✕</button>
+                  <button :class="['icon-btn', fact.pinned ? 'pinned-active' : '']" :title="fact.pinned ? t('titlePinned') : t('titleNotPinned')" @click="toggleMemoryFactPin(fact)"><app-icon name="pin" :size="14"></app-icon></button>
+                  <button class="icon-btn" :title="t('titleEditFact')" @click="startEditMemoryFact(fact)"><app-icon name="pencil" :size="14"></app-icon></button>
+                  <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryFact(fact.id)"><app-icon name="x" :size="14"></app-icon></button>
                 </template>
               </div>
             </div>
@@ -4913,7 +4910,7 @@
           </template>
           <template v-if="memoryActiveSubTab === 'maintenance'">
         <div class="memory-action-row">
-          <button class="s-btn s-btn-secondary memory-btn-backup" @click="initMemoryAction('backup', memoryProfileId)" :title="t('titleBackup')">{{ t('btnBackup') }}</button>
+          <button class="s-btn s-btn-secondary memory-btn-backup" @click="initMemoryAction('backup', memoryProfileId)" :title="t('titleBackup')"><app-icon name="archive" :size="14"></app-icon> {{ t('btnBackup') }}</button>
           <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearHistory', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearHistory') }}</button>
           <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearFacts', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearFacts') }}</button>
           <button class="s-btn s-btn-secondary memory-btn-danger" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="initMemoryAction('clearVectors', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearVectors') }}</button>
@@ -4979,7 +4976,7 @@
                         @click="memShowChangelog = !memShowChangelog">
                   <span>{{ t('memChangelogTitle') }}</span>
                   <span v-if="memoryChangelog.length" class="mem-changelog-count">{{ memoryChangelog.length }}</span>
-                  <span class="mem-changelog-caret" aria-hidden="true">{{ memShowChangelog ? '▲' : '▼' }}</span>
+                  <span class="mem-changelog-caret" aria-hidden="true"><app-icon :name="memShowChangelog ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon></span>
                 </button>
                 <button type="button" class="s-btn s-btn-secondary" style="font-size:11px;" :aria-label="t('btnRefresh')"
                         :disabled="memoryChangelogLoading || !memoryProfileId" @click="loadMemoryChangelog(memoryProfileId)">
@@ -4995,20 +4992,20 @@
                   <span>{{ run.date }} · {{ run.trigger === 'manual' ? t('memChangelogManual') : t('memChangelogAuto') }}</span>
                   <span class="mem-changelog-brief">{{ memChangelogBrief(run) }}</span>
                   <span v-if="run.rolled_back" class="mem-changelog-rbtag">{{ t('memChangelogRolledBack') }}</span>
-                  <span class="mem-changelog-caret" aria-hidden="true">{{ memChangelogExpanded === run.run_id ? '▲' : '▼' }}</span>
+                  <span class="mem-changelog-caret" aria-hidden="true"><app-icon :name="memChangelogExpanded === run.run_id ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon></span>
                 </button>
                 <div v-show="memChangelogExpanded === run.run_id" class="mem-changelog-detail">
                   <template v-if="run.summary.consolidation.added_contents && run.summary.consolidation.added_contents.length">
                     <div class="mem-changelog-sub">{{ t('memChangelogAdded') }}</div>
-                    <div v-for="(s, i) in run.summary.consolidation.added_contents" :key="'a'+i" class="mem-changelog-fact added">+ {{ s }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.added_contents" :key="'a'+i" class="mem-changelog-fact added"><app-icon name="plus" :size="14"></app-icon> {{ s }}</div>
                   </template>
                   <template v-if="run.summary.consolidation.vectors_removed_contents && run.summary.consolidation.vectors_removed_contents.length">
                     <div class="mem-changelog-sub">{{ t('memChangelogMerged') }}</div>
-                    <div v-for="(s, i) in run.summary.consolidation.vectors_removed_contents" :key="'v'+i" class="mem-changelog-fact removed">− {{ s }}</div>
+                    <div v-for="(s, i) in run.summary.consolidation.vectors_removed_contents" :key="'v'+i" class="mem-changelog-fact removed"><app-icon name="minus" :size="14"></app-icon> {{ s }}</div>
                   </template>
                   <template v-if="run.summary.decay_floored && run.summary.decay_floored.length">
                     <div class="mem-changelog-sub">{{ t('memChangelogFloored') }}</div>
-                    <div v-for="(s, i) in run.summary.decay_floored" :key="'f'+i" class="mem-changelog-fact">↓ {{ s }}</div>
+                    <div v-for="(s, i) in run.summary.decay_floored" :key="'f'+i" class="mem-changelog-fact"><app-icon name="arrow-down" :size="14"></app-icon> {{ s }}</div>
                   </template>
                   <div class="mem-changelog-stats">
                     {{ t('memChangelogStatOrphan') }} {{ run.summary.orphan_vectors }}
@@ -5027,8 +5024,8 @@
 
           <template v-if="memoryActiveSubTab === 'vectors'">
             <div style="margin-bottom:8px;">
-              <button class="s-btn" style="font-size:12px;" :disabled="!(memoryStatus && memoryStatus.vector_ok) || syncFactsLoading" @click="syncFactsToVectors()">{{ syncFactsLoading ? t('btnSyncing') : t('btnSyncFactsToVectors') }}</button>
-              <span v-if="syncFactsResult" style="font-size:11px;color:var(--text-secondary);">{{ syncFactsResult }}</span>
+              <button class="s-btn" style="font-size:12px;" :disabled="!(memoryStatus && memoryStatus.vector_ok) || syncFactsLoading" @click="syncFactsToVectors()"><app-icon :name="syncFactsLoading ? 'loader-circle' : 'refresh-cw'" :size="14"></app-icon> {{ syncFactsLoading ? t('btnSyncing') : t('btnSyncFactsToVectors') }}</button>
+              <span v-if="syncFactsResult" style="font-size:11px;color:var(--text-secondary);"><app-icon name="check" :size="14" v-if="syncFactsResult.ok"></app-icon> {{ syncFactsResult.text }}</span>
             </div>
             <div class="mem-add-form">
               <textarea class="form-input" style="flex:1;min-height:56px;font-size:12px;resize:vertical;" v-model="memoryVectorText" :placeholder="t('phAddVector')"></textarea>
@@ -5046,7 +5043,7 @@
                 <span class="mem-fact-content" style="flex:1;">{{ vec.document }}</span>
                 <span v-if="vec.metadata && vec.metadata.emotional_note" class="mem-emotional-badge">{{ vec.metadata.emotional_note }}</span>
                 <span v-if="vec.metadata && vec.metadata.created_at" style="font-size:10px;opacity:0.6;">{{ new Date(vec.metadata.created_at * 1000).toLocaleDateString() }}</span>
-                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryVector(vec.id)">✕</button>
+                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryVector(vec.id)"><app-icon name="x" :size="14"></app-icon></button>
               </div>
             </div>
             <div class="mem-list-footer">
@@ -5080,7 +5077,7 @@
               <div v-for="sum in displayedMemorySummaries" :key="sum.date" class="mem-fact-row">
                 <span class="mem-cat-badge" style="min-width:76px;">{{ sum.date }}</span>
                 <span class="mem-fact-content" style="flex:1;">{{ sum.summary }}</span>
-                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemorySummary(sum.date)">✕</button>
+                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemorySummary(sum.date)"><app-icon name="x" :size="14"></app-icon></button>
               </div>
             </div>
             <div class="mem-list-footer">
@@ -5104,7 +5101,7 @@
                 <span class="mem-cat-badge" :style="{ minWidth:'28px', background: msg.role === 'user' ? 'var(--bg-elevated)' : 'var(--accent-muted,#3d3a6e)' }">{{ (msg.sender && msg.sender.trim()) ? msg.sender : (msg.role === 'user' ? t('lblMsgSenderYou') : 'AI') }}</span>
                 <span class="mem-msg-time">{{ new Date(msg.timestamp * 1000).toLocaleString() }}</span>
                 <span class="mem-fact-content" style="white-space:pre-wrap;word-break:break-all;">{{ msg.content }}</span>
-                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteChatMessage(msg.id)">✕</button>
+                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteChatMessage(msg.id)"><app-icon name="x" :size="14"></app-icon></button>
               </div>
             </div>
             <div class="mem-list-footer">
@@ -5166,7 +5163,7 @@
 
               <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.ltm"
                    @click="memGlobalAdvOpen.ltm = !memGlobalAdvOpen.ltm" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
-                {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.ltm ? '▲' : '▼' }}
+                {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.ltm ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
               </div>
               <div v-show="memGlobalAdvOpen.ltm">
                 <div class="param-row" style="margin-top:8px;">
@@ -5190,7 +5187,7 @@
                 <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.vector_enabled }">
                   <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.vector"
                        @click="memGlobalAdvOpen.vector = !memGlobalAdvOpen.vector" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
-                    {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.vector ? '▲' : '▼' }}
+                    {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.vector ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
                   </div>
                   <div v-show="memGlobalAdvOpen.vector">
                     <div class="param-row" style="margin-top:8px;">
@@ -5239,7 +5236,7 @@
 
               <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.daySummary"
                    @click="memGlobalAdvOpen.daySummary = !memGlobalAdvOpen.daySummary" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
-                {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.daySummary ? '▲' : '▼' }}
+                {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.daySummary ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
               </div>
               <div v-show="memGlobalAdvOpen.daySummary">
                 <div class="param-row" style="margin-top:8px;">
@@ -5284,7 +5281,7 @@
               <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.daily_forgetting_enabled }">
                 <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.decay"
                      @click="memGlobalAdvOpen.decay = !memGlobalAdvOpen.decay" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
-                  {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.decay ? '▲' : '▼' }}
+                  {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.decay ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
                 </div>
                 <div v-show="memGlobalAdvOpen.decay">
                   <div class="param-row" style="margin-top:8px;">
@@ -5328,7 +5325,7 @@
               <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.daily_consolidation_enabled }">
                 <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.consolidation"
                      @click="memGlobalAdvOpen.consolidation = !memGlobalAdvOpen.consolidation" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
-                  {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.consolidation ? '▲' : '▼' }}
+                  {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.consolidation ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
                 </div>
                 <div v-show="memGlobalAdvOpen.consolidation">
                   <div class="param-row" style="margin-top:8px;">
@@ -5356,7 +5353,7 @@
 
           <!-- Global auto-save indicator -->
           <div style="margin-bottom:4px;padding:0 2px;">
-            <span v-if="memGlobalSaveState === 'saved'" class="form-hint ok">{{ t('ttsAutoSaved') }}</span>
+            <span v-if="memGlobalSaveState === 'saved'" class="form-hint ok"><app-icon name="check" :size="14"></app-icon> {{ t('ttsAutoSaved') }}</span>
             <span v-else-if="memGlobalSaveState === 'saving'" class="form-hint muted">…</span>
           </div>
 
@@ -5365,7 +5362,7 @@
           <!-- ── Profile Card ── -->
           <div v-show="memorySettingsScope === 'persona'" id="memory-extraction-settings" tabindex="-1" class="s-card">
             <div class="mem-zone-header mem-zone-header--profile">
-              <span class="mem-zone-icon">◈</span>
+              <span class="mem-zone-icon"><app-icon name="brain" :size="14"></app-icon></span>
               <span>{{ t('memSectProfileOverride') }}</span>
               <select class="form-select mem-zone-profile-select" v-model="memoryProfileId"
                       @change="onMemorySettingsProfileChange(memoryProfileId)">
@@ -5376,7 +5373,7 @@
               </select>
               <button class="s-btn s-btn-secondary mem-zone-refresh-btn"
                       :disabled="!memoryProfileId" :aria-label="t('btnRefresh')"
-                      @click="loadMemoryTabProfileConfig(memoryProfileId)">↺</button>
+                      @click="loadMemoryTabProfileConfig(memoryProfileId)"><app-icon name="refresh-cw" :size="14"></app-icon></button>
             </div>
             <p class="mem-cfg-hint" style="margin-bottom:14px;">{{ t('hintProfileOverrideDesc') }}</p>
 
@@ -5464,7 +5461,7 @@
 
               <div class="section-divider" role="button" tabindex="0" :aria-expanded="memProfileAdvOpen.extract"
                    @click="memProfileAdvOpen.extract = !memProfileAdvOpen.extract" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
-                {{ t('lblTtsAdvanced') }} {{ memProfileAdvOpen.extract ? '▲' : '▼' }}
+                {{ t('lblTtsAdvanced') }} <app-icon :name="memProfileAdvOpen.extract ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
               </div>
               <div v-show="memProfileAdvOpen.extract">
                 <div class="param-row" style="margin-top:8px;">
@@ -5536,7 +5533,7 @@
               </div>
               <div class="section-divider" role="button" tabindex="0" :aria-expanded="memProfileAdvOpen.forgetting"
                    @click="memProfileAdvOpen.forgetting = !memProfileAdvOpen.forgetting" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:4px;">
-                {{ t('lblTtsAdvanced') }} {{ memProfileAdvOpen.forgetting ? '▲' : '▼' }}
+                {{ t('lblTtsAdvanced') }} <app-icon :name="memProfileAdvOpen.forgetting ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
               </div>
               <div v-show="memProfileAdvOpen.forgetting">
                 <div class="param-row" style="margin-top:8px;">
@@ -5608,12 +5605,12 @@
 
             <!-- Budget breakdown -->
             <div class="mem-cfg-item" style="margin-top:12px;padding:8px 10px;background:var(--bg-app);border-radius:6px;border:1px solid var(--border);">
-              <p class="mem-cfg-hint" style="margin:0;">{{ memoryBudgetBreakdown }}</p>
+              <p class="mem-cfg-hint" style="margin:0;"><app-icon name="chart-no-axes-column" :size="14"></app-icon> {{ memoryBudgetBreakdown }}</p>
             </div>
 
             <!-- Profile auto-save indicator -->
             <div style="margin-top:10px;padding:0 2px;">
-              <span v-if="memProfileSaveState === 'saved'" class="form-hint ok">{{ t('ttsAutoSaved') }}</span>
+              <span v-if="memProfileSaveState === 'saved'" class="form-hint ok"><app-icon name="check" :size="14"></app-icon> {{ t('ttsAutoSaved') }}</span>
               <span v-else-if="memProfileSaveState === 'saving'" class="form-hint muted">…</span>
             </div>
             </fieldset>
@@ -5634,8 +5631,8 @@
       <div ref="profileWizardDialog" class="profile-wizard-box" role="dialog" tabindex="-1"
            :aria-modal="settingsDialogName === 'profileWizard'" :aria-label="t('profileWizardTitle')">
         <div class="profile-wizard-header">
-          <span>🪄 {{ t('profileWizardTitle') }}</span>
-          <button class="profile-wizard-close" :aria-label="t('settingsCloseDialog')" @click="profileWizardOpen = false">✕</button>
+          <span><app-icon name="wand-sparkles" :size="14"></app-icon> {{ t('profileWizardTitle') }}</span>
+          <button class="profile-wizard-close" :aria-label="t('settingsCloseDialog')" @click="profileWizardOpen = false"><app-icon name="x"></app-icon></button>
         </div>
         <div class="profile-wizard-body">
           <p style="font-size:13px;color:var(--text-secondary);margin:0 0 8px;">
@@ -5673,7 +5670,7 @@
           <div v-if="profileWizardResult" style="margin-top:14px;">
             <div class="section-divider" style="margin-bottom:10px;">
               {{ t('profileWizardResultPreview') }}
-              <span v-if="profileWizardPresetUsed" style="float:right;font-size:11px;font-weight:400;opacity:0.7;">✓ {{ profileWizardPresetUsed }}</span>
+              <span v-if="profileWizardPresetUsed" style="float:right;font-size:11px;font-weight:400;opacity:0.7;"><app-icon name="check" :size="14"></app-icon> {{ profileWizardPresetUsed }}</span>
             </div>
             <div class="form-field">
               <div class="form-label">{{ t('lblWizardName') }}</div>
@@ -5688,7 +5685,7 @@
               <textarea class="form-input" v-model="profileWizardResult.style_constraint" style="font-size:13px;min-height:80px;"></textarea>
             </div>
             <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;line-height:1.6;">
-              ✓ {{ t('wizardGeneratedFields') }}：
+              <app-icon name="check" :size="14"></app-icon> {{ t('wizardGeneratedFields') }}：
               <span v-if="profileWizardResult.emotion_prompts && Object.keys(profileWizardResult.emotion_prompts).length">{{ t('wizardFieldEmotions') }} · </span>
               <span v-if="profileWizardResult.energy_prompts">{{ t('wizardFieldEnergy') }} · </span>
               <span v-if="profileWizardResult.affinity_prompts">{{ t('wizardFieldAffinity') }} · </span>
@@ -5699,7 +5696,7 @@
 
           <div class="btn-row" style="margin-top:14px;flex-wrap:wrap;gap:8px;">
             <button class="s-btn s-btn-primary" :disabled="profileWizardGenerating || !profileWizardDesc.trim()" @click="runProfileWizard">
-              {{ profileWizardGenerating ? t('btnWizardGenerating') : t('btnWizardGenerate') }}
+              <app-icon name="sparkles" :size="14" v-if="!profileWizardGenerating"></app-icon> {{ profileWizardGenerating ? t('btnWizardGenerating') : t('btnWizardGenerate') }}
             </button>
             <button v-if="profileWizardResult" class="s-btn s-btn-secondary" @click="applyWizardToNew">{{ t('btnWizardCreateNew') }}</button>
             <button v-if="profileWizardResult && selectedProfileId" class="s-btn s-btn-secondary" @click="applyWizardToCurrent">{{ t('btnWizardApplyCurrent') }}</button>
@@ -5716,7 +5713,7 @@
            :aria-modal="settingsDialogName === 'profileCreate'" :aria-label="t('profileCreateModalTitle')" style="width:420px;max-width:92vw;">
         <div class="profile-wizard-header">
           <span>{{ t('profileCreateModalTitle') }}</span>
-          <button type="button" class="profile-wizard-close" :aria-label="t('settingsCloseDialog')" @click="cancelProfileCreateModal">✕</button>
+          <button type="button" class="profile-wizard-close" :aria-label="t('settingsCloseDialog')" @click="cancelProfileCreateModal"><app-icon name="x"></app-icon></button>
         </div>
         <div class="profile-wizard-body">
           <div class="form-field">
@@ -5743,7 +5740,7 @@
   <div class="toast-stack">
     <transition-group name="toast-anim" tag="div" style="display:flex;flex-direction:column;gap:8px;align-items:center;">
       <div v-for="toast in toasts" :key="toast.id" :class="['toast-item', toast.type ? 'toast-' + toast.type : '']">
-        {{ toast.msg }}
+        <app-icon :name="toastIcon(toast.type)" :size="14"></app-icon> {{ toast.msg }}
       </div>
     </transition-group>
   </div>
@@ -5752,10 +5749,11 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20261102trisync1"></script>
-<script src="js/components.js?v=20261105settings3"></script>
-<script src="js/settings.js?v=20261105chatlayout1"></script>
+<script src="js/icons.js?v=20261105lucide1"></script>
+<script src="js/components.js?v=20261105lucide1"></script>
+<script src="js/settings.js?v=20261105lucide1"></script>
 <script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
-<script src="js/app.js?v=20261105chatlayout1"></script>
+<script src="js/app.js?v=20261105lucide1"></script>
 </body>
 </html>

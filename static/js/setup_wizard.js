@@ -70,6 +70,11 @@
       };
     },
     computed: {
+      quickEmbedReady() {
+        const g = this.g;
+        return !g.memory_vector_enabled || g.embedding_provider !== 'local' || g.embedding_local_on_disk
+          || !!(g.embed_installed && (g.embed_installed.bge_small_zh || g.embed_installed.minilm_en));
+      },
       memBundles() {
         if (!this.g || !this.g.bundles) return [];
         return this.g.bundles.filter((x) => x.category === 'memory' || x.category === 'embedding');
@@ -362,5 +367,6 @@
     },
   });
 
+  app.component('app-icon', window.SK_ICONS.component);
   app.mount('#wiz');
 })();

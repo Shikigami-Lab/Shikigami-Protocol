@@ -326,15 +326,15 @@ const App = {
 
       // Toolbar button visibility config (P5-C)
       toolbarConfig: {
-        tts:         { label: 'TTS',   icon: '🔊', enabled: true },
-        voiceInput:  { label: '语音输入', icon: '🎤', enabled: true },
-        convMode:    { label: '对话模式', icon: '💬', enabled: true, sttRequired: true },
-        screenshot:  { label: '截图',  icon: '📷', enabled: true, electronOnly: true },
-        screenShare: { label: '屏幕共享', icon: '🖥️', enabled: true, webOnly: true },
-        uploadImage: { label: '上传图片', icon: '📁', enabled: true },
-        todos:       { label: '待办',  icon: '📋', enabled: true },
-        timer:       { label: '计时',  icon: '⏱', enabled: true },
-        commands:    { label: '命令',  icon: '⌘', enabled: true },
+        tts:         { label: 'TTS',   icon: 'volume-2', enabled: true },
+        voiceInput:  { label: '语音输入', icon: 'mic', enabled: true },
+        convMode:    { label: '对话模式', icon: 'audio-lines', enabled: true, sttRequired: true },
+        screenshot:  { label: '截图',  icon: 'camera', enabled: true, electronOnly: true },
+        screenShare: { label: '屏幕共享', icon: 'monitor-up', enabled: true, webOnly: true },
+        uploadImage: { label: '上传图片', icon: 'image-plus', enabled: true },
+        todos:       { label: '待办',  icon: 'list-todo', enabled: true },
+        timer:       { label: '计时',  icon: 'timer', enabled: true },
+        commands:    { label: '命令',  icon: 'command', enabled: true },
       },
 
       // The quick popup and workspace Plans tab share one todo controller.
@@ -1394,7 +1394,7 @@ const App = {
           } else if (data.type === 'message_deleted') {
             this._applyMessageDeleted(data.message_id, sessionId);
           } else if (data.type === 'timer_expired') {
-            this.showToast(`⏱ 计时器「${data.label}」到时了！`);
+            this.showToast(`计时器「${data.label}」到时了！`, 'timer');
             if (this.showTimerPanel) this.refreshTimers();
             // system_trigger 已由后端直接处理，前端只负责 UI 刷新
           } else if (data.type === 'heartbeat_screenshot_request') {
@@ -1736,7 +1736,7 @@ const App = {
     async _sendSystemTrigger(label) {
       if (!this.currentSessionId) return;
       // Insert a timer_notice bubble (frontend-only, not saved to history)
-      this.messages.push({ role: 'timer_notice', content: `⏱ 计时器「${label}」时间到了！`, timestamp: this._now() });
+      this.messages.push({ role: 'timer_notice', content: `计时器「${label}」时间到了！`, timestamp: this._now() });
       await this.$nextTick();
       this.scrollToBottom();
 
@@ -2549,6 +2549,10 @@ const App = {
 
     /* ─────────────────── Helpers ─────────────────── */
 
+    toastIcon(type) {
+      return { success: 'check', error: 'circle-x', timer: 'timer' }[type];
+    },
+
     _now() {
       return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     },
@@ -2748,7 +2752,7 @@ const App = {
         });
         const data = await res.json();
         if (data.ok) {
-          this.statusText = '✓ 状态已更新';
+          this.statusText = this.t('statusAdjustSaved');
           this.editAffinityDelta = 0;
           await this.fetchStatus();
         } else {
@@ -3138,7 +3142,7 @@ const App = {
     replayTTS(displayIdx) {
       if (!this.ttsEnabled) {
         const prev = this.statusText;
-        this.statusText = '请先开启语音（🔊）';
+        this.statusText = this.t('statusEnableTtsFirst');
         setTimeout(() => { this.statusText = prev; }, 2000);
         return;
       }
@@ -3358,6 +3362,16 @@ const App = {
       if (es.tertiary_emotion) layers.push({ emotion: es.tertiary_emotion, intensity: es.tertiary_weight ?? 0.2 });
       return layers;
     },
+    toolbarStatus() {
+      const text = this.statusText;
+      if (this.engineWarning && text === this.t('statusReady')) {
+        return { icon: 'triangle-alert', text: this.engineWarning };
+      }
+      if (text === this.t('statusAdjustSaved')) return { icon: 'check', text };
+      if (text === this.t('statusEnableTtsFirst')) return { icon: 'volume-2', text };
+      const toast = this.toasts.at(-1);
+      return { icon: toast && toast.msg === text ? this.toastIcon(toast.type) : undefined, text };
+    },
     statusSummary() {
       const es = this.currentStatus.emotion_state;
       if (!es) return '状态';
@@ -3405,4 +3419,5 @@ const App = {
 const vueApp = Vue.createApp(App);
 // 注册全局组件（定义见 components.js）
 Object.entries(window.SK_COMPONENTS || {}).forEach(([name, def]) => vueApp.component(name, def));
+if (window.SK_ICONS) vueApp.component('app-icon', window.SK_ICONS.component);
 vueApp.mount('#app');

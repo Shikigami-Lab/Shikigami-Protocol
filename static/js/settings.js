@@ -77,14 +77,14 @@ const SettingsMixin = {
       settingsScrollTargetTab: '',
       memorySettingsScope: 'global',
       settingsTabs: [
-        { id: 'onboarding', labelZh: '新手引导', labelEn: 'First steps', shortEn: 'Guide', icon: '◇' },
-        { id: 'profiles',   labelZh: '人格',  labelEn: 'Profiles',   shortEn: 'Profile', icon: '◆' },
-        { id: 'llm',        labelZh: '模型',  labelEn: 'Models',     shortEn: 'Models',  icon: '◈' },
-        { id: 'tts',        labelZh: '语音',  labelEn: 'Voice',      shortEn: 'Voice',   icon: '♪' },
-        { id: 'behavior',   labelZh: '行为',  labelEn: 'Behavior',   shortEn: 'Behavior', icon: '◎' },
-        { id: 'memory',     labelZh: '记忆',  labelEn: 'Memory',     shortEn: 'Memory',  icon: '◫' },
-        { id: 'tools',      labelZh: '工具',  labelEn: 'Tools',      shortEn: 'Tools',   icon: '⚙' },
-        { id: 'system',     labelZh: '系统',  labelEn: 'System',     shortEn: 'System',  icon: '≡' },
+        { id: 'onboarding', labelZh: '新手引导', labelEn: 'First steps', shortEn: 'Guide', icon: 'book-open' },
+        { id: 'profiles',   labelZh: '人格',  labelEn: 'Profiles',   shortEn: 'Profile', icon: 'contact-round' },
+        { id: 'llm',        labelZh: '模型',  labelEn: 'Models',     shortEn: 'Models',  icon: 'cpu' },
+        { id: 'tts',        labelZh: '语音',  labelEn: 'Voice',      shortEn: 'Voice',   icon: 'mic' },
+        { id: 'behavior',   labelZh: '行为',  labelEn: 'Behavior',   shortEn: 'Behavior', icon: 'sliders-horizontal' },
+        { id: 'memory',     labelZh: '记忆',  labelEn: 'Memory',     shortEn: 'Memory',  icon: 'brain' },
+        { id: 'tools',      labelZh: '工具',  labelEn: 'Tools',      shortEn: 'Tools',   icon: 'wrench' },
+        { id: 'system',     labelZh: '系统',  labelEn: 'System',     shortEn: 'System',  icon: 'monitor' },
       ],
       // Standard emotion keys (filled from GET /settings/emotion_keys)
       emotionStandardKeys: [],
@@ -453,7 +453,7 @@ const SettingsMixin = {
       diaryResultPerDate: [], // 生成后的 per_date
       diaryMessage: '',
       diaryMessageOk: false,
-      syncFactsResult: '',
+      syncFactsResult: null,
       syncFactsLoading: false,
       forgettingRunLoading: false,
       forgettingPreview: null,   // 每日遗忘预览结果 { skip, reason, day_summary, decay, ... }
@@ -1038,8 +1038,7 @@ const SettingsMixin = {
 
     showToast(msg, type) {
       // 1. 状态栏（聊天界面底部）
-      const prefix = type === 'error' ? '❌ ' : type === 'success' ? '✓ ' : '';
-      this.statusText = prefix + msg;
+      this.statusText = msg;
       clearTimeout(this._toastTimer);
       this._toastTimer = setTimeout(() => { this.statusText = this.t('statusReady'); }, 3000);
       // 2. 固定悬浮 toast（设置面板打开时也可见）
@@ -1775,7 +1774,7 @@ const SettingsMixin = {
         return;
       }
       this.llmActivePreset = name;
-      this.showToast(`✓ 已激活 ${name}`, 'success');
+      this.showToast(`已激活 ${name}`, 'success');
       await this.loadLLMPresets();
     },
 
@@ -2063,7 +2062,7 @@ const SettingsMixin = {
           // 只刷 loadSessions 会出现「标题切到 B、气泡还是 A」
           if (typeof this.syncSessionsFromServer === 'function') await this.syncSessionsFromServer();
           else if (typeof this.loadSessions === 'function') await this.loadSessions();
-          this.showToast(loadIntoChat ? '✓ 已加入侧栏，可与其对话' : '✓ 已从侧栏移除，仅作储存（群聊用到时会按需加载）', 'success');
+          this.showToast(loadIntoChat ? '已加入侧栏，可与其对话' : '已从侧栏移除，仅作储存（群聊用到时会按需加载）', 'success');
         } else { p.load_into_chat = prev; this.showToast(`保存失败: ${data.detail || data.error || ''}`, 'error'); }
       } catch (e) {
         p.load_into_chat = prev;
@@ -2802,8 +2801,8 @@ const SettingsMixin = {
           }
         );
         if (r.ok) { if (!skipToast) this.showToast(this.t('toastSpecialDatesSaved'), 'success'); }
-        else { if (!skipToast) this.showToast('✗ 保存失败', 'error'); }
-      } catch (e) { if (!skipToast) this.showToast(`✗ ${e.message}`, 'error'); }
+        else { if (!skipToast) this.showToast('保存失败', 'error'); }
+      } catch (e) { if (!skipToast) this.showToast(`${e.message}`, 'error'); }
     },
 
     async onAvatarFileChange(event, profileId) {
@@ -3113,7 +3112,7 @@ const SettingsMixin = {
         const data = await res.json();
         if (res.ok && data.ok) {
           const warn = data.warnings && data.warnings.length ? `（${data.warnings.length} 个文件跳过）` : '';
-          this.showToast(`✓ 已备份 ${data.files.length} 个文件至 ${data.path}${warn}`, 'success');
+          this.showToast(`已备份 ${data.files.length} 个文件至 ${data.path}${warn}`, 'success');
         } else {
           this.showToast(`备份失败: ${data.detail || data.error || '未知错误'}`, 'error');
         }
@@ -3132,7 +3131,7 @@ const SettingsMixin = {
             this.memoryFacts = [];
             this.memoryEditingFact = null;
           }
-          this.showToast(`✓ 已清空事实库（${data.deleted} 条）`, 'success');
+          this.showToast(`已清空事实库（${data.deleted} 条）`, 'success');
           await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId), this.loadMemoryChangelog(profileId)]);
         } else {
           this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
@@ -3149,7 +3148,7 @@ const SettingsMixin = {
         const data = await res.json();
         if (res.ok && data.ok) {
           if (profileId === this.memoryProfileId) this.memoryVectors = [];
-          this.showToast(`✓ 已清空向量库（${data.deleted} 条）`, 'success');
+          this.showToast(`已清空向量库（${data.deleted} 条）`, 'success');
           await Promise.all([this.loadMemoryVectors(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
@@ -3168,7 +3167,7 @@ const SettingsMixin = {
           if (profileId === this.memoryProfileId) this.memorySummaries = [];
           await this.loadMemorySummaries(profileId);
           await this.loadMemoryStatus(profileId);
-          this.showToast(`✓ 已清空摘要（${data.deleted ?? 0} 条）`, 'success');
+          this.showToast(`已清空摘要（${data.deleted ?? 0} 条）`, 'success');
         } else {
           this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
         }
@@ -3574,7 +3573,7 @@ const SettingsMixin = {
         this.selectProfile(pid);
         this.profileWizardOpen = false;
         this.profileSubTab = 'prompts';
-        this.showToast('✓ 新人格已创建并保存', 'success');
+        this.showToast('新人格已创建并保存', 'success');
       } catch (e) {
         this.showToast(`创建失败：${e.message}`, 'error');
       }
@@ -3590,7 +3589,7 @@ const SettingsMixin = {
         this.selectProfile(this.selectedProfileId);
         this.profileWizardOpen = false;
         this.profileSubTab = 'prompts';
-        this.showToast('✓ 已覆盖当前人格并保存', 'success');
+        this.showToast('已覆盖当前人格并保存', 'success');
       } catch (e) {
         this.showToast(`保存失败：${e.message}`, 'error');
       }
@@ -4546,7 +4545,7 @@ const SettingsMixin = {
       this.diaryResultPerDate = [];
       this.diaryMessage = '';
       this.diaryPreviewLoading = this.diaryLoading = false;
-      this.syncFactsResult = '';
+      this.syncFactsResult = null;
       this.syncFactsLoading = false;
       this.forgettingPreview = null;
       this.forgettingPreviewLoading = this.forgettingRunLoading = false;
@@ -4773,7 +4772,7 @@ const SettingsMixin = {
               && draft.content === content && draft.category === category && draft.weight === weight) {
             this.memoryFactForm = { content: '', category: 'other', weight: 1.0 };
           }
-          this.showToast('✓ 事实已添加', 'success');
+          this.showToast('事实已添加', 'success');
           await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`添加失败: ${data.detail || data.error || ''}`, 'error');
@@ -4804,7 +4803,7 @@ const SettingsMixin = {
           if (this.memoryEditingFact === draft && draft.content === content
               && draft.category === category && draft.weight === weight) this.memoryEditingFact = null;
           await this.loadMemoryFacts(profileId);
-          this.showToast('✓ 事实已更新', 'success');
+          this.showToast('事实已更新', 'success');
         } else {
           this.showToast(`更新失败: ${data.error || ''}`, 'error');
         }
@@ -4821,7 +4820,7 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok && data.ok) {
-          this.showToast('✓ 事实已删除', 'success');
+          this.showToast('事实已删除', 'success');
           await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`删除失败: ${data.error || ''}`, 'error');
@@ -4841,7 +4840,7 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok && data.ok) {
-          this.showToast(newPinned ? '📌 已设为永久显示' : '✓ 已取消永久显示', 'success');
+          this.showToast(newPinned ? '已设为永久显示' : '已取消永久显示', 'success');
           await this.loadMemoryFacts(profileId);
         } else {
           this.showToast(`操作失败: ${data.error || ''}`, 'error');
@@ -4865,7 +4864,7 @@ const SettingsMixin = {
           if (this.memoryViewGeneration === generation && this.memoryVectorText === draft) this.memoryVectorText = '';
           await this.loadMemoryVectors(profileId);
           this.loadMemoryStatus(profileId);
-          this.showToast('✓ 向量已添加', 'success');
+          this.showToast('向量已添加', 'success');
         } else {
           this.showToast(`添加失败: ${data.error || ''}`, 'error');
         }
@@ -4882,7 +4881,7 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok && data.ok) {
-          this.showToast('✓ 向量已删除', 'success');
+          this.showToast('向量已删除', 'success');
           await Promise.all([this.loadMemoryVectors(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`删除失败: ${data.error || ''}`, 'error');
@@ -4896,7 +4895,7 @@ const SettingsMixin = {
       const current = this.beginMemoryRequest(profileId, 'syncFacts');
       if (!current) return;
       this.syncFactsLoading = true;
-      this.syncFactsResult = '同步中…';
+      this.syncFactsResult = { text: '同步中…', ok: false };
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.memoryVectorsSyncFacts(profileId),
@@ -4904,14 +4903,14 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok) {
-          if (current()) this.syncFactsResult = `✓ 新增 ${data.synced} 条（共 ${data.total} 条事实，向量库 ${data.vector_count} 条）`;
+          if (current()) this.syncFactsResult = { text: `新增 ${data.synced} 条（共 ${data.total} 条事实，向量库 ${data.vector_count} 条）`, ok: true };
           await this.loadMemoryVectors(profileId);
           await this.loadMemoryStatus(profileId);
         } else if (current()) {
-          this.syncFactsResult = `同步失败: ${data.detail || ''}`;
+          this.syncFactsResult = { text: `同步失败: ${data.detail || ''}`, ok: false };
         }
       } catch (e) {
-        if (current()) this.syncFactsResult = `同步失败: ${e.message}`;
+        if (current()) this.syncFactsResult = { text: `同步失败: ${e.message}`, ok: false };
       } finally {
         if (current()) this.syncFactsLoading = false;
       }
@@ -4947,7 +4946,7 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok && data.ok) {
-          this.showToast('✓ 已执行一次每日记忆/遗忘任务', 'success');
+          this.showToast('已执行一次每日记忆/遗忘任务', 'success');
           if (current()) {
             this.beginMemoryRequest(profileId, 'forgettingPreview');
             this.forgettingPreview = null;
@@ -5029,7 +5028,7 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok && data.ok) {
-          this.showToast('✓ 摘要已删除', 'success');
+          this.showToast('摘要已删除', 'success');
           await Promise.all([this.loadMemorySummaries(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`删除失败: ${data.error || ''}`, 'error');
@@ -5310,7 +5309,7 @@ const SettingsMixin = {
         );
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (data && data.ok) {
-          if (skipToast) this.setAutoSaveState('profileReflection', 'saved', profileId); else this.showToast('✓ 该人格自省 Prompt 已保存', 'success');
+          if (skipToast) this.setAutoSaveState('profileReflection', 'saved', profileId); else this.showToast('该人格自省 Prompt 已保存', 'success');
         } else {
           if (skipToast) this.setAutoSaveState('profileReflection', 'error', profileId);
           this.showToast('保存失败', 'error');
@@ -5408,7 +5407,7 @@ const SettingsMixin = {
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (data && data.ok) {
           this.personaEvolutionForm.core_anchor = data.core_anchor || '';
-          this.showToast('✓ 核心锚点已提炼', 'success');
+          this.showToast('核心锚点已提炼', 'success');
         } else {
           this.showToast('提炼失败', 'error');
         }
@@ -5431,7 +5430,7 @@ const SettingsMixin = {
         });
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (data && data.ok) {
-          this.showToast('✓ 已回滚', 'success');
+          this.showToast('已回滚', 'success');
           await this.loadPersonaEvolution(profileId);
         } else {
           this.showToast('回滚失败', 'error');
@@ -5453,7 +5452,7 @@ const SettingsMixin = {
         });
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (data && data.ok) {
-          this.showToast('✓ ' + (this.locale === 'en' ? 'Evolution complete' : '演化完成'), 'success');
+          this.showToast(this.locale === 'en' ? 'Evolution complete' : '演化完成', 'success');
           await this.loadPersonaEvolution(profileId);
         } else {
           const reason = (data && data.reason) || (this.locale === 'en' ? 'Evolution skipped' : '演化被跳过');
