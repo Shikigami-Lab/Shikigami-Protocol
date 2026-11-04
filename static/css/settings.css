@@ -16,12 +16,19 @@
 .settings-overlay.open { display: block; }
 
 /* ── Immersive Canvas — 全屏沉浸式面板 ── */
-.settings-drawer {
+:is(.settings-drawer, .profile-wizard-overlay) {
   --set-fs-section: 13px;
   --set-fs-label: 13px;
   --set-fs-hint: 12px;
   --set-fs-body: 14px;
   --set-color-secondary: var(--text-secondary);
+  --set-color-secondary: color-mix(in srgb, var(--text-secondary) 72%, var(--text-primary));
+  --settings-accent-ink: #000;
+}
+
+[data-theme="light"] :is(.settings-drawer, .profile-wizard-overlay) { --settings-accent-ink: #fff; }
+
+.settings-drawer {
   position: fixed;
   /* Center with margin:auto — avoids translate(-50%,-50%) + scale() half-pixel offsets
      that blur text at non-integer window scale (especially with dense flex columns). */
@@ -31,7 +38,8 @@
   min-width: 640px;
   height: min(90vh, 960px);
   max-height: 960px;
-  min-height: 480px;
+  min-height: min(480px, 100vh);
+  min-height: min(480px, 100dvh);
   margin: auto;
   transform: none;
   isolation: isolate;
@@ -50,6 +58,38 @@
 .settings-drawer.open {
   opacity: 1;
   pointer-events: all;
+}
+
+.settings-drawer :focus-visible,
+:is(.lorebook-create-modal, .lorebook-delete-modal) :focus-visible,
+.settings-drawer .toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The nested dialog must be focusable as soon as it opens. */
+:is(.lorebook-create-modal, .lorebook-delete-modal).open {
+  transition-property: opacity, transform;
+}
+
+.settings-avatar-picker {
+  position: relative;
+}
+
+.settings-avatar-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.settings-avatar-picker:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-drawer :is(.canvas-nav-item, .session-item, .preset-list-item):focus-visible {
+  outline-offset: -2px;
 }
 
 /* ── Canvas two-column layout ── */
@@ -118,7 +158,7 @@
   margin: 1px 8px;
   border: none;
   background: none;
-  color: var(--text-secondary);
+  color: var(--set-color-secondary);
   font-size: var(--fs-base);
   cursor: pointer;
   border-radius: var(--radius-md);
@@ -187,6 +227,7 @@
   gap: 8px;
   flex-shrink: 0;
   min-width: 108px;
+  max-width: 45%;
 }
 .persona-avatar-lg {
   width: 88px;
@@ -201,6 +242,8 @@
   font-weight: 700;
   color: var(--text-primary);
   text-align: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .persona-avatar-status {
   font-size: var(--fs-xs);
@@ -538,7 +581,7 @@
   transition: color var(--transition-base), border-color var(--transition-base);
 }
 .memory-panel-tabs button:hover { color: var(--text-primary); }
-.memory-panel-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.memory-panel-tabs button.active { color: var(--text-primary); border-bottom-color: var(--accent); }
 
 .memory-panel-body {
   flex: 1;
@@ -751,7 +794,11 @@
   overflow: hidden;
 }
 .preset-list-item:hover { background: var(--accent-dim); }
-.preset-list-item.active { background: var(--active-bg, rgba(108, 99, 255, 0.22)); color: var(--accent); }
+.preset-list-item.active {
+  background: var(--active-bg, rgba(108, 99, 255, 0.22));
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 var(--accent);
+}
 .preset-list-item-draggable { gap: 6px; }
 .preset-list-item.drag-over { background: var(--accent-dim); outline: 1px dashed var(--accent); }
 .profile-drag-handle {
@@ -1054,6 +1101,12 @@ textarea.form-input {
 }
 .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
+.settings-drawer .toggle-switch input:not(:checked) + .toggle-slider {
+  box-shadow: inset 0 0 0 1px var(--text-secondary);
+}
+.settings-drawer .toggle-switch input:checked + .toggle-slider::before {
+  background: var(--settings-accent-ink);
+}
 
 /* ── Hint block (replaces inline hint divs) ── */
 .hint-block {
@@ -1142,6 +1195,17 @@ textarea.form-input {
   margin: 20px 0 12px;
   padding-bottom: 7px;
   border-bottom: 1px solid var(--border);
+}
+.settings-disclosure-btn {
+  width: 100%;
+  padding-inline: 0;
+  padding-top: 0;
+  border-inline: 0;
+  border-top: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: start;
+  cursor: pointer;
 }
 .section-divider.settings-section-first { margin-top: 0; }
 /* Reduced from 28px: cards now have margin-bottom:16px, so total gap stays ~36px */
@@ -1327,7 +1391,7 @@ textarea.form-input {
   white-space: nowrap;
 }
 .s-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.s-btn-primary { background: var(--accent); color: #fff; }
+.s-btn-primary { background: var(--accent); color: var(--settings-accent-ink, #fff); }
 .s-btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .s-btn-secondary {
   background: none;
@@ -1366,6 +1430,13 @@ textarea.form-input {
   overflow: hidden;
 }
 .template-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
   padding: 9px 14px;
   cursor: pointer;
   font-size: var(--fs-md);
@@ -1465,7 +1536,7 @@ textarea.form-input {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
+  color: var(--set-color-secondary);
   word-break: keep-all;
 }
 
@@ -2026,6 +2097,12 @@ textarea.form-input {
   box-shadow: 0 3px 10px rgba(0,0,0,0.10);
 }
 .section-collapsible-header {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: start;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2056,9 +2133,89 @@ textarea.form-input {
   }
   .llm-split { flex-direction: column; }
   .preset-list-col { width: 100%; flex-direction: row; flex-wrap: wrap; }
-  .preset-list-item { flex: none; }
+  .preset-list-col .preset-list-item { max-width: 100%; }
+  .llm-split .btn-row { flex-wrap: wrap; }
+  .llm-split .btn-row > * {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .llm-split .param-label {
+    width: auto;
+    flex: 0 1 150px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .llm-split .param-val {
+    width: auto;
+    min-width: 42px;
+  }
   .profile-split { flex-direction: column; }
-  .profile-list-col { width: 100%; flex-direction: row; flex-wrap: wrap; }
+  .profile-list-col { width: 100%; max-width: none; flex: none; }
+  .profile-list-col .session-name {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .profile-detail-col { width: 100%; }
+
+  .theme-picker {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 70px), 1fr));
+    gap: 10px;
+    max-width: 362px;
+  }
+  .theme-card,
+  .theme-swatch { width: 100%; }
+
+  .memory-canvas-content .param-row { flex-wrap: wrap; }
+  .memory-canvas-content .param-row > .param-label {
+    flex: 1 1 130px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .memory-panel-content > .param-row > .param-label { flex-basis: 100%; }
+  .memory-panel-content > .param-row > .form-select {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .memory-panel-settings .param-row > .form-select:not(.mem-time-select) {
+    flex: 1 1 120px;
+    max-width: 100%;
+  }
+  .memory-canvas-content .param-row-time > .param-label { flex-basis: 90px; }
+  .memory-canvas-content .param-row-time > .mem-time-select {
+    flex: 0 0 56px;
+    padding-right: 22px;
+    background-position: right 6px center;
+  }
+  .settings-drawer .memory-canvas-content .param-row .form-select[style*="padding"] {
+    padding-right: 28px !important; /* Keep the dropdown arrow clear of the selection. */
+  }
+  .memory-canvas-content .form-select { text-overflow: ellipsis; }
+  .memory-canvas-content .mem-zone-profile-select {
+    flex: 1 1 130px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .memory-canvas-content .mem-add-form { align-items: center; }
+  .memory-canvas-content .mem-add-form > .form-input { flex-basis: 100% !important; }
+  .memory-canvas-content .mem-add-form > .form-select {
+    flex: 1 1 85px;
+    padding-right: 28px;
+  }
+  .memory-canvas-content .mem-subtab-btn { padding-inline: 10px; }
+  .memory-canvas-content .memory-panel-sub .s-btn {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .memory-canvas-content .mem-diary-preview-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-wrap: anywhere;
+  }
+  .memory-canvas-content .mem-forgetting-preview-table .mem-diary-preview-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
 
   /* ── Header 溢出修复 ── */
   /* 情绪/能量按钮：隐藏 energy bar，去掉 min-width，只留情绪文字标签 */
@@ -2171,7 +2328,7 @@ textarea.form-input {
 }
 .mem-subtab-btn:hover:not(:disabled) { color: var(--text-primary); }
 .mem-subtab-btn.active {
-  color: var(--accent, #7c6cf0);
+  color: var(--text-primary);
   border-bottom-color: var(--accent, #7c6cf0);
   font-weight: 600;
 }
@@ -2872,11 +3029,30 @@ textarea.form-input {
 
   /* Memory canvas: adjust negative pull-out margins to match reduced padding */
   .memory-canvas-content { margin: -14px -16px !important; }
+  .memory-canvas-content .memory-panel-tabs,
+  .memory-canvas-body { padding-inline: 16px; }
 
   /* Persona stats block: stack vertically on narrow screens */
   .persona-canvas-header { flex-direction: column; align-items: center; gap: 16px; }
+  .persona-avatar-block { max-width: 100%; }
   .persona-stats-block { width: 100%; }
   .persona-radar-wrap { margin: 0 auto; }
+}
+
+@media (max-width: 440px) {
+  .canvas-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    height: auto;
+  }
+  .canvas-nav-item {
+    min-width: 0;
+    min-height: 44px;
+    padding: 4px;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* ── 入门 / 新手引导 ── */
@@ -2901,11 +3077,9 @@ textarea.form-input {
   color: var(--text-secondary);
 }
 .setup-guide-doc-links a {
-  color: var(--accent);
-  text-decoration: none;
-}
-.setup-guide-doc-links a:hover {
+  color: var(--text-primary);
   text-decoration: underline;
+  text-underline-offset: 0.16em;
 }
 .setup-guide-doc-sep {
   margin: 0 6px;
@@ -2977,13 +3151,6 @@ textarea.form-input {
   color: var(--text-secondary);
   margin: -6px 0 14px;
   padding: 0 2px;
-}
-.setup-guide-doc-links-dev a {
-  color: var(--accent);
-  text-decoration: none;
-}
-.setup-guide-doc-links-dev a:hover {
-  text-decoration: underline;
 }
 /* 新手引导：可选组件（镜像 / 向量 / TTS / STT），保持展开可见，避免 <details> 默认折叠导致「下载区消失」 */
 .setup-guide-optional-wrap {
@@ -3315,7 +3482,7 @@ textarea.form-input {
   background: var(--bg-elevated, var(--bg-app));
 }
 .profile-subtab-btn.active {
-  color: var(--accent);
+  color: var(--text-primary);
   border-color: var(--accent);
   background: var(--active-bg, rgba(120,86,255,0.12));
 }
@@ -3381,7 +3548,7 @@ textarea.form-input {
 .tri-btn:last-child { border-right: none; }
 .tri-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--settings-accent-ink, #fff);
 }
 .tri-btn:hover:not(.active) {
   background: var(--bg-app);
@@ -3752,13 +3919,24 @@ textarea.form-input {
 
 /* ── 记忆变更历史面板 ── */
 .mem-changelog { margin-top: var(--space-3); }
-/* Collapsible header row: the whole row toggles; the refresh button on the right uses @click.stop so it does not toggle */
-.mem-changelog-toggle {
+.mem-changelog-toggle,
+.mem-changelog-title-btn {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+.mem-changelog-title-btn,
+.mem-changelog-head {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
   cursor: pointer;
-  user-select: none;
+}
+.mem-changelog-title-btn {
+  flex: 1;
+  padding: 0;
 }
 .mem-changelog-count {
   color: var(--text-secondary);
@@ -3780,12 +3958,13 @@ textarea.form-input {
 .mem-changelog-entry.is-rolled-back { opacity: 0.55; }
 .mem-changelog-head {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  cursor: pointer;
   font-size: var(--fs-sm);
 }
+.settings-drawer .mem-changelog-head:focus-visible { outline-offset: -2px; }
 .mem-changelog-head:hover { background: var(--bg-elevated); }
 .mem-changelog-brief { color: var(--text-secondary); font-size: var(--fs-xs); }
 .mem-changelog-caret { margin-left: auto; color: var(--text-secondary); font-size: var(--fs-xs); }
@@ -3895,3 +4074,13 @@ textarea.form-input {
 .agent-settings-model .form-input { flex: 1; min-width: 120px; }
 .agent-settings-advanced { border-top: 1px solid var(--border); margin-top: var(--space-3); padding-top: var(--space-3); }
 .agent-settings-advanced summary { cursor: pointer; color: var(--text-secondary); font-size: var(--fs-sm); }
+
+.settings-save-status {
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.settings-save-status:not(:empty) { margin-inline-start: 0.65em; }
+.settings-save-status.is-error { font-weight: 600; }

@@ -73,6 +73,8 @@ const SettingsMixin = {
       settingsOpen: false,
       activeTab: 'profiles',
       settingsSectionTarget: '',
+      settingsTabScroll: {},
+      settingsScrollTargetTab: '',
       memorySettingsScope: 'global',
       settingsTabs: [
         { id: 'onboarding', labelZh: '新手引导', labelEn: 'First steps', shortEn: 'Guide', icon: '◇' },
@@ -307,12 +309,11 @@ const SettingsMixin = {
       systemEnvSaving: false,
       uiPrefsShowLauncher: true,
       uiPrefsSaving: false,
-      autoSaveState: null,   // null | 'saving' | 'saved'
+      settingsSaveStates: {},
       settingsWrites: new Map(),
       settingsWriteTimers: new Map(),
       settingsReadRevisions: {},
       profileWriteSnapshots: new Map(),
-      _autoSaveStateTimer: null,
       _systemFormLoaded: false,
 
       // ── Auto-updater ──────────────────────────────────────────────────────
@@ -565,6 +566,14 @@ const SettingsMixin = {
   },
 
   computed: {
+    settingsDialogName() {
+      if (this.showLorebookCreateModal) return 'lorebookCreate';
+      if (this.showLorebookDeleteConfirm) return 'lorebookDelete';
+      if (!this.settingsOpen) return '';
+      if (this.profileCreateModalOpen) return 'profileCreate';
+      if (this.profileWizardOpen) return 'profileWizard';
+      return 'settings';
+    },
     llmModelConnectionDirty() {
       const saved = this.llmPresets[this.selectedPresetName];
       return !saved
@@ -764,6 +773,10 @@ const SettingsMixin = {
   },
 
   watch: {
+    settingsDialogName: {
+      flush: 'sync',
+      handler: 'updateSettingsDialogFocus',
+    },
     ttsForm: {
       deep: true,
       handler() {
@@ -927,6 +940,7 @@ const SettingsMixin = {
       },
     },
     activeTab(newTab, oldTab) {
+      this.switchSettingsScroll(newTab, oldTab);
       this.confirmingAction = null;
       if (oldTab === 'onboarding' && this.setupDownloadPollId) {
         clearInterval(this.setupDownloadPollId);
@@ -987,6 +1001,10 @@ const SettingsMixin = {
         this.loadAgentSettings(false, false);
       }
     },
+  },
+
+  beforeUnmount() {
+    document.removeEventListener('keydown', this.handleSettingsDialogKeydown);
   },
 
   methods: {
@@ -1066,6 +1084,26 @@ const SettingsMixin = {
 
     /* ─────────────── Drawer ─────────────── */
 
+    settingsScrollContainer(tab) {
+      const body = this.$refs?.settingsBodyScroll;
+      if (tab === 'memory') return body?.querySelector('.memory-canvas-body');
+      return body;
+    },
+
+    switchSettingsScroll(newTab, oldTab) {
+      const anchored = this.settingsScrollTargetTab === newTab;
+      this.settingsScrollTargetTab = '';
+      if (!this.settingsOpen || !this.$refs?.settingsBodyScroll) return;
+      const previous = this.settingsScrollContainer(oldTab);
+      if (previous && oldTab) this.settingsTabScroll[oldTab] = previous.scrollTop;
+      if (anchored) return;
+      this.$nextTick(() => {
+        if (!this.settingsOpen || this.activeTab !== newTab) return;
+        const current = this.settingsScrollContainer(newTab);
+        if (current) current.scrollTop = this.settingsTabScroll[newTab] ?? 0;
+      });
+    },
+
     openSettingsSection(tab, target, subtab) {
       if (tab === 'behavior' && subtab) this.behaviorSubTab = subtab;
       if (tab === 'profiles' && subtab) this.profileSubTab = subtab;
@@ -1074,12 +1112,101 @@ const SettingsMixin = {
         this.memorySettingsScope = 'persona';
       }
       this.settingsSectionTarget = target;
+      if (this.activeTab !== tab) this.settingsScrollTargetTab = tab;
       this.activeTab = tab;
       this.$nextTick(() => {
+        if (!this.settingsOpen || this.activeTab !== tab) return;
         const section = document.getElementById(target);
         section?.scrollIntoView({ block: 'start' });
         section?.focus({ preventScroll: true });
       });
+    },
+
+    updateSettingsDialogFocus(name) {
+      const stack = this._settingsDialogStack ??= [];
+      const parentIndex = stack.findIndex(dialog => dialog.name === name);
+      let returnTo;
+      if (!name) {
+        returnTo = stack[0]?.opener;
+        stack.length = 0;
+        document.removeEventListener('keydown', this.handleSettingsDialogKeydown);
+      } else if (parentIndex !== -1) {
+        returnTo = stack[parentIndex + 1]?.opener;
+        stack.length = parentIndex + 1;
+      } else {
+        if (!stack.length) document.addEventListener('keydown', this.handleSettingsDialogKeydown);
+        stack.push({ name, opener: document.activeElement });
+      }
+
+      // Capture the opener before Vue makes it inert, then wait for the new refs.
+      queueMicrotask(() => {
+        this.$nextTick(() => {
+          if (this.settingsDialogName !== name) return;
+          const dialog = this.$refs[name + 'Dialog'];
+          if (returnTo?.isConnected && (!dialog || dialog.contains(returnTo))) {
+            returnTo.focus({ preventScroll: true });
+            if (document.activeElement === returnTo && returnTo !== document.body) return;
+          }
+          if (!dialog) {
+            const workspaceModal = this.agentWorkspaceOpen && this.agentDrawerNarrow
+              && !this.currentGroupId && this.currentSessionId;
+            const fallback = workspaceModal ? this.$refs.agentWorkspaceClose : this.$refs.settingsTrigger;
+            fallback?.focus({ preventScroll: true });
+            return;
+          }
+          const controls = this.settingsDialogControls(dialog);
+          const initial = controls.find(control => control.hasAttribute('data-settings-initial-focus'));
+          (initial || controls[0] || dialog).focus({ preventScroll: true });
+          if (name === 'lorebookCreate') initial?.select();
+        });
+      });
+    },
+
+    settingsDialogControls(dialog) {
+      return Array.from(dialog.querySelectorAll(
+        'a[href], button, input:not([type="hidden"]), select, textarea, summary, [contenteditable], [tabindex]'
+      )).filter(control => {
+        if (control.tabIndex < 0 || control.matches(':disabled') || control.closest('[inert]')
+            || !control.getClientRects().length || getComputedStyle(control).visibility !== 'visible') return false;
+        // Chromium can expose client rects for content hidden by a closed disclosure.
+        for (let parent = control.parentElement; parent && parent !== dialog; parent = parent.parentElement) {
+          if (parent.tagName === 'DETAILS' && !parent.open
+              && !parent.querySelector(':scope > summary')?.contains(control)) return false;
+        }
+        return true;
+      });
+    },
+
+    handleSettingsDialogKeydown(event) {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      const name = this.settingsDialogName;
+      const dialog = this.$refs[name + 'Dialog'];
+      if (!dialog) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (event.repeat) return;
+        if (name === 'settings' && this.llmShowNewMenu && event.target.closest?.('.preset-list-actions')) {
+          this.llmShowNewMenu = false;
+          this.$refs.llmNewPresetTrigger?.focus();
+          return;
+        }
+        switch (name) {
+          case 'lorebookCreate': this.cancelLorebookCreateModal(); break;
+          case 'lorebookDelete': this.cancelLorebookDeleteDialog(); break;
+          case 'profileCreate': this.cancelProfileCreateModal(); break;
+          case 'profileWizard': this.profileWizardOpen = false; break;
+          case 'settings': this.closeSettings(); break;
+        }
+      } else if (event.key === 'Tab') {
+        const controls = this.settingsDialogControls(dialog);
+        const first = controls[0], last = controls[controls.length - 1];
+        const active = document.activeElement;
+        if (!first || !dialog.contains(active) || active === dialog || active === (event.shiftKey ? first : last)) {
+          event.preventDefault();
+          ((event.shiftKey ? last : first) || dialog).focus();
+        }
+      }
     },
 
     openSettings() {
@@ -1116,9 +1243,9 @@ const SettingsMixin = {
         this.setupDownloadPollId = null;
       }
       this.settingsOpen = false;
+      this.profileWizardOpen = false;
+      this.profileCreateModalOpen = false;
       this.confirmingAction = null;
-      const active = document.activeElement;
-      if (active && typeof active.blur === 'function') active.blur();
     },
 
     onboardingBundleTitle(b) {
@@ -1434,7 +1561,9 @@ const SettingsMixin = {
     },
 
     handleLLMModelKeydown(event) {
-      if (event.key === 'Escape') {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Escape' && this.llmModelDropdownOpen) {
+        event.preventDefault();
         this.closeLLMModelDropdown();
         return;
       }
@@ -1561,6 +1690,7 @@ const SettingsMixin = {
 
     async createLLMPreset(templateKey) {
       this.llmShowNewMenu = false;
+      this.$refs?.llmNewPresetTrigger?.focus();
       const tmpl = PRESET_TEMPLATES[templateKey] || PRESET_TEMPLATES.custom;
       // Find a unique name
       let name = tmpl.name;
@@ -2252,13 +2382,6 @@ const SettingsMixin = {
     openLorebookCreateModal() {
       this.lorebookCreateNameDraft = this.t('lblNewLorebookDefaultName');
       this.showLorebookCreateModal = true;
-      this.$nextTick(() => {
-        const el = document.getElementById('lorebook-create-name-input');
-        if (el) {
-          el.focus();
-          el.select();
-        }
-      });
     },
 
     cancelLorebookCreateModal() {
@@ -2434,7 +2557,7 @@ const SettingsMixin = {
 
     async writeProfileSnapshot(profileId, body, skipToast) {
       this.profileSaving = true;
-      if (skipToast) this.setAutoSaveState('saving');
+      if (skipToast) this.setAutoSaveState('profile', 'saving', profileId);
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.profile(profileId),
@@ -2446,18 +2569,18 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok && data.ok) {
-          if (skipToast) this.setAutoSaveState('saved'); else this.showToast(this.t('toastProfileSaved'), 'success');
+          if (skipToast) this.setAutoSaveState('profile', 'saved', profileId); else this.showToast(this.t('toastProfileSaved'), 'success');
           await this.loadProfiles();
           if (this.profileWriteSnapshots.get(profileId) === body) {
             this.profileWriteSnapshots.delete(profileId);
           }
           await this.loadSessions(); // refresh sidebar display names
         } else {
-          if (skipToast) this.setAutoSaveState(null);
+          if (skipToast) this.setAutoSaveState('profile', 'error', profileId);
           if (!skipToast) this.showToast(`保存失败: ${data.error || ''}`, 'error');
         }
       } catch (e) {
-        if (skipToast) this.setAutoSaveState(null);
+        if (skipToast) this.setAutoSaveState('profile', 'error', profileId);
         if (!skipToast) this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.profileSaving = false;
@@ -2630,17 +2753,17 @@ const SettingsMixin = {
 
     async writeProfileEngineSnapshot(profileId, body, skipToast) {
       this.profileEnginesSaving = true;
-      if (skipToast) this.setAutoSaveState('saving');
+      if (skipToast) this.setAutoSaveState('profileEngine', 'saving', profileId);
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.profileEngineConfig(profileId),
           { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
         );
         const data = res.ok ? await res.json().catch(() => null) : null;
-        if (data && data.ok) { if (skipToast) this.setAutoSaveState('saved'); else this.showToast(this.t('toastEngineConfigSaved'), 'success'); }
-        else { if (skipToast) this.setAutoSaveState(null); else this.showToast('保存失败', 'error'); }
+        if (data && data.ok) { if (skipToast) this.setAutoSaveState('profileEngine', 'saved', profileId); else this.showToast(this.t('toastEngineConfigSaved'), 'success'); }
+        else { if (skipToast) this.setAutoSaveState('profileEngine', 'error', profileId); else this.showToast('保存失败', 'error'); }
       } catch (e) {
-        if (skipToast) this.setAutoSaveState(null); else this.showToast(`保存失败: ${e.message}`, 'error');
+        if (skipToast) this.setAutoSaveState('profileEngine', 'error', profileId); else this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.profileEnginesSaving = false;
       }
@@ -2708,12 +2831,8 @@ const SettingsMixin = {
 
     /** Electron 下 window.prompt 常不可用，改用设置内弹窗 */
     openProfileCreateModal() {
-      this.profileCreateModalOpen = true;
       this.profileCreateNameDraft = '';
-      this.$nextTick(() => {
-        const el = document.getElementById('profile-create-name-input');
-        if (el) el.focus();
-      });
+      this.profileCreateModalOpen = true;
     },
     cancelProfileCreateModal() {
       if (this.profileCreateSaving) return;
@@ -3588,7 +3707,7 @@ const SettingsMixin = {
 
     async writeSystemConfig(body, silent) {
       this.systemSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      if (silent) this.setAutoSaveState('system', 'saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSystem(), {
           method: 'POST',
@@ -3596,11 +3715,11 @@ const SettingsMixin = {
           body,
         });
         const data = await res.json();
-        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastSystemSaved'), 'success'); }
-        else { if (silent) this.setAutoSaveState(null); this.showToast(`保存失败: ${data.error || ''}`, 'error'); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('system', 'saved'); else this.showToast(this.t('toastSystemSaved'), 'success'); }
+        else { if (silent) this.setAutoSaveState('system', 'error'); this.showToast(`${this.t('settingsSaveFailed')} · ${data.error || ''}`, 'error'); }
       } catch (e) {
-        if (silent) this.setAutoSaveState(null);
-        this.showToast(`保存失败: ${e.message}`, 'error');
+        if (silent) this.setAutoSaveState('system', 'error');
+        this.showToast(`${this.t('settingsSaveFailed')} · ${e.message}`, 'error');
       } finally {
         this.systemSaving = false;
       }
@@ -3622,7 +3741,7 @@ const SettingsMixin = {
 
     async writeSystemEnv(body, silent) {
       this.systemEnvSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      this.setAutoSaveState('proxy', 'saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSystemEnv(), {
           method: 'POST',
@@ -3632,11 +3751,11 @@ const SettingsMixin = {
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
         if (Object.hasOwn(data, 'http_proxy') && body === JSON.stringify(this.systemEnvForm)) this.applySystemEnv(data);
-        if (silent) this.setAutoSaveState('saved');
-        else this.showToast(this.t('toastEnvSaved'), 'success');
+        this.setAutoSaveState('proxy', 'saved');
+        if (!silent) this.showToast(this.t('toastEnvSaved'), 'success');
       } catch (e) {
-        if (silent) this.setAutoSaveState(null);
-        this.showToast(`保存失败: ${e.message}`, 'error');
+        this.setAutoSaveState('proxy', 'error');
+        this.showToast(`${this.t('settingsSaveFailed')} · ${e.message}`, 'error');
       } finally {
         this.systemEnvSaving = false;
       }
@@ -3697,7 +3816,7 @@ const SettingsMixin = {
     async saveEnginesConfig(silent = false) {
       if (this.enginesSaving) return;
       this.enginesSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      if (silent) this.setAutoSaveState('engines', 'saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsEngines(), {
           method: 'POST',
@@ -3714,9 +3833,11 @@ const SettingsMixin = {
           }),
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastEnginesSaved'), 'success'); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('engines', 'saved'); else this.showToast(this.t('toastEnginesSaved'), 'success'); }
+        else if (silent) this.setAutoSaveState('engines', 'error');
         else this.showToast(`保存失败: ${data.error || ''}`, 'error');
       } catch (e) {
+        if (silent) this.setAutoSaveState('engines', 'error');
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.enginesSaving = false;
@@ -3739,7 +3860,7 @@ const SettingsMixin = {
     async saveUserPersona(silent = false) {
       if (this.userPersonaSaving) return;
       this.userPersonaSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      if (silent) this.setAutoSaveState('myProfile', 'saving');
       try {
         const res = await fetch(getBaseUrl() + '/settings/user_persona', {
           method: 'POST',
@@ -3750,10 +3871,11 @@ const SettingsMixin = {
           }),
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastSaved') || '已保存', 'success'); }
-        else { if (silent) this.setAutoSaveState(null); this.showToast(`保存失败: ${data.error || ''}`, 'error'); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('myProfile', 'saved'); else this.showToast(this.t('toastSaved') || '已保存', 'success'); }
+        else { if (silent) this.setAutoSaveState('myProfile', 'error'); this.showToast(`${this.t('settingsSaveFailed')} · ${data.error || ''}`, 'error'); }
       } catch (e) {
-        this.showToast(`保存失败: ${e.message}`, 'error');
+        if (silent) this.setAutoSaveState('myProfile', 'error');
+        this.showToast(`${this.t('settingsSaveFailed')} · ${e.message}`, 'error');
       } finally {
         this.userPersonaSaving = false;
       }
@@ -3868,16 +3990,17 @@ const SettingsMixin = {
       const pid = this.selectedProfileId;
       if (!pid) return;
       try {
-        if (silent) this.setAutoSaveState('saving');
+        if (silent) this.setAutoSaveState('portraitContent', 'saving', pid);
         const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/edit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: this.userPortraitForm.content || '' }),
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); }
-        else { if (silent) this.setAutoSaveState(null); this.showToast('画像保存失败', 'error'); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('portraitContent', 'saved', pid); }
+        else { if (silent) this.setAutoSaveState('portraitContent', 'error', pid); this.showToast('画像保存失败', 'error'); }
       } catch (e) {
+        if (silent) this.setAutoSaveState('portraitContent', 'error', pid);
         this.showToast(`画像保存失败: ${e.message}`, 'error');
       }
     },
@@ -3886,7 +4009,7 @@ const SettingsMixin = {
       const pid = this.selectedProfileId;
       if (!pid) return;
       try {
-        if (silent) this.setAutoSaveState('saving');
+        if (silent) this.setAutoSaveState('portraitConfig', 'saving', pid);
         const f = this.userPortraitForm;
         const res = await fetch(getBaseUrl() + `/profiles/${encodeURIComponent(pid)}/user_portrait/config`, {
           method: 'POST',
@@ -3903,9 +4026,10 @@ const SettingsMixin = {
           }),
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); }
-        else { if (silent) this.setAutoSaveState(null); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('portraitConfig', 'saved', pid); }
+        else { if (silent) this.setAutoSaveState('portraitConfig', 'error', pid); }
       } catch (e) {
+        if (silent) this.setAutoSaveState('portraitConfig', 'error', pid);
         console.error('[settings] saveUserPortraitConfig:', e);
       }
     },
@@ -4011,7 +4135,7 @@ const SettingsMixin = {
     async saveAnalysisModel(silent = false) {
       if (this.analysisModelSaving) return;
       this.analysisModelSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      if (silent) this.setAutoSaveState('analysis', 'saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSecondaryModels(), {
           method: 'POST',
@@ -4027,10 +4151,11 @@ const SettingsMixin = {
           }),
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastAnalysisModelSaved'), 'success'); }
-        else { if (silent) this.setAutoSaveState(null); this.showToast(`保存失败: ${data.error || ''}`, 'error'); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('analysis', 'saved'); else this.showToast(this.t('toastAnalysisModelSaved'), 'success'); }
+        else { if (silent) this.setAutoSaveState('analysis', 'error'); this.showToast(`${this.t('settingsSaveFailed')} · ${data.error || ''}`, 'error'); }
       } catch (e) {
-        this.showToast(`保存失败: ${e.message}`, 'error');
+        if (silent) this.setAutoSaveState('analysis', 'error');
+        this.showToast(`${this.t('settingsSaveFailed')} · ${e.message}`, 'error');
       } finally {
         this.analysisModelSaving = false;
       }
@@ -4166,7 +4291,7 @@ const SettingsMixin = {
     async saveEmbeddingConfig(silent = false) {
       if (this.embeddingSaving) return;
       this.embeddingSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      if (silent) this.setAutoSaveState('embedding', 'saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsEmbedding(), {
           method: 'POST',
@@ -4182,14 +4307,16 @@ const SettingsMixin = {
           }),
         });
         const d = await res.json();
-        if (d.ok) {
+        if (res.ok && d.ok) {
           this.embeddingForm.api_key = '';
           await this.loadEmbeddingConfig();
-          if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastEmbeddingSaved'), 'success');
+          if (silent) this.setAutoSaveState('embedding', 'saved'); else this.showToast(this.t('toastEmbeddingSaved'), 'success');
         } else {
-          this.showToast(d.error || this.t('toastSaveFailed'), 'error');
+          if (silent) this.setAutoSaveState('embedding', 'error');
+          this.showToast(d.error || d.detail?.message || this.t('toastSaveFailed'), 'error');
         }
       } catch (e) {
+        if (silent) this.setAutoSaveState('embedding', 'error');
         this.showToast(this.t('toastSaveFailed') + ': ' + e.message, 'error');
       } finally {
         this.embeddingSaving = false;
@@ -4972,7 +5099,7 @@ const SettingsMixin = {
 
     async writeReflectionConfig(body, silent) {
       this.reflectionSaving = true;
-      if (silent) this.setAutoSaveState('saving');
+      if (silent) this.setAutoSaveState('reflection', 'saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsReflection(), {
           method: 'POST',
@@ -4981,14 +5108,14 @@ const SettingsMixin = {
         });
         const data = await res.json();
         if (res.ok && data.ok) {
-          if (silent) this.setAutoSaveState('saved'); else this.showToast('自省与主动设置已保存', 'success');
+          if (silent) this.setAutoSaveState('reflection', 'saved'); else this.showToast(this.t('settingsSaved'), 'success');
         } else {
-          if (silent) this.setAutoSaveState(null);
-          this.showToast(`保存失败: ${data.detail || ''}`, 'error');
+          if (silent) this.setAutoSaveState('reflection', 'error');
+          this.showToast(`${this.t('settingsSaveFailed')} · ${data.detail || ''}`, 'error');
         }
       } catch (e) {
-        if (silent) this.setAutoSaveState(null);
-        this.showToast(`保存失败: ${e.message}`, 'error');
+        if (silent) this.setAutoSaveState('reflection', 'error');
+        this.showToast(`${this.t('settingsSaveFailed')} · ${e.message}`, 'error');
       } finally {
         this.reflectionSaving = false;
       }
@@ -5008,12 +5135,18 @@ const SettingsMixin = {
       this.selectMemoryProfile(profileId);
       return this.loadMemoryTabProfileConfig(profileId);
     },
-    /** 全局自动保存状态指示（saving → saved → null） */
-    setAutoSaveState(state) {
-      clearTimeout(this._autoSaveStateTimer);
-      this.autoSaveState = state;
+    settingsSaveState(scope, profileId = '') {
+      return this.settingsSaveStates[JSON.stringify([scope, profileId])]?.state || '';
+    },
+
+    setAutoSaveState(scope, state, profileId = '') {
+      const key = JSON.stringify([scope, profileId]);
+      const token = Symbol();
+      this.settingsSaveStates[key] = { state, token };
       if (state === 'saved') {
-        this._autoSaveStateTimer = setTimeout(() => { this.autoSaveState = null; }, 2000);
+        setTimeout(() => {
+          if (this.settingsSaveStates[key]?.token === token) delete this.settingsSaveStates[key];
+        }, 2200);
       }
     },
 
@@ -5161,7 +5294,7 @@ const SettingsMixin = {
 
     async writeReflectionProfileConfig(profileId, body, skipToast) {
       this.reflectionProfileSaving = true;
-      if (skipToast) this.setAutoSaveState('saving');
+      if (skipToast) this.setAutoSaveState('profileReflection', 'saving', profileId);
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.profileReflectionConfig(profileId),
@@ -5173,13 +5306,13 @@ const SettingsMixin = {
         );
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (data && data.ok) {
-          if (skipToast) this.setAutoSaveState('saved'); else this.showToast('✓ 该人格自省 Prompt 已保存', 'success');
+          if (skipToast) this.setAutoSaveState('profileReflection', 'saved', profileId); else this.showToast('✓ 该人格自省 Prompt 已保存', 'success');
         } else {
-          if (skipToast) this.setAutoSaveState(null);
+          if (skipToast) this.setAutoSaveState('profileReflection', 'error', profileId);
           this.showToast('保存失败', 'error');
         }
       } catch (e) {
-        if (skipToast) this.setAutoSaveState(null);
+        if (skipToast) this.setAutoSaveState('profileReflection', 'error', profileId);
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.reflectionProfileSaving = false;
@@ -5231,7 +5364,7 @@ const SettingsMixin = {
     async savePersonaEvolutionData() {
       const profileId = this.selectedProfileId;
       if (!profileId) return;
-      this.setAutoSaveState('saving');
+      this.setAutoSaveState('evolution', 'saving', profileId);
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.profilePersonaEvolution(profileId), {
           method: 'PUT',
@@ -5248,9 +5381,12 @@ const SettingsMixin = {
           }),
         });
         if (res.ok) {
-          this.setAutoSaveState('saved');
+          this.setAutoSaveState('evolution', 'saved', profileId);
+        } else {
+          this.setAutoSaveState('evolution', 'error', profileId);
         }
       } catch (e) {
+        this.setAutoSaveState('evolution', 'error', profileId);
         console.error('[settings] savePersonaEvolutionData:', e);
       }
     },

@@ -5,6 +5,14 @@
  * 这正是「把现有 markup 原样塞进组件」安全的原因。
  */
 window.SK_COMPONENTS = {
+  'settings-save-status': {
+    inject: ['gt'],
+    props: { state: String },
+    template: `<span class="settings-save-status" :class="{ 'is-error': state === 'error' }" role="status">
+      {{ state ? gt({ saving: 'settingsSaving', saved: 'settingsSaved', error: 'settingsSaveFailed' }[state]) : '' }}
+    </span>`,
+  },
+
 
   // Both surfaces delegate to the same parent controller and ownership guards.
   'todo-list': {
@@ -159,10 +167,10 @@ window.SK_COMPONENTS = {
     },
     template: `
       <div class="section-collapsible">
-        <div class="section-collapsible-header" @click="isOpen = !isOpen">
+        <button type="button" class="section-collapsible-header" :aria-expanded="isOpen" @click="isOpen = !isOpen">
           {{ title }}
-          <span>{{ isOpen ? '▲' : '▼' }}</span>
-        </div>
+          <span aria-hidden="true">{{ isOpen ? '▲' : '▼' }}</span>
+        </button>
         <div v-show="isOpen" class="section-collapsible-body" :class="bodyClass">
           <slot></slot>
         </div>

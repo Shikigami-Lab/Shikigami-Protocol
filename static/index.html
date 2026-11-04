@@ -11,12 +11,12 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20261102trisync1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261102trisync1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261105settings3" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261104toolmodel1"></script>
+  <script src="js/i18n.js?v=20261105settings3"></script>
 </head>
 <body>
 
@@ -30,7 +30,7 @@
   ></div>
 
   <!-- ════════════════ SIDEBAR ════════════════ -->
-  <aside class="sidebar" :class="{ open: sidebarOpen }" :inert="agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId">
+  <aside class="sidebar" :class="{ open: sidebarOpen }" :inert="!!settingsDialogName || (agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId)">
     <div class="sidebar-header">
       <div class="app-logo" aria-hidden="true"><img src="icon.png" alt="" class="app-logo-img" onerror="this.style.display='none';this.nextElementSibling?.classList.add('use-fallback');" /><span class="app-logo-fallback">式</span></div>
       <span class="app-name">Shikigami</span>
@@ -98,7 +98,7 @@
 
   <!-- ════════════════ 创建群组弹窗 ════════════════ -->
   <div class="create-group-overlay" :class="{ open: showCreateGroupModal }" @click.self="showCreateGroupModal = false"></div>
-  <div class="create-group-modal" :class="{ open: showCreateGroupModal }">
+  <div class="create-group-modal" :class="{ open: showCreateGroupModal }" :inert="!!settingsDialogName || !showCreateGroupModal">
     <div class="create-group-header">
       <span>{{ t('createGroupTitle') }}</span>
       <button type="button" class="create-group-close" @click="showCreateGroupModal = false">✕</button>
@@ -122,10 +122,12 @@
 
   <!-- ════════════════ 删除世界书确认 ════════════════ -->
   <div class="create-group-overlay" :class="{ open: showLorebookDeleteConfirm }" @click.self="cancelLorebookDeleteDialog"></div>
-  <div class="create-group-modal lorebook-delete-modal" :class="{ open: showLorebookDeleteConfirm }">
+  <div ref="lorebookDeleteDialog" class="create-group-modal lorebook-delete-modal" :class="{ open: showLorebookDeleteConfirm }"
+       role="dialog" :aria-label="t('lorebookDeleteModalTitle')" :aria-modal="settingsDialogName === 'lorebookDelete'"
+       tabindex="-1" :inert="settingsDialogName !== 'lorebookDelete'">
     <div class="create-group-header">
       <span>{{ t('lorebookDeleteModalTitle') }}</span>
-      <button type="button" class="create-group-close" @click="cancelLorebookDeleteDialog">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="cancelLorebookDeleteDialog">✕</button>
     </div>
     <div class="create-group-body">
       <p class="lorebook-delete-modal-text">{{ lorebookDeleteConfirmBody }}</p>
@@ -138,14 +140,16 @@
 
   <!-- ════════════════ 新建世界书（避免 Electron 中 window.prompt 无效） ════════════════ -->
   <div class="create-group-overlay" :class="{ open: showLorebookCreateModal }" @click.self="cancelLorebookCreateModal"></div>
-  <div class="create-group-modal lorebook-create-modal" :class="{ open: showLorebookCreateModal }">
+  <div ref="lorebookCreateDialog" class="create-group-modal lorebook-create-modal" :class="{ open: showLorebookCreateModal }"
+       role="dialog" :aria-label="t('btnNewLorebook')" :aria-modal="settingsDialogName === 'lorebookCreate'"
+       tabindex="-1" :inert="settingsDialogName !== 'lorebookCreate'">
     <div class="create-group-header">
       <span>{{ t('btnNewLorebook') }}</span>
-      <button type="button" class="create-group-close" @click="cancelLorebookCreateModal">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('settingsCloseDialog')" @click="cancelLorebookCreateModal">✕</button>
     </div>
     <div class="create-group-body">
       <label class="create-group-label" for="lorebook-create-name-input">{{ t('phNewLorebookName') }}</label>
-      <input id="lorebook-create-name-input" type="text" class="create-group-input" v-model="lorebookCreateNameDraft"
+      <input id="lorebook-create-name-input" data-settings-initial-focus type="text" class="create-group-input" v-model="lorebookCreateNameDraft"
         :placeholder="t('lblNewLorebookDefaultName')" autocomplete="off"
         @keydown.enter.prevent="confirmCreateLorebookFile" />
     </div>
@@ -157,7 +161,7 @@
 
   <!-- ════════════════ 群组设置弹窗（D1） ════════════════ -->
   <div class="create-group-overlay" :class="{ open: showGroupSettingsModal }" @click.self="showGroupSettingsModal = false"></div>
-  <div class="create-group-modal create-group-modal-settings" :class="{ open: showGroupSettingsModal }">
+  <div class="create-group-modal create-group-modal-settings" :class="{ open: showGroupSettingsModal }" :inert="!!settingsDialogName || !showGroupSettingsModal">
     <div class="create-group-header">
       <span>{{ t('groupSettingsTitle') }}</span>
       <button type="button" class="create-group-close" @click="showGroupSettingsModal = false">✕</button>
@@ -245,7 +249,7 @@
   </div>
 
   <!-- ════════════════ MAIN ════════════════ -->
-  <main class="chat-main" :inert="agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId">
+  <main class="chat-main" :inert="!!settingsDialogName || (agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId)">
 
     <!-- Header -->
     <header class="chat-header">
@@ -501,7 +505,7 @@
             </div>
           </div>
         </div>
-        <button class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
+        <button ref="settingsTrigger" class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
       </div>
     </header>
 
@@ -873,7 +877,7 @@
   <div v-if="agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && currentSessionId" class="agent-workspace-backdrop"
        aria-hidden="true" @click="closeAgentWorkspace"></div>
   <aside v-if="!currentGroupId && currentSessionId" v-show="agentWorkspaceOpen" ref="agentWorkspaceDrawer"
-         class="agent-workspace-drawer" id="agent-workspace-drawer" role="dialog"
+         class="agent-workspace-drawer" id="agent-workspace-drawer" role="dialog" :inert="!!settingsDialogName"
          :aria-modal="agentDrawerNarrow" aria-labelledby="agent-workspace-title" tabindex="-1"
          @keydown.esc.stop.prevent="closeAgentWorkspace" @keydown.tab="trapAgentWorkspaceFocus">
     <div class="agent-workspace-header">
@@ -980,23 +984,29 @@
   </aside>
 
   <!-- ════════════════ SETTINGS OVERLAY ════════════════ -->
-  <div class="settings-overlay" :class="{ open: settingsOpen }" @click="closeSettings()"></div>
+  <div class="settings-overlay" :class="{ open: settingsOpen }" aria-hidden="true"
+       @click="settingsDialogName === 'settings' && closeSettings()"></div>
 
   <!-- ════════════════ SETTINGS CANVAS ════════════════ -->
-  <div class="settings-drawer" :class="{ open: settingsOpen }">
-    <div class="canvas-layout">
+  <div class="settings-drawer" :class="{ open: settingsOpen }" :inert="!settingsOpen">
+    <div ref="settingsDialog" class="canvas-layout" role="dialog" :aria-label="t('headerSettingsBtn')"
+         :aria-modal="settingsDialogName === 'settings'" tabindex="-1" :inert="settingsDialogName !== 'settings'">
 
       <!-- Left navigation -->
       <div class="canvas-nav">
         <div class="canvas-nav-header">
           <span class="canvas-nav-title">{{ t('appName') }}</span>
-          <button class="canvas-close-btn" @click="closeSettings()" :title="t('settingsClose')">✕</button>
+          <button type="button" class="canvas-close-btn" data-settings-initial-focus
+                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')">✕</button>
         </div>
         <button
           v-for="tab in settingsTabs"
           :key="tab.id"
+          type="button"
           class="canvas-nav-item"
           :class="{ active: activeTab === tab.id }"
+          :aria-current="activeTab === tab.id ? 'true' : null"
+          :aria-label="locale === 'en' ? tab.labelEn : tab.labelZh"
           @click="activeTab = tab.id"
         >
           <span class="canvas-nav-icon">{{ tab.icon }}</span>
@@ -1009,9 +1019,8 @@
       <div class="canvas-content">
         <div class="canvas-content-header">
           <h2>{{ currentTabLabel }}</h2>
-          <span v-if="autoSaveState === 'saving'" style="font-size:12px;color:var(--text-secondary);margin-right:auto;margin-left:12px;">…</span>
-          <span v-else-if="autoSaveState === 'saved'" class="form-hint ok" style="margin-right:auto;margin-left:12px;">✓ {{ locale === 'en' ? 'Saved' : '已保存' }}</span>
-          <button class="canvas-mobile-close" @click="closeSettings()" title="关闭">✕</button>
+          <button type="button" class="canvas-mobile-close" data-settings-initial-focus
+                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')">✕</button>
         </div>
         <!-- Tab body -->
         <div class="settings-body" ref="settingsBodyScroll">
@@ -1352,6 +1361,8 @@
               v-for="(preset, name) in llmPresets"
               :key="name"
               class="preset-list-item"
+              role="button" tabindex="0" :aria-pressed="selectedPresetName === name"
+              @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()"
               :class="{ active: selectedPresetName === name }"
               @click="selectPreset(name)"
             >
@@ -1360,21 +1371,23 @@
             </div>
 
             <div class="preset-list-actions" style="position:relative;">
-              <button class="preset-action-btn" :title="t('titleAddPreset')" @click="llmShowNewMenu = !llmShowNewMenu">＋</button>
+              <button ref="llmNewPresetTrigger" type="button" class="preset-action-btn" :title="t('titleAddPreset')"
+                      :aria-label="t('titleAddPreset')" :aria-expanded="llmShowNewMenu"
+                      @click="llmShowNewMenu = !llmShowNewMenu">＋</button>
               <button
                 class="preset-action-btn"
-                :title="t('titleDeletePreset')"
+                :title="t('titleDeletePreset')" :aria-label="t('titleDeletePreset')"
                 :disabled="!selectedPresetName || selectedPresetName === llmActivePreset"
                 @click="deleteLLMPreset"
               >－</button>
 
               <!-- Template popup -->
               <div v-if="llmShowNewMenu" class="template-popup">
-                <div class="template-item" @click="createLLMPreset('openai')">OpenAI</div>
-                <div class="template-item" @click="createLLMPreset('gemini')">Google Gemini</div>
-                <div class="template-item" @click="createLLMPreset('ollama')">{{ t('llmNewPresetOllama') }}</div>
-                <div class="template-item" @click="createLLMPreset('lmstudio')">{{ t('llmNewPresetLMStudio') }}</div>
-                <div class="template-item" @click="createLLMPreset('custom')">{{ t('llmNewPresetCustom') }}</div>
+                <button type="button" class="template-item" @click="createLLMPreset('openai')">OpenAI</button>
+                <button type="button" class="template-item" @click="createLLMPreset('gemini')">Google Gemini</button>
+                <button type="button" class="template-item" @click="createLLMPreset('ollama')">{{ t('llmNewPresetOllama') }}</button>
+                <button type="button" class="template-item" @click="createLLMPreset('lmstudio')">{{ t('llmNewPresetLMStudio') }}</button>
+                <button type="button" class="template-item" @click="createLLMPreset('custom')">{{ t('llmNewPresetCustom') }}</button>
               </div>
             </div>
           </div>
@@ -1389,16 +1402,16 @@
               <div class="s-card">
 
                 <div class="form-field">
-                  <div class="form-label">{{ t('llmPresetNameLabel') }}</div>
-                  <input class="form-input" v-model="presetForm.name" placeholder="preset_name" />
+                  <label class="form-label" for="llm-preset-name">{{ t('llmPresetNameLabel') }}</label>
+                  <input class="form-input" id="llm-preset-name" v-model="presetForm.name" placeholder="preset_name" />
                   <p v-if="presetForm.name.trim() !== selectedPresetName && modelPresetDependencies(selectedPresetName).length" class="form-hint">
                     {{ t('llmPresetDependencyWarning').replace('{roles}', () => modelPresetDependencies(selectedPresetName).join(', ')) }}
                   </p>
                 </div>
 
                 <div class="form-field">
-                  <div class="form-label">{{ t('llmTypeLabel') }}</div>
-                  <select class="form-select" v-model="presetForm.type" @change="clearLLMModels">
+                  <label class="form-label" for="llm-provider-type">{{ t('llmTypeLabel') }}</label>
+                  <select class="form-select" id="llm-provider-type" v-model="presetForm.type" @change="clearLLMModels">
                     <option value="openai_compat">OpenAI / Compat</option>
                     <option value="gemini">Google Gemini</option>
                     <option value="ollama">{{ t('llmTypeOllama') }}</option>
@@ -1408,37 +1421,39 @@
                 </div>
 
                 <div class="form-field">
-                  <div class="form-label">API Key</div>
+                  <label class="form-label" for="llm-api-key">API Key</label>
                   <div class="key-wrapper">
                     <input
                       class="form-input"
                       :type="llmShowKey ? 'text' : 'password'"
-                      v-model="presetForm.api_key"
+                      id="llm-api-key" v-model="presetForm.api_key"
                       @input="clearLLMModels"
                       :placeholder="presetForm.has_key ? t('llmApiKeyExisting') : t('llmApiKeyPlaceholder')"
                     />
-                    <button class="key-toggle" @click="llmShowKey = !llmShowKey">{{ llmShowKey ? '🙈' : '👁' }}</button>
+                    <button type="button" class="key-toggle" @click="llmShowKey = !llmShowKey"
+                            :aria-label="t(llmShowKey ? 'btnHide' : 'btnShow') + ' ' + t('llmApiKey')">{{ llmShowKey ? '🙈' : '👁' }}</button>
                   </div>
                 </div>
 
                 <div class="form-field">
-                  <div class="form-label">Base URL</div>
-                  <input class="form-input" v-model="presetForm.base_url" @input="clearLLMModels" :placeholder="t('llmBaseUrlPlaceholderZh')" />
+                  <label class="form-label" for="llm-base-url">Base URL</label>
+                  <input class="form-input" id="llm-base-url" v-model="presetForm.base_url" @input="clearLLMModels" :placeholder="t('llmBaseUrlPlaceholderZh')" />
                 </div>
 
                 <div class="form-field">
-                  <div class="form-label">{{ t('llmModelNameLabel') }}</div>
+                  <label class="form-label" for="llm-model-name">{{ t('llmModelNameLabel') }}</label>
                   <div class="llm-model-picker-row">
                     <div class="llm-model-input-wrap">
-                      <input class="form-input" v-model="presetForm.model" autocomplete="off"
+                      <input id="llm-model-name" class="form-input" v-model="presetForm.model" autocomplete="off"
                         role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
                         :aria-expanded="llmModelDropdownOpen" aria-controls="llm-model-options"
+                        :aria-activedescendant="llmModelDropdownOpen && llmModelActiveIndex >= 0 ? 'llm-model-option-' + llmModelActiveIndex : null"
                         @focus="openLLMModelDropdown" @blur="closeLLMModelDropdown"
                         @input="filterLLMModelDropdown" @keydown="handleLLMModelKeydown"
                         placeholder="gpt-4o / gemini-2.5-flash / …" />
-                      <div v-if="llmModelDropdownOpen" id="llm-model-options" class="llm-model-options" role="listbox" @mousedown.prevent>
+                      <div v-show="llmModelDropdownOpen" id="llm-model-options" class="llm-model-options" role="listbox" :aria-label="t('llmModelNameLabel')" @mousedown.prevent>
                         <button v-for="(model, index) in filteredLLMModels" :key="model" type="button"
-                          class="llm-model-option" role="option"
+                          class="llm-model-option" role="option" tabindex="-1" :id="'llm-model-option-' + index"
                           :class="{ 'is-active': index === llmModelActiveIndex, 'is-selected': model === presetForm.model }"
                           :aria-selected="model === presetForm.model"
                           @mouseenter="llmModelActiveIndex = index" @click="selectLLMModel(model)">
@@ -1561,6 +1576,7 @@
 
         <!-- Analysis model (collapsible) — 情绪/好感度辅助模型 -->
         <collapsible-section :title="t('llmAnalysisSectionTitle')">
+                  <settings-save-status :state="settingsSaveState('analysis')"></settings-save-status>
             <p class="form-hint" style="margin-bottom:8px;">{{ t('hintAnalysisModelIntro') }}</p>
             <toggle-row style="margin-bottom:0;" :label="t('lblEnableAnalysis')" v-model="analysisModelEnabled"></toggle-row>
             <div class="form-field">
@@ -1690,6 +1706,7 @@
 
         <!-- VLM model (collapsible) — 图像识别 -->
         <collapsible-section id="model-vision-settings" tabindex="-1" :open="settingsSectionTarget === 'model-vision-settings' ? true : null" @update:open="settingsSectionTarget = ''" :title="t('secVlm')">
+            <settings-save-status :state="settingsSaveState('reflection')"></settings-save-status>
             <toggle-row :label="t('lblEnableVlm')" v-model="reflectionForm.vlm_enabled"></toggle-row>
 
             <div class="form-field" style="margin-top:8px;">
@@ -1725,6 +1742,7 @@
 
         <!-- Embedding model (collapsible) -->
         <collapsible-section :title="t('llmEmbeddingSectionTitle')">
+                  <settings-save-status :state="settingsSaveState('embedding')"></settings-save-status>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('tabEmbeddingDesc') }}</p>
 
             <div class="form-field">
@@ -1827,8 +1845,8 @@
 
         <!-- 子 Tab 导航 -->
         <div class="memory-panel-tabs">
-          <button type="button" :class="{ active: ttsSubTab === 'tts' }" @click="ttsSubTab='tts'">{{ t('ttsSubTabTts') }}</button>
-          <button type="button" :class="{ active: ttsSubTab === 'stt' }" @click="ttsSubTab='stt'; loadSttConfig()">{{ t('ttsSubTabStt') }}</button>
+          <button type="button" :aria-pressed="ttsSubTab === 'tts'" :class="{ active: ttsSubTab === 'tts' }" @click="ttsSubTab='tts'">{{ t('ttsSubTabTts') }}</button>
+          <button type="button" :aria-pressed="ttsSubTab === 'stt'" :class="{ active: ttsSubTab === 'stt' }" @click="ttsSubTab='stt'; loadSttConfig()">{{ t('ttsSubTabStt') }}</button>
         </div>
 
         <!-- ══ TTS 子页 ══ -->
@@ -1951,7 +1969,8 @@
                 <span class="param-val">{{ ttsForm.gptsovits_speed.toFixed(2) }}</span>
               </div>
               <!-- 高级参数（折叠） -->
-              <div class="section-divider" @click="ttsAdvancedOpen.gptsovits = !ttsAdvancedOpen.gptsovits"
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="ttsAdvancedOpen.gptsovits"
+                   @click="ttsAdvancedOpen.gptsovits = !ttsAdvancedOpen.gptsovits" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()"
                    style="cursor:pointer;user-select:none;">
                 {{ t('lblTtsAdvanced') }} {{ ttsAdvancedOpen.gptsovits ? '▲' : '▼' }}
               </div>
@@ -2105,7 +2124,8 @@
                 </div>
               </template>
               <!-- 高级参数（折叠） -->
-              <div class="section-divider" @click="ttsAdvancedOpen.qwen3 = !ttsAdvancedOpen.qwen3"
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="ttsAdvancedOpen.qwen3"
+                   @click="ttsAdvancedOpen.qwen3 = !ttsAdvancedOpen.qwen3" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()"
                    style="cursor:pointer;user-select:none;margin-bottom:0;">
                 {{ t('lblTtsAdvanced') }} {{ ttsAdvancedOpen.qwen3 ? '▲' : '▼' }}
               </div>
@@ -2164,7 +2184,7 @@
             <div class="param-row">
               <span class="param-label">{{ t('lblSttServerEnabled') }}</span>
               <label class="toggle-switch">
-                <input type="checkbox" :checked="sttConfig.enabled" @change="onSttServerEnabledToggle($event)" />
+                <input type="checkbox" :aria-label="t('lblSttServerEnabled')" :checked="sttConfig.enabled" @change="onSttServerEnabledToggle($event)" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -2172,7 +2192,7 @@
             <div class="param-row">
               <span class="param-label">{{ t('lblShowVoiceBtn') }}</span>
               <label class="toggle-switch">
-                <input type="checkbox" v-model="toolbarConfig.voiceInput.enabled" @change="_saveToolbarConfig()" />
+                <input type="checkbox" :aria-label="t('lblShowVoiceBtn')" v-model="toolbarConfig.voiceInput.enabled" @change="_saveToolbarConfig()" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -2201,7 +2221,7 @@
             <div class="param-row">
               <span class="param-label">{{ t('lblVadEnabled') }}</span>
               <label class="toggle-switch">
-                <input type="checkbox" v-model="voiceVadEnabled" @change="localStorage.setItem('voiceVadEnabled', voiceVadEnabled)" />
+                <input type="checkbox" :aria-label="t('lblVadEnabled')" v-model="voiceVadEnabled" @change="localStorage.setItem('voiceVadEnabled', voiceVadEnabled)" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -2287,6 +2307,9 @@
                 :class="{ active: selectedProfileId === p.profile_id, dragging: profileDragging && profileDragActiveId === p.profile_id, 'drag-over': profileDragOverId === p.profile_id }"
                 :draggable="supportsHtml5Drag"
                 :data-profile-id="p.profile_id"
+                role="button" tabindex="0" :aria-pressed="selectedProfileId === p.profile_id"
+                :aria-label="p.display_name || p.profile_id"
+                @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()"
                 @click="profileItemClick(p.profile_id)"
                 @dragstart="profileDragStart($event, p.profile_id)"
                 @dragend="profileDragEnd"
@@ -2318,14 +2341,15 @@
             </div>
             <div v-else>
 
+              <div class="settings-profile-save-state"><settings-save-status :state="settingsSaveState('profile', selectedProfileId)"></settings-save-status></div>
               <!-- Sub-tab nav -->
               <div class="profile-subtab-nav">
-                <button :class="['profile-subtab-btn', { active: profileSubTab === 'basic' }]" @click="profileSubTab = 'basic'">{{ t('profileSubTabBasic') }}</button>
-                <button :class="['profile-subtab-btn', { active: profileSubTab === 'prompts' }]" @click="profileSubTab = 'prompts'">{{ t('profileSubTabPrompts') }}</button>
-                <button :class="['profile-subtab-btn', { active: profileSubTab === 'lorebook' }]" @click="openProfileLorebookTab()">{{ t('profileSubTabLorebook') }}</button>
-                <button :class="['profile-subtab-btn', { active: profileSubTab === 'behavior' }]" @click="profileSubTab = 'behavior'">{{ locale === 'en' ? 'Behavior' : '行为' }}</button>
-                <button :class="['profile-subtab-btn', { active: profileSubTab === 'tts' }]" @click="profileSubTab = 'tts'">{{ t('profileSubTabTts') }}</button>
-                <button :class="['profile-subtab-btn', { active: profileSubTab === 'tools' }]" @click="profileSubTab = 'tools'">{{ t('profileSubTabTools') }}</button>
+                <button type="button" :aria-pressed="profileSubTab === 'basic'" :class="['profile-subtab-btn', { active: profileSubTab === 'basic' }]" @click="profileSubTab = 'basic'">{{ t('profileSubTabBasic') }}</button>
+                <button type="button" :aria-pressed="profileSubTab === 'prompts'" :class="['profile-subtab-btn', { active: profileSubTab === 'prompts' }]" @click="profileSubTab = 'prompts'">{{ t('profileSubTabPrompts') }}</button>
+                <button type="button" :aria-pressed="profileSubTab === 'lorebook'" :class="['profile-subtab-btn', { active: profileSubTab === 'lorebook' }]" @click="openProfileLorebookTab()">{{ t('profileSubTabLorebook') }}</button>
+                <button type="button" :aria-pressed="profileSubTab === 'behavior'" :class="['profile-subtab-btn', { active: profileSubTab === 'behavior' }]" @click="profileSubTab = 'behavior'">{{ locale === 'en' ? 'Behavior' : '行为' }}</button>
+                <button type="button" :aria-pressed="profileSubTab === 'tts'" :class="['profile-subtab-btn', { active: profileSubTab === 'tts' }]" @click="profileSubTab = 'tts'">{{ t('profileSubTabTts') }}</button>
+                <button type="button" :aria-pressed="profileSubTab === 'tools'" :class="['profile-subtab-btn', { active: profileSubTab === 'tools' }]" @click="profileSubTab = 'tools'">{{ t('profileSubTabTools') }}</button>
               </div>
 
               <!-- ─── 基础设定 ─── -->
@@ -2345,9 +2369,9 @@
                       <div v-else class="avatar-preview avatar-placeholder">
                         {{ (profileForm.display_name || '?').charAt(0) }}
                       </div>
-                      <label class="s-btn s-btn-secondary" style="cursor:pointer;white-space:nowrap;font-size:12px;padding:6px 12px;">
+                      <label class="s-btn s-btn-secondary settings-avatar-picker" style="cursor:pointer;white-space:nowrap;font-size:12px;padding:6px 12px;">
                         {{ t('btnSelectImage') }}
-                        <input type="file" accept="image/*" style="display:none" @change="onAvatarFileChange($event, profileForm.profile_id)" />
+                        <input type="file" accept="image/*" @change="onAvatarFileChange($event, profileForm.profile_id)" />
                       </label>
                       <button v-if="profileForm.avatar" type="button" class="s-btn s-btn-secondary" style="font-size:12px;padding:6px 10px;"
                               @click="profileForm.avatar = ''">{{ t('btnClearAvatar') }}</button>
@@ -2357,7 +2381,7 @@
                     <div class="param-row" style="margin-bottom:4px;">
                       <span class="param-label">{{ t('lblLoadToChat') }}</span>
                       <label class="toggle-switch">
-                        <input type="checkbox" :checked="(profiles.find(p => p.profile_id === selectedProfileId) || {}).load_into_chat !== false" @change="saveProfileLoadIntoChat(selectedProfileId, $event.target.checked)" />
+                        <input type="checkbox" :aria-label="t('lblLoadToChat')" :checked="(profiles.find(p => p.profile_id === selectedProfileId) || {}).load_into_chat !== false" @change="saveProfileLoadIntoChat(selectedProfileId, $event.target.checked)" />
                         <span class="toggle-slider"></span>
                       </label>
                     </div>
@@ -2392,10 +2416,10 @@
                     {{ promptAutofillBusy ? '…' : t('btnPromptAutofill') }}
                   </button>
                   <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;user-select:none;color:var(--text-secondary);">
-                    <label class="toggle-switch" style="margin:0;">
+                    <span class="toggle-switch" style="margin:0;">
                       <input type="checkbox" v-model="promptAutofillAllowOverwrite" />
                       <span class="toggle-slider"></span>
-                    </label>
+                    </span>
                     {{ t('lblPromptAutofillOverwrite') }}
                   </label>
                   <span style="font-size:11px;color:var(--text-secondary);line-height:1.45;flex:1;min-width:200px;">{{ t('hintPromptAutofillToolbar') }}</span>
@@ -2430,6 +2454,7 @@
 
                 <!-- 人格演化 -->
                 <collapsible-section :title="t('secPersonaEvolution')">
+                  <settings-save-status :state="settingsSaveState('evolution', selectedProfileId)"></settings-save-status>
                     <p class="form-hint" style="margin-bottom:12px;">{{ t('hintPersonaEvolution') }}</p>
 
                     <!-- 开关 + 频率 -->
@@ -2768,7 +2793,7 @@
 
                 <!-- AI 对你的画像（自动维护） -->
                 <div class="s-card">
-                  <div class="s-card-title">{{ locale === 'en' ? 'AI portrait of you (auto-maintained)' : 'AI 对你的画像（自动维护）' }}</div>
+                  <div class="s-card-title">{{ locale === 'en' ? 'AI portrait of you (auto-maintained)' : 'AI 对你的画像（自动维护）' }} <settings-save-status :state="settingsSaveState('portraitConfig', selectedProfileId)"></settings-save-status></div>
                   <p class="form-hint" style="margin-bottom:12px;">{{ locale === 'en' ? 'A long-running portrait this AI maintains based on your conversations, day summaries, and memory facts. Independent of memory settings.' : '此 AI 基于对话、日记和记忆事实滚动维护的整体画像。独立于记忆系统设置。' }}</p>
 
                   <toggle-row :label="locale === 'en' ? 'Enable' : '启用'" v-model="userPortraitForm.enabled"></toggle-row>
@@ -2797,7 +2822,7 @@
                       </p>
                     </div>
 
-                    <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Portrait content' : '画像内容' }}</div>
+                    <div class="form-label" style="margin-bottom:6px;">{{ locale === 'en' ? 'Portrait content' : '画像内容' }} <settings-save-status :state="settingsSaveState('portraitContent', selectedProfileId)"></settings-save-status></div>
                     <textarea class="form-input" v-model="userPortraitForm.content" rows="12" style="resize:vertical;"
                       :placeholder="locale === 'en' ? 'Empty for now — will be generated on next refresh.' : '当前为空——下次刷新时会生成。'"></textarea>
 
@@ -2907,10 +2932,10 @@
 
                 <!-- 自省引擎 + ASE -->
                 <div id="persona-reflection-settings" tabindex="-1" class="s-card">
-                  <div class="s-card-title">{{ t('lblReflectionEngine') }}</div>
+                  <div class="s-card-title">{{ t('lblReflectionEngine') }} <settings-save-status :state="settingsSaveState('profileReflection', selectedProfileId)"></settings-save-status></div>
                   <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEngineInherit') }}</p>
                   <div class="engine-override-block" :inert="profileEnginesFormProfileId !== selectedProfileId">
-                    <div class="engine-override-label">{{ t('lblReflectionEngine') }}</div>
+                    <div class="engine-override-label">{{ t('lblReflectionEngine') }} <settings-save-status :state="settingsSaveState('profileEngine', selectedProfileId)"></settings-save-status></div>
                     <p class="form-hint engine-global-default-hint" style="margin:0;font-size:11px;line-height:1.45;color:var(--text-secondary);">
                       <span>{{ t('hintEngineGlobalDefaultLabel') }}</span><span>{{ engineGlobalDefaultLine('reflection') }}</span>
                     </p>
@@ -3224,7 +3249,7 @@
 
                 <!-- 情绪引擎 -->
                 <div class="s-card">
-                  <div class="s-card-title">{{ t('lblEmotionEngine') }}</div>
+                  <div class="s-card-title">{{ t('lblEmotionEngine') }} <settings-save-status :state="settingsSaveState('profileEngine', selectedProfileId)"></settings-save-status></div>
                   <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEngineInherit') }}</p>
                   <div class="engine-override-block" :inert="profileEnginesFormProfileId !== selectedProfileId">
                     <p class="form-hint engine-global-default-hint" style="margin:0 0 8px;font-size:11px;line-height:1.45;color:var(--text-secondary);">
@@ -3928,7 +3953,7 @@
                         <div style="font-size:12px;color:var(--text-secondary);">{{ t('toolDesc_' + tool.tool_id) || tool.description }}</div>
                       </div>
                       <label class="toggle-switch" style="flex-shrink:0;margin-top:2px;">
-                        <input type="checkbox" :checked="tool.config.enabled"
+                        <input type="checkbox" :aria-label="t('toolLabel_' + tool.tool_id) || tool.label" :checked="tool.config.enabled"
                                @change="saveToolConfig(tool.tool_id, {...tool.config, enabled: $event.target.checked}, selectedProfileId)">
                         <span class="toggle-slider"></span>
                       </label>
@@ -4061,109 +4086,6 @@
 
         </div>
 
-        <!-- AI Profile Wizard Modal -->
-        <div v-if="profileWizardOpen" class="profile-wizard-overlay" @click.self="profileWizardOpen = false">
-          <div class="profile-wizard-box">
-            <div class="profile-wizard-header">
-              <span>🪄 {{ t('profileWizardTitle') }}</span>
-              <button class="profile-wizard-close" @click="profileWizardOpen = false">✕</button>
-            </div>
-            <div class="profile-wizard-body">
-              <p style="font-size:13px;color:var(--text-secondary);margin:0 0 8px;">
-                {{ t('profileWizardLead') }}
-              </p>
-              <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px;">
-                {{ t('wizardUsingPreset') }}：<strong>{{ setupGuide && setupGuide.default_llm ? (setupGuide.default_llm + ' (analysis → 主模型)') : t('wizardPresetUnknown') }}</strong>
-              </p>
-              <textarea class="form-input" rows="5" v-model="profileWizardDesc"
-                :placeholder="t('phProfileWizardDesc')"
-                style="resize:vertical;font-size:13px;line-height:1.5;"
-                :disabled="profileWizardGenerating"
-              ></textarea>
-              <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:10px;font-size:12px;color:var(--text-secondary);">
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                  <input type="checkbox" v-model="profileWizardDisableEmotion" :disabled="profileWizardGenerating" />
-                  {{ t('wizardDisableEmotion') }}
-                </label>
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                  <input type="checkbox" v-model="profileWizardDisableAffinity" :disabled="profileWizardGenerating" />
-                  {{ t('wizardDisableAffinity') }}
-                </label>
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                  <input type="checkbox" v-model="profileWizardDisableReflection" :disabled="profileWizardGenerating" />
-                  {{ t('wizardDisableReflection') }}
-                </label>
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                  <input type="checkbox" v-model="profileWizardDisableMemory" :disabled="profileWizardGenerating" />
-                  {{ t('wizardDisableMemory') }}
-                </label>
-              </div>
-              <div v-if="profileWizardError" style="color:var(--danger,#e55);font-size:12px;margin-top:6px;">{{ profileWizardError }}</div>
-
-              <div v-if="profileWizardResult" style="margin-top:14px;">
-                <div class="section-divider" style="margin-bottom:10px;">
-                  {{ t('profileWizardResultPreview') }}
-                  <span v-if="profileWizardPresetUsed" style="float:right;font-size:11px;font-weight:400;opacity:0.7;">✓ {{ profileWizardPresetUsed }}</span>
-                </div>
-                <div class="form-field">
-                  <div class="form-label">{{ t('lblWizardName') }}</div>
-                  <input class="form-input" v-model="profileWizardResult.display_name" />
-                </div>
-                <div class="form-field">
-                  <div class="form-label">{{ t('lblBasePrompt') }}</div>
-                  <textarea class="form-input" v-model="profileWizardResult.base_prompt" style="font-size:13px;min-height:160px;"></textarea>
-                </div>
-                <div class="form-field">
-                  <div class="form-label">{{ t('lblStyleConstraint') }}</div>
-                  <textarea class="form-input" v-model="profileWizardResult.style_constraint" style="font-size:13px;min-height:80px;"></textarea>
-                </div>
-                <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;line-height:1.6;">
-                  ✓ {{ t('wizardGeneratedFields') }}：
-                  <span v-if="profileWizardResult.emotion_prompts && Object.keys(profileWizardResult.emotion_prompts).length">{{ t('wizardFieldEmotions') }} · </span>
-                  <span v-if="profileWizardResult.energy_prompts">{{ t('wizardFieldEnergy') }} · </span>
-                  <span v-if="profileWizardResult.affinity_prompts">{{ t('wizardFieldAffinity') }} · </span>
-                  <span v-if="profileWizardResult.reflection_custom_prompt">{{ t('wizardFieldReflection') }} · </span>
-                  <span v-if="profileWizardResult.memory_extraction_prompt">{{ t('wizardFieldMemory') }}</span>
-                </div>
-              </div>
-
-              <div class="btn-row" style="margin-top:14px;flex-wrap:wrap;gap:8px;">
-                <button class="s-btn s-btn-primary" :disabled="profileWizardGenerating || !profileWizardDesc.trim()" @click="runProfileWizard">
-                  {{ profileWizardGenerating ? t('btnWizardGenerating') : t('btnWizardGenerate') }}
-                </button>
-                <button v-if="profileWizardResult" class="s-btn s-btn-secondary" @click="applyWizardToNew">{{ t('btnWizardCreateNew') }}</button>
-                <button v-if="profileWizardResult && selectedProfileId" class="s-btn s-btn-secondary" @click="applyWizardToCurrent">{{ t('btnWizardApplyCurrent') }}</button>
-                <button class="s-btn s-btn-secondary" @click="profileWizardOpen = false">{{ t('settingsConfirmCancel') }}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 新建人格：避免 Electron 中 window.prompt 无效 -->
-        <div v-if="profileCreateModalOpen" class="profile-wizard-overlay" @click.self="cancelProfileCreateModal">
-          <div class="profile-wizard-box" style="width:420px;max-width:92vw;">
-            <div class="profile-wizard-header">
-              <span>{{ t('profileCreateModalTitle') }}</span>
-              <button type="button" class="profile-wizard-close" @click="cancelProfileCreateModal">✕</button>
-            </div>
-            <div class="profile-wizard-body">
-              <div class="form-field">
-                <div class="form-label">{{ t('lblDisplayName') }}</div>
-                <input id="profile-create-name-input" class="form-input" v-model="profileCreateNameDraft"
-                  :placeholder="t('phProfileCreateName')" autocomplete="off"
-                  @keydown.enter.prevent="confirmProfileCreate" />
-              </div>
-              <p class="form-hint" style="margin-top:4px;font-size:11px;">{{ t('hintProfileCreateId') }}</p>
-              <div class="btn-row" style="margin-top:14px;gap:8px;flex-wrap:wrap;">
-                <button type="button" class="s-btn s-btn-primary" :disabled="profileCreateSaving" @click="confirmProfileCreate">
-                  {{ profileCreateSaving ? '…' : t('btnProfileCreateConfirm') }}
-                </button>
-                <button type="button" class="s-btn s-btn-secondary" :disabled="profileCreateSaving" @click="cancelProfileCreateModal">{{ t('settingsConfirmCancel') }}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
       </div><!-- end Profiles tab -->
 
       <!-- ── Tab: 系统 ── -->
@@ -4261,16 +4183,16 @@
 
         <!-- 行为 子 tab 导航 -->
         <div class="memory-panel-tabs">
-          <button type="button" :class="{ active: behaviorSubTab === 'protagonist' }" @click="behaviorSubTab = 'protagonist'">{{ locale === 'en' ? 'My profile' : '我的资料' }}</button>
-          <button type="button" :class="{ active: behaviorSubTab === 'reflection' }" @click="behaviorSubTab = 'reflection'">{{ locale === 'en' ? 'Reflection' : '自省' }}</button>
-          <button type="button" :class="{ active: behaviorSubTab === 'proactive' }" @click="behaviorSubTab = 'proactive'">{{ t('secAseEngine') }}</button>
-          <button type="button" :class="{ active: behaviorSubTab === 'emotion' }" @click="behaviorSubTab = 'emotion'">{{ t('characterEngineDefaults') }}</button>
+          <button type="button" :aria-pressed="behaviorSubTab === 'protagonist'" :class="{ active: behaviorSubTab === 'protagonist' }" @click="behaviorSubTab = 'protagonist'">{{ locale === 'en' ? 'My profile' : '我的资料' }}</button>
+          <button type="button" :aria-pressed="behaviorSubTab === 'reflection'" :class="{ active: behaviorSubTab === 'reflection' }" @click="behaviorSubTab = 'reflection'">{{ locale === 'en' ? 'Reflection' : '自省' }}</button>
+          <button type="button" :aria-pressed="behaviorSubTab === 'proactive'" :class="{ active: behaviorSubTab === 'proactive' }" @click="behaviorSubTab = 'proactive'">{{ t('secAseEngine') }}</button>
+          <button type="button" :aria-pressed="behaviorSubTab === 'emotion'" :class="{ active: behaviorSubTab === 'emotion' }" @click="behaviorSubTab = 'emotion'">{{ t('characterEngineDefaults') }}</button>
         </div>
 
         <!-- ── 主角 sub-tab ── -->
         <div v-if="behaviorSubTab === 'protagonist'">
           <div class="s-card">
-            <div class="s-card-title">{{ locale === 'en' ? 'My profile' : '我的资料' }}</div>
+            <div class="s-card-title">{{ locale === 'en' ? 'My profile' : '我的资料' }} <settings-save-status :state="settingsSaveState('myProfile')"></settings-save-status></div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'Global info about you. Used as a seed for each persona. Each profile can override these and grow its own AI-maintained portrait.' : '关于你的全局信息，作为每个人格画像的初始种子。各人格可在「人格→行为 → 我的资料设定覆盖」里单独覆盖并由 AI 自动维护画像。' }}</p>
             <div class="form-field">
               <div class="form-label">{{ locale === 'en' ? 'Name (how AI calls you)' : '称呼（AI 如何叫你）' }}</div>
@@ -4288,7 +4210,7 @@
         <div v-if="behaviorSubTab === 'reflection'" class="reflection-ase-tab">
 
           <div class="s-card">
-            <div class="s-card-title">{{ t('secReflectionEngine') }}</div>
+            <div class="s-card-title">{{ t('secReflectionEngine') }} <settings-save-status :state="settingsSaveState('reflection')"></settings-save-status></div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'The AI periodically generates an internal monologue — reflecting on the conversation, mood, and whether it wants to say something. This state then subtly influences how it responds.' : 'AI 会定期进行一次内心独白——回顾对话、感受情绪、判断是否想主动开口。这个内心状态会轻微影响它的回应方式。' }}</p>
 
             <toggle-row :label="t('lblEnableReflection')" v-model="reflectionForm.reflection_enabled"></toggle-row>
@@ -4329,7 +4251,8 @@
                 <input type="number" class="seg-num-input" min="60" max="3600" v-model.number="reflectionForm.reflection_ttl" :disabled="!reflectionForm.reflection_enabled" />
               </div>
               <div class="form-hint" style="margin-bottom:0;">{{ t('hintReflectionTtl') }}</div>
-              <div class="adv-toggle-row" @click="reflectionAdvancedOpen = !reflectionAdvancedOpen">
+              <div class="adv-toggle-row" role="button" tabindex="0" :aria-expanded="reflectionAdvancedOpen"
+                   @click="reflectionAdvancedOpen = !reflectionAdvancedOpen" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
                 <span>{{ locale === 'en' ? 'Advanced' : '高级' }}</span>
                 <span class="adv-toggle-arrow" :class="{ open: reflectionAdvancedOpen }">›</span>
               </div>
@@ -4365,7 +4288,7 @@
 
         <div v-if="behaviorSubTab === 'proactive'" class="reflection-ase-tab">
           <div class="s-card">
-            <div class="s-card-title">{{ t('secAseEngine') }}</div>
+            <div class="s-card-title">{{ t('secAseEngine') }} <settings-save-status :state="settingsSaveState('reflection')"></settings-save-status></div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'When the AI has something on its mind and you\'ve been quiet for a while, it can send a message on its own. Requires reflection to be enabled.' : '当 AI 内心有话想说，而你已经沉默一段时间时，它会主动发一条消息。需要先开启自省引擎。' }}</p>
 
             <toggle-row :label="t('lblEnableAse')" v-model="reflectionForm.ase_enabled"></toggle-row>
@@ -4382,7 +4305,8 @@
                 </select>
               </div>
               <div v-if="reflectionForm.ase_modes[reflectionForm.ase_mode]">
-                <div class="adv-toggle-row" @click="aseAdvancedOpen = !aseAdvancedOpen">
+                <div class="adv-toggle-row" role="button" tabindex="0" :aria-expanded="aseAdvancedOpen"
+                     @click="aseAdvancedOpen = !aseAdvancedOpen" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
                   <span>{{ locale === 'en' ? 'Advanced' : '高级' }} · {{ {low:t('optAseLow'),medium:t('optAseMedium'),high:t('optAseHigh'),game:t('optAseGame'),focus:t('optAseFocus')}[reflectionForm.ase_mode] || reflectionForm.ase_mode }}</span>
                   <span class="adv-toggle-arrow" :class="{ open: aseAdvancedOpen }">›</span>
                 </div>
@@ -4460,10 +4384,10 @@
               </template>
             </div>
 
-            <div class="section-divider" style="margin:10px 0 4px;font-size:11px;cursor:pointer;"
-                 @click="topicDiscoveryAdvancedOpen = !topicDiscoveryAdvancedOpen">
-              {{ topicDiscoveryAdvancedOpen ? '▲' : '▼' }} {{ t('lblTopicAdvanced') }}
-            </div>
+            <button type="button" class="section-divider settings-disclosure-btn" style="margin:10px 0 4px;font-size:11px;"
+                    :aria-expanded="topicDiscoveryAdvancedOpen" @click="topicDiscoveryAdvancedOpen = !topicDiscoveryAdvancedOpen">
+              <span aria-hidden="true">{{ topicDiscoveryAdvancedOpen ? '▲' : '▼' }}</span> {{ t('lblTopicAdvanced') }}
+            </button>
             <template v-if="topicDiscoveryAdvancedOpen">
               <div class="param-row">
                 <span class="param-label">{{ t('lblCandidateCap') }}</span>
@@ -4518,7 +4442,7 @@
         <!-- ── 情绪 sub-tab ── -->
         <div v-if="behaviorSubTab === 'emotion'">
           <div class="s-card">
-            <div class="s-card-title">{{ locale === 'en' ? 'Engine Defaults' : '引擎全局默认值' }}</div>
+            <div class="s-card-title">{{ locale === 'en' ? 'Engine Defaults' : '引擎全局默认值' }} <settings-save-status :state="settingsSaveState('engines')"></settings-save-status></div>
             <p class="form-hint" style="margin-bottom:14px;">{{ locale === 'en' ? 'Global defaults. Each profile can override these in Profile → Behavior.' : '全局默认值，各人格可在人格→行为页单独覆盖。' }}</p>
 
             <div class="section-divider">{{ locale === 'en' ? 'Emotion Engine' : '情绪引擎' }}</div>
@@ -4609,7 +4533,7 @@
           <div class="param-row" style="margin-bottom:0;">
             <span class="param-label">{{ t('prefsShowStartupLauncher') }}</span>
             <label class="toggle-switch">
-              <input type="checkbox" v-model="uiPrefsShowLauncher" @change="saveUiPrefsLauncher" />
+              <input type="checkbox" :aria-label="t('prefsShowStartupLauncher')" v-model="uiPrefsShowLauncher" @change="saveUiPrefsLauncher" />
               <span class="toggle-slider"></span>
             </label>
           </div>
@@ -4619,86 +4543,97 @@
           <div class="s-card-title">{{ t('secAppearance') }}</div>
           <div class="theme-picker">
 
-          <div class="theme-card" @click="applyTheme('velvet')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'velvet' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'velvet'"
+            @click="applyTheme('velvet')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'velvet' }">
               <div class="theme-swatch-bar" style="background:linear-gradient(90deg,#c4a040 60%,#3cc8a8 100%);"></div>
               <div class="theme-swatch-body" style="background:#0e0d1a;color:#e8e2d4;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameVelvet') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === '' || currentTheme === 'purple' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === '' || currentTheme === 'purple'"
+            @click="applyTheme('')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === '' || currentTheme === 'purple' }">
               <div class="theme-swatch-bar" style="background:#6c63ff;"></div>
               <div class="theme-swatch-body" style="background:#111127;color:#e8e8f4;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNamePurple') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('cursor')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'cursor' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'cursor'"
+            @click="applyTheme('cursor')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'cursor' }">
               <div class="theme-swatch-bar" style="background:#007acc;"></div>
               <div class="theme-swatch-body" style="background:#252526;color:#cccccc;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameCursor') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('midnight')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'midnight' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'midnight'"
+            @click="applyTheme('midnight')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'midnight' }">
               <div class="theme-swatch-bar" style="background:#3d9fe0;"></div>
               <div class="theme-swatch-body" style="background:#111827;color:#b8c8e0;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameMidnight') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('nord')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'nord' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'nord'"
+            @click="applyTheme('nord')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'nord' }">
               <div class="theme-swatch-bar" style="background:#88c0d0;"></div>
               <div class="theme-swatch-body" style="background:#3b4252;color:#eceff4;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameNord') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('matcha')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'matcha' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'matcha'"
+            @click="applyTheme('matcha')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'matcha' }">
               <div class="theme-swatch-bar" style="background:#8a8a5c;"></div>
               <div class="theme-swatch-body" style="background:#0d1f18;color:#ebe6dc;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameMatcha') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('warm')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'warm' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'warm'"
+            @click="applyTheme('warm')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'warm' }">
               <div class="theme-swatch-bar" style="background:#c8903c;"></div>
               <div class="theme-swatch-body" style="background:#241d14;color:#ead8b4;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameWarm') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('light')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'light' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'light'"
+            @click="applyTheme('light')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'light' }">
               <div class="theme-swatch-bar" style="background:#0078d4;"></div>
               <div class="theme-swatch-body" style="background:#f3f3f3;color:#1f1f1f;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameLight') }}</div>
           </div>
 
-          <div class="theme-card" @click="applyTheme('rose')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'rose' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'rose'"
+            @click="applyTheme('rose')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'rose' }">
               <div class="theme-swatch-bar" style="background:#d46a8a;"></div>
               <div class="theme-swatch-body" style="background:#1a0a0f;color:#f5e6eb;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameRose') }}</div>
           </div>
-          <div class="theme-card" @click="applyTheme('synthwave')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'synthwave' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'synthwave'"
+            @click="applyTheme('synthwave')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'synthwave' }">
               <div class="theme-swatch-bar" style="background:linear-gradient(90deg,#f472b6 50%,#a78bfa 100%);"></div>
               <div class="theme-swatch-body" style="background:#0f0612;color:#f0e4f8;">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameSynthwave') }}</div>
           </div>
-          <div class="theme-card" @click="applyTheme('ink')">
-            <div class="theme-swatch" :class="{ selected: currentTheme === 'ink' }">
+          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'ink'"
+            @click="applyTheme('ink')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
+            <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'ink' }">
               <div class="theme-swatch-bar" style="background:#c4b8a8;"></div>
               <div class="theme-swatch-body" style="background:#0c0c0c;color:#e8e6e3;">Aa</div>
             </div>
@@ -4733,7 +4668,8 @@
         </div>
 
         <div class="s-card">
-          <div class="s-card-title">{{ t('secServerAndLog') }}</div>
+          <div class="s-card-title">{{ t('secServerAndLog') }} <settings-save-status :state="settingsSaveState('system')"></settings-save-status></div>
+          <p class="form-hint">{{ t('hintLogLevelLive') }}</p>
           <div class="form-field">
             <div class="form-label">{{ t('lblServerAddress') }}</div>
             <input class="form-input" :value="serverAddress" readonly />
@@ -4750,7 +4686,7 @@
         </div>
 
         <div class="s-card">
-          <div class="s-card-title">{{ t('secProxyAndHf') }}</div>
+          <div class="s-card-title">{{ t('secProxyAndHf') }} <settings-save-status :state="settingsSaveState('proxy')"></settings-save-status></div>
           <p class="form-hint" style="margin-bottom:12px;">{{ t('hintProxyDesc') }}</p>
           <fieldset style="border:0;margin:0;padding:0;min-width:0;" :disabled="systemEnvSaving || !systemEnvLoaded">
             <toggle-row style="margin-bottom:8px;" :label="t('lblUseProxy')" v-model="systemEnvForm.proxy_enabled"></toggle-row>
@@ -4816,8 +4752,8 @@
 
       <!-- 记忆子 Tab 导航 -->
       <div class="memory-panel-tabs">
-        <button type="button" :class="{ active: memoryPanelTab === 'content' }" @click="memoryPanelTab='content'">{{ t('memSubTabContent') }}</button>
-        <button type="button" :class="{ active: memoryPanelTab === 'settings' }" @click="memoryPanelTab='settings'">{{ t('memSubTabSettings') }}</button>
+        <button type="button" :aria-pressed="memoryPanelTab === 'content'" :class="{ active: memoryPanelTab === 'content' }" @click="memoryPanelTab='content'">{{ t('memSubTabContent') }}</button>
+        <button type="button" :aria-pressed="memoryPanelTab === 'settings'" :class="{ active: memoryPanelTab === 'settings' }" @click="memoryPanelTab='settings'">{{ t('memSubTabSettings') }}</button>
       </div>
       <div class="memory-canvas-body">
       <!-- 确认条：备份/清空等在此确认，手机端在记忆面板内可见 -->
@@ -4851,11 +4787,11 @@
           <span v-if="memoryStatus.vector_ok" class="mem-stat-provider">{{ memoryStatus.vector_provider }}</span>
         </div>
         <div class="mem-subtab-bar">
-          <button :class="['mem-subtab-btn', {active: memoryActiveSubTab==='facts'}]" @click="memoryActiveSubTab='facts'">{{ t('memTabFacts') }}</button>
-          <button :class="['mem-subtab-btn', {active: memoryActiveSubTab==='vectors'}]" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="memoryActiveSubTab='vectors'">{{ t('memTabVectors') }}</button>
-          <button :class="['mem-subtab-btn', {active: memoryActiveSubTab==='summaries'}]" @click="memoryActiveSubTab='summaries'; loadDiaryPreview(memoryProfileId)">{{ t('memTabSummaries') }}</button>
-          <button :class="['mem-subtab-btn', {active: memoryActiveSubTab==='history'}]" @click="memoryActiveSubTab='history'; loadChatHistory(memoryProfileId)">{{ t('memTabHistory') }}</button>
-          <button :class="['mem-subtab-btn', {active: memoryActiveSubTab==='maintenance'}]" @click="memoryActiveSubTab='maintenance'">{{ t('memTabMaintenance') }}</button>
+          <button type="button" :aria-pressed="memoryActiveSubTab==='facts'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='facts'}]" @click="memoryActiveSubTab='facts'">{{ t('memTabFacts') }}</button>
+          <button type="button" :aria-pressed="memoryActiveSubTab==='vectors'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='vectors'}]" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="memoryActiveSubTab='vectors'">{{ t('memTabVectors') }}</button>
+          <button type="button" :aria-pressed="memoryActiveSubTab==='summaries'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='summaries'}]" @click="memoryActiveSubTab='summaries'; loadDiaryPreview(memoryProfileId)">{{ t('memTabSummaries') }}</button>
+          <button type="button" :aria-pressed="memoryActiveSubTab==='history'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='history'}]" @click="memoryActiveSubTab='history'; loadChatHistory(memoryProfileId)">{{ t('memTabHistory') }}</button>
+          <button type="button" :aria-pressed="memoryActiveSubTab==='maintenance'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='maintenance'}]" @click="memoryActiveSubTab='maintenance'">{{ t('memTabMaintenance') }}</button>
         </div>
         <!-- 子 Tab 内容复用：事实库/向量/摘要/历史 与设置里原记忆 Tab 一致，见下方 memory-panel-sub 占位，由下一段注入 -->
         <div class="memory-panel-sub" :inert="memoryPanelLoading || !memoryProfileId">
@@ -4988,28 +4924,29 @@
 
             <!-- Memory change history: collapsed by default; when expanded it scrolls at a fixed height so the fact list below stays visible -->
             <div class="mem-changelog">
-              <div class="mem-diary-preview-title mem-changelog-toggle"
-                   @click="memShowChangelog = !memShowChangelog">
-                <span>{{ t('memChangelogTitle') }}</span>
-                <span v-if="memoryChangelog.length" class="mem-changelog-count">{{ memoryChangelog.length }}</span>
-                <button class="s-btn s-btn-secondary" style="font-size:11px;margin-left:auto;"
-                        :disabled="memoryChangelogLoading || !(memoryProfileId)"
-                        @click.stop="loadMemoryChangelog(memoryProfileId)">
+              <div class="mem-diary-preview-title mem-changelog-toggle">
+                <button type="button" class="mem-changelog-title-btn" :aria-expanded="memShowChangelog"
+                        @click="memShowChangelog = !memShowChangelog">
+                  <span>{{ t('memChangelogTitle') }}</span>
+                  <span v-if="memoryChangelog.length" class="mem-changelog-count">{{ memoryChangelog.length }}</span>
+                  <span class="mem-changelog-caret" aria-hidden="true">{{ memShowChangelog ? '▲' : '▼' }}</span>
+                </button>
+                <button type="button" class="s-btn s-btn-secondary" style="font-size:11px;" :aria-label="t('btnRefresh')"
+                        :disabled="memoryChangelogLoading || !memoryProfileId" @click="loadMemoryChangelog(memoryProfileId)">
                   {{ memoryChangelogLoading ? '…' : t('btnRefresh') }}
                 </button>
-                <span class="mem-changelog-caret">{{ memShowChangelog ? '▲' : '▼' }}</span>
               </div>
               <div v-show="memShowChangelog" class="mem-changelog-body">
               <p v-if="!memoryChangelog.length" class="mem-cfg-hint">{{ t('memChangelogEmpty') }}</p>
               <div v-for="run in memoryChangelog" :key="run.run_id"
                    class="mem-changelog-entry" :class="{ 'is-rolled-back': run.rolled_back }">
-                <div class="mem-changelog-head"
-                     @click="memChangelogExpanded = (memChangelogExpanded === run.run_id ? '' : run.run_id)">
+                <button type="button" class="mem-changelog-head" :aria-expanded="memChangelogExpanded === run.run_id"
+                        @click="memChangelogExpanded = (memChangelogExpanded === run.run_id ? '' : run.run_id)">
                   <span>{{ run.date }} · {{ run.trigger === 'manual' ? t('memChangelogManual') : t('memChangelogAuto') }}</span>
                   <span class="mem-changelog-brief">{{ memChangelogBrief(run) }}</span>
                   <span v-if="run.rolled_back" class="mem-changelog-rbtag">{{ t('memChangelogRolledBack') }}</span>
-                  <span class="mem-changelog-caret">{{ memChangelogExpanded === run.run_id ? '▲' : '▼' }}</span>
-                </div>
+                  <span class="mem-changelog-caret" aria-hidden="true">{{ memChangelogExpanded === run.run_id ? '▲' : '▼' }}</span>
+                </button>
                 <div v-show="memChangelogExpanded === run.run_id" class="mem-changelog-detail">
                   <template v-if="run.summary.consolidation.added_contents && run.summary.consolidation.added_contents.length">
                     <div class="mem-changelog-sub">{{ t('memChangelogAdded') }}</div>
@@ -5130,9 +5067,9 @@
       <div v-show="memoryPanelTab === 'settings'" class="memory-panel-settings">
         <div class="memory-settings-form" style="max-width:100%;">
           <div class="memory-panel-tabs" style="margin-bottom:12px;padding:0;">
-            <button type="button" :class="{ active: memorySettingsScope === 'global' }"
+            <button type="button" :aria-pressed="memorySettingsScope === 'global'" :class="{ active: memorySettingsScope === 'global' }"
                     @click="memorySettingsScope = 'global'">{{ t('memoryScopeGlobal') }}</button>
-            <button type="button" :class="{ active: memorySettingsScope === 'persona' }"
+            <button type="button" :aria-pressed="memorySettingsScope === 'persona'" :class="{ active: memorySettingsScope === 'persona' }"
                     @click="memorySettingsScope = 'persona'">{{ t('memoryScopePersona') }}</button>
           </div>
           <div v-show="memorySettingsScope === 'global'">
@@ -5177,7 +5114,8 @@
               </div>
               <div class="form-hint">{{ t('hintRecentFactQuota') }}</div>
 
-              <div class="section-divider" @click="memGlobalAdvOpen.ltm = !memGlobalAdvOpen.ltm" style="cursor:pointer;margin-top:10px;">
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.ltm"
+                   @click="memGlobalAdvOpen.ltm = !memGlobalAdvOpen.ltm" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
                 {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.ltm ? '▲' : '▼' }}
               </div>
               <div v-show="memGlobalAdvOpen.ltm">
@@ -5194,13 +5132,14 @@
                 <div class="param-row">
                   <span class="param-label" style="font-weight:500;">{{ t('lblEnableVectorSearch') }}</span>
                   <label class="toggle-switch">
-                    <input type="checkbox" v-model="memoryGlobalForm.vector_enabled" :disabled="!memoryGlobalForm.enabled" />
+                    <input type="checkbox" :aria-label="t('lblEnableVectorSearch')" v-model="memoryGlobalForm.vector_enabled" :disabled="!memoryGlobalForm.enabled" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
                 <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableVectorSearch') }}</div>
                 <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.vector_enabled }">
-                  <div class="section-divider" @click="memGlobalAdvOpen.vector = !memGlobalAdvOpen.vector" style="cursor:pointer;">
+                  <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.vector"
+                       @click="memGlobalAdvOpen.vector = !memGlobalAdvOpen.vector" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
                     {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.vector ? '▲' : '▼' }}
                   </div>
                   <div v-show="memGlobalAdvOpen.vector">
@@ -5248,7 +5187,8 @@
               </div>
               <div class="form-hint">{{ t('hintDaySummaryMaxMessages') }}</div>
 
-              <div class="section-divider" @click="memGlobalAdvOpen.daySummary = !memGlobalAdvOpen.daySummary" style="cursor:pointer;margin-top:10px;">
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.daySummary"
+                   @click="memGlobalAdvOpen.daySummary = !memGlobalAdvOpen.daySummary" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
                 {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.daySummary ? '▲' : '▼' }}
               </div>
               <div v-show="memGlobalAdvOpen.daySummary">
@@ -5286,13 +5226,14 @@
               <div class="param-row">
                 <span class="param-label" style="font-weight:500;">{{ t('lblEnableDailyForgetting') }}</span>
                 <label class="toggle-switch">
-                  <input type="checkbox" v-model="memoryGlobalForm.daily_forgetting_enabled" />
+                  <input type="checkbox" :aria-label="t('lblEnableDailyForgetting')" v-model="memoryGlobalForm.daily_forgetting_enabled" />
                   <span class="toggle-slider"></span>
                 </label>
               </div>
               <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableDailyForgetting') }}</div>
               <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.daily_forgetting_enabled }">
-                <div class="section-divider" @click="memGlobalAdvOpen.decay = !memGlobalAdvOpen.decay" style="cursor:pointer;">
+                <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.decay"
+                     @click="memGlobalAdvOpen.decay = !memGlobalAdvOpen.decay" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
                   {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.decay ? '▲' : '▼' }}
                 </div>
                 <div v-show="memGlobalAdvOpen.decay">
@@ -5317,7 +5258,7 @@
               <div class="param-row">
                 <span class="param-label" style="font-weight:500;">{{ t('lblEnableReinforcement') }}</span>
                 <label class="toggle-switch">
-                  <input type="checkbox" id="mem_global_reinforcement" v-model="memoryGlobalForm.daily_reinforcement_enabled" />
+                  <input type="checkbox" :aria-label="t('lblEnableReinforcement')" id="mem_global_reinforcement" v-model="memoryGlobalForm.daily_reinforcement_enabled" />
                   <span class="toggle-slider"></span>
                 </label>
               </div>
@@ -5329,13 +5270,14 @@
               <div class="param-row">
                 <span class="param-label" style="font-weight:500;">{{ t('lblEnableConsolidation') }}</span>
                 <label class="toggle-switch">
-                  <input type="checkbox" id="mem_global_consolidation" v-model="memoryGlobalForm.daily_consolidation_enabled" />
+                  <input type="checkbox" :aria-label="t('lblEnableConsolidation')" id="mem_global_consolidation" v-model="memoryGlobalForm.daily_consolidation_enabled" />
                   <span class="toggle-slider"></span>
                 </label>
               </div>
               <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableConsolidation') }}</div>
               <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.daily_consolidation_enabled }">
-                <div class="section-divider" @click="memGlobalAdvOpen.consolidation = !memGlobalAdvOpen.consolidation" style="cursor:pointer;">
+                <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.consolidation"
+                     @click="memGlobalAdvOpen.consolidation = !memGlobalAdvOpen.consolidation" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
                   {{ t('lblTtsAdvanced') }} {{ memGlobalAdvOpen.consolidation ? '▲' : '▼' }}
                 </div>
                 <div v-show="memGlobalAdvOpen.consolidation">
@@ -5470,7 +5412,8 @@
               </div>
               <div class="form-hint">{{ t('hintProfileRecentFactQuota') }}</div>
 
-              <div class="section-divider" @click="memProfileAdvOpen.extract = !memProfileAdvOpen.extract" style="cursor:pointer;margin-top:10px;">
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="memProfileAdvOpen.extract"
+                   @click="memProfileAdvOpen.extract = !memProfileAdvOpen.extract" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
                 {{ t('lblTtsAdvanced') }} {{ memProfileAdvOpen.extract ? '▲' : '▼' }}
               </div>
               <div v-show="memProfileAdvOpen.extract">
@@ -5541,7 +5484,8 @@
                 </div>
                 <p class="mem-cfg-hint">{{ t('hintProfileConsolidation') }}</p>
               </div>
-              <div class="section-divider" @click="memProfileAdvOpen.forgetting = !memProfileAdvOpen.forgetting" style="cursor:pointer;margin-top:4px;">
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="memProfileAdvOpen.forgetting"
+                   @click="memProfileAdvOpen.forgetting = !memProfileAdvOpen.forgetting" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:4px;">
                 {{ t('lblTtsAdvanced') }} {{ memProfileAdvOpen.forgetting ? '▲' : '▼' }}
               </div>
               <div v-show="memProfileAdvOpen.forgetting">
@@ -5585,7 +5529,7 @@
                 <div class="param-row">
                   <span class="param-label" style="font-weight:500;">{{ t('lblGroupMergeHistory') }}</span>
                   <label class="toggle-switch">
-                    <input type="checkbox" v-model="memoryTabProfileForm.group_chat_merge_into_history" />
+                    <input type="checkbox" :aria-label="t('lblGroupMergeHistory')" v-model="memoryTabProfileForm.group_chat_merge_into_history" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -5633,6 +5577,115 @@
         </div><!-- end settings-body -->
       </div><!-- end canvas-content -->
     </div><!-- end canvas-layout -->
+
+    <!-- AI Profile Wizard Modal -->
+    <div v-if="profileWizardOpen" class="profile-wizard-overlay"
+         :inert="settingsDialogName !== 'profileWizard'" @click.self="profileWizardOpen = false">
+      <div ref="profileWizardDialog" class="profile-wizard-box" role="dialog" tabindex="-1"
+           :aria-modal="settingsDialogName === 'profileWizard'" :aria-label="t('profileWizardTitle')">
+        <div class="profile-wizard-header">
+          <span>🪄 {{ t('profileWizardTitle') }}</span>
+          <button class="profile-wizard-close" :aria-label="t('settingsCloseDialog')" @click="profileWizardOpen = false">✕</button>
+        </div>
+        <div class="profile-wizard-body">
+          <p style="font-size:13px;color:var(--text-secondary);margin:0 0 8px;">
+            {{ t('profileWizardLead') }}
+          </p>
+          <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px;">
+            {{ t('wizardUsingPreset') }}：<strong>{{ setupGuide && setupGuide.default_llm ? (setupGuide.default_llm + ' (analysis → 主模型)') : t('wizardPresetUnknown') }}</strong>
+          </p>
+          <textarea class="form-input" rows="5" v-model="profileWizardDesc" data-settings-initial-focus
+            :aria-label="t('phProfileWizardDesc')"
+            :placeholder="t('phProfileWizardDesc')"
+            style="resize:vertical;font-size:13px;line-height:1.5;"
+            :disabled="profileWizardGenerating"
+          ></textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:10px;font-size:12px;color:var(--text-secondary);">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input type="checkbox" v-model="profileWizardDisableEmotion" :disabled="profileWizardGenerating" />
+              {{ t('wizardDisableEmotion') }}
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input type="checkbox" v-model="profileWizardDisableAffinity" :disabled="profileWizardGenerating" />
+              {{ t('wizardDisableAffinity') }}
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input type="checkbox" v-model="profileWizardDisableReflection" :disabled="profileWizardGenerating" />
+              {{ t('wizardDisableReflection') }}
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input type="checkbox" v-model="profileWizardDisableMemory" :disabled="profileWizardGenerating" />
+              {{ t('wizardDisableMemory') }}
+            </label>
+          </div>
+          <div v-if="profileWizardError" style="color:var(--danger,#e55);font-size:12px;margin-top:6px;">{{ profileWizardError }}</div>
+
+          <div v-if="profileWizardResult" style="margin-top:14px;">
+            <div class="section-divider" style="margin-bottom:10px;">
+              {{ t('profileWizardResultPreview') }}
+              <span v-if="profileWizardPresetUsed" style="float:right;font-size:11px;font-weight:400;opacity:0.7;">✓ {{ profileWizardPresetUsed }}</span>
+            </div>
+            <div class="form-field">
+              <div class="form-label">{{ t('lblWizardName') }}</div>
+              <input class="form-input" v-model="profileWizardResult.display_name" />
+            </div>
+            <div class="form-field">
+              <div class="form-label">{{ t('lblBasePrompt') }}</div>
+              <textarea class="form-input" v-model="profileWizardResult.base_prompt" style="font-size:13px;min-height:160px;"></textarea>
+            </div>
+            <div class="form-field">
+              <div class="form-label">{{ t('lblStyleConstraint') }}</div>
+              <textarea class="form-input" v-model="profileWizardResult.style_constraint" style="font-size:13px;min-height:80px;"></textarea>
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;line-height:1.6;">
+              ✓ {{ t('wizardGeneratedFields') }}：
+              <span v-if="profileWizardResult.emotion_prompts && Object.keys(profileWizardResult.emotion_prompts).length">{{ t('wizardFieldEmotions') }} · </span>
+              <span v-if="profileWizardResult.energy_prompts">{{ t('wizardFieldEnergy') }} · </span>
+              <span v-if="profileWizardResult.affinity_prompts">{{ t('wizardFieldAffinity') }} · </span>
+              <span v-if="profileWizardResult.reflection_custom_prompt">{{ t('wizardFieldReflection') }} · </span>
+              <span v-if="profileWizardResult.memory_extraction_prompt">{{ t('wizardFieldMemory') }}</span>
+            </div>
+          </div>
+
+          <div class="btn-row" style="margin-top:14px;flex-wrap:wrap;gap:8px;">
+            <button class="s-btn s-btn-primary" :disabled="profileWizardGenerating || !profileWizardDesc.trim()" @click="runProfileWizard">
+              {{ profileWizardGenerating ? t('btnWizardGenerating') : t('btnWizardGenerate') }}
+            </button>
+            <button v-if="profileWizardResult" class="s-btn s-btn-secondary" @click="applyWizardToNew">{{ t('btnWizardCreateNew') }}</button>
+            <button v-if="profileWizardResult && selectedProfileId" class="s-btn s-btn-secondary" @click="applyWizardToCurrent">{{ t('btnWizardApplyCurrent') }}</button>
+            <button class="s-btn s-btn-secondary" @click="profileWizardOpen = false">{{ t('settingsConfirmCancel') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建人格：避免 Electron 中 window.prompt 无效 -->
+    <div v-if="profileCreateModalOpen" class="profile-wizard-overlay"
+         :inert="settingsDialogName !== 'profileCreate'" @click.self="cancelProfileCreateModal">
+      <div ref="profileCreateDialog" class="profile-wizard-box" role="dialog" tabindex="-1"
+           :aria-modal="settingsDialogName === 'profileCreate'" :aria-label="t('profileCreateModalTitle')" style="width:420px;max-width:92vw;">
+        <div class="profile-wizard-header">
+          <span>{{ t('profileCreateModalTitle') }}</span>
+          <button type="button" class="profile-wizard-close" :aria-label="t('settingsCloseDialog')" @click="cancelProfileCreateModal">✕</button>
+        </div>
+        <div class="profile-wizard-body">
+          <div class="form-field">
+            <label class="form-label" for="profile-create-name-input">{{ t('lblDisplayName') }}</label>
+            <input id="profile-create-name-input" data-settings-initial-focus class="form-input" v-model="profileCreateNameDraft"
+              :placeholder="t('phProfileCreateName')" autocomplete="off"
+              @keydown.enter.prevent="confirmProfileCreate" />
+          </div>
+          <p class="form-hint" style="margin-top:4px;font-size:11px;">{{ t('hintProfileCreateId') }}</p>
+          <div class="btn-row" style="margin-top:14px;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="s-btn s-btn-primary" :disabled="profileCreateSaving" @click="confirmProfileCreate">
+              {{ profileCreateSaving ? '…' : t('btnProfileCreateConfirm') }}
+            </button>
+            <button type="button" class="s-btn s-btn-secondary" :disabled="profileCreateSaving" @click="cancelProfileCreateModal">{{ t('settingsConfirmCancel') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- end settings-drawer -->
 
   <!-- ════════════════ TOAST STACK ════════════════ -->
@@ -5649,8 +5702,8 @@
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20261102trisync1"></script>
-<script src="js/components.js?v=20261102trisync1"></script>
-<script src="js/settings.js?v=20261104toolmodel1"></script>
+<script src="js/components.js?v=20261105settings3"></script>
+<script src="js/settings.js?v=20261105settings3"></script>
 <script src="js/agent-ui.js?v=20261102trisync1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261102trisync1"></script>
