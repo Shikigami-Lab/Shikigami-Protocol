@@ -267,6 +267,26 @@ class ConversationStore:
         return [{"role": r[0], "content": r[1], "sender": r[2] or "",
                  "id": r[3], "agent_run_id": r[4], "generation_status": r[5]} for r in rows]
 
+    def memory_tail_id(self) -> int:
+        row = self._conn.execute("SELECT MAX(id) FROM messages").fetchone()
+        return int(row[0] or 0)
+
+    def memory_messages_after(self, after_id: int, limit: int) -> List[Dict]:
+        rows = self._conn.execute(
+            "SELECT id, role, content, sender, timestamp, generation_status FROM messages "
+            "WHERE id > ? AND timestamp >= ? ORDER BY id LIMIT ?",
+            (after_id, self.context_since_ts, limit),
+        ).fetchall()
+        return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
+                for row in rows]
+
+    def has_memory_evidence(self, message: Dict) -> bool:
+        row = self._conn.execute(
+            "SELECT role, content, sender, timestamp FROM messages WHERE id=? AND timestamp >= ?",
+            (message["id"], self.context_since_ts),
+        ).fetchone()
+        return row is not None and tuple(row) == tuple(message[key] for key in ("role", "content", "sender", "timestamp"))
+
     def get_recent_with_ts(self, n_turns: int = 20) -> List[Dict]:
         """Like get_recent but each dict includes 'timestamp' for merging with group messages."""
         since = self._context_since_ts

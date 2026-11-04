@@ -431,8 +431,8 @@ const SettingsMixin = {
       _memGlobalSaveStateTimer: null,
       _memProfileFormLoaded: false,
       _memProfileSaveStateTimer: null,
-      memGlobalAdvOpen: { ltm: false, vector: false, daySummary: false, decay: false, consolidation: false },
-      memProfileAdvOpen: { extract: false, vector: false, forgetting: false },
+      memGlobalAdvOpen: { ltm: false, vector: false, daySummary: false },
+      memProfileAdvOpen: { extract: false, vector: false },
       memoryFormProfileId: '',      // 记忆设置表单所属人格，load 完成后设置，save 时用此 id 避免盖错人
       memoryContentProfileId: '',   // 记忆内容（事实/向量/摘要/历史）所属人格，load 完成后设置
       memoryFacts: [],
@@ -454,7 +454,7 @@ const SettingsMixin = {
       syncFactsResult: null,
       syncFactsLoading: false,
       forgettingRunLoading: false,
-      forgettingPreview: null,   // 每日遗忘预览结果 { skip, reason, day_summary, decay, ... }
+      forgettingPreview: null,
       forgettingPreviewLoading: false,
       memoryChangelog: [],       // 记忆变更历史（最近 20 条）
       memoryChangelogLoading: false,
@@ -4672,13 +4672,16 @@ const SettingsMixin = {
       return this.t('memCountItemsFmt').replace('{n}', String(n));
     },
 
-    /** 遗忘任务「合并为摘要」一行完整文案 */
-    formatConsolidationForgettingLine(c) {
-      if (!c) return '';
-      return this.t('memForgettingConsolidationLineFmt')
-        .replace('{batch}', String(c.batch_size))
-        .replace('{candidates}', String(c.candidates_count))
-        .replace('{total}', String(c.total_facts));
+    memoryMaintenanceSkipReason(preview) {
+      const labels = {
+        session_manager_unavailable: 'memMaintenanceSessionUnavailable',
+        profile_not_loaded: 'memMaintenanceProfileNotLoaded',
+        memory_manager_unavailable: 'memMaintenanceManagerUnavailable',
+        memory_disabled: 'memMaintenanceMemoryDisabled',
+        maintenance_disabled: 'memMaintenanceDisabled',
+      };
+      const label = labels[preview.reason_code];
+      return label ? this.t(label) : preview.reason;
     },
 
     async generateDiary(profileId) {
@@ -4921,10 +4924,13 @@ const SettingsMixin = {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryForgettingPreview(profileId));
         const data = await res.json();
         if (!current()) return;
-        if (res.ok) this.forgettingPreview = data;
-        else this.showToast('预览失败: ' + (data.detail || ''), 'error');
-      } catch (e) {
-        if (current()) this.showToast('预览失败: ' + e.message, 'error');
+        if (res.ok) {
+          this.forgettingPreview = data;
+          return data;
+        }
+        this.showToast(this.t('toastMemoryMaintenancePreviewFail'), 'error');
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryMaintenancePreviewFail'), 'error');
       } finally {
         if (current()) this.forgettingPreviewLoading = false;
       }
@@ -4942,21 +4948,22 @@ const SettingsMixin = {
           { method: 'POST' }
         );
         const data = await res.json();
+        if (!current()) return;
         if (res.ok && data.ok) {
-          this.showToast('已执行一次每日记忆/遗忘任务', 'success');
-          if (current()) {
-            this.beginMemoryRequest(profileId, 'forgettingPreview');
-            this.forgettingPreview = null;
-            this.forgettingPreviewLoading = false;
+          const [preview] = await Promise.all([
+            this.loadForgettingPreview(profileId),
+            this.loadMemoryFacts(profileId),
+            this.loadMemoryStatus(profileId),
+            this.loadMemoryVectors(profileId),
+          ]);
+          if (current() && preview && !preview.skip) {
+            this.showToast(this.t('toastMemoryMaintenanceRequestDone'), 'success');
           }
-          await this.loadMemoryFacts(profileId);
-          await this.loadMemoryStatus(profileId);
-          await this.loadMemoryChangelog(profileId);
         } else {
-          this.showToast(`执行失败: ${data.detail || data.error || ''}`, 'error');
+          this.showToast(this.t('toastMemoryMaintenanceRunFail'), 'error');
         }
-      } catch (e) {
-        this.showToast(`执行失败: ${e.message}`, 'error');
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryMaintenanceRunFail'), 'error');
       } finally {
         if (current()) this.forgettingRunLoading = false;
       }

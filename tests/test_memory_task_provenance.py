@@ -118,17 +118,19 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("GROUP_FAILED_DROP" in m["content"] for m in wire[1:]))
 
     async def test_extraction_filters_partials_and_preserves_normal_fact_writes(self):
+        sources = {"single": self.store, "group:g": self.group}
+        await self.manager.auto_extract({"single": self.store}, {}, self.app)
+        await self.manager.auto_extract({"group:g": self.group}, {}, self.app)
         self.populate()
-        rows = get_merged_recent_messages(self.session, self.app, {}, 20)
-        original = deepcopy(rows)
-        self.response = json.dumps([{"content": "Synthetic user likes mathematical puzzles",
-                                     "category": "preference", "weight": 1.5}])
-        for custom in ("", "Custom extraction {conversation}", "Custom extraction without placeholder"):
-            self.manager._cfg["extraction_prompt"] = custom
-            await self.manager.auto_extract(rows, {}, self.app)
-            self.assert_clean_prompt(["USER_KEPT", "COMPLETE_KEPT", "GROUP_USER_KEPT", "GROUP_COMPLETE_KEPT"])
+        original = self.store.get_all_with_id()
+        mid = original[0]["id"]
+        self.response = json.dumps([{"op": "add", "content": "Synthetic user likes mathematical puzzles",
+                                     "category": "preference", "weight": 1.5, "evidence": [f"single:{mid}"]}])
+        self.manager._cfg["extraction_prompt"] = "Custom extraction without placeholder"
+        await self.manager.auto_extract(sources, {}, self.app)
+        self.assert_clean_prompt(["USER_KEPT", "COMPLETE_KEPT", "GROUP_USER_KEPT", "GROUP_COMPLETE_KEPT"])
         self.assertEqual(self.manager.facts.get_all()[0].content, "Synthetic user likes mathematical puzzles")
-        self.assertEqual(rows, original)
+        self.assertEqual(self.store.get_all_with_id(), original)
 
     async def test_summary_filters_object_and_dict_inputs_before_counting(self):
         self.populate()
@@ -224,19 +226,27 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(self.manager, 'auto_extract', new=AsyncMock()) as extract:
                 _fire_memory_tasks(self.session, self.store, self.app)
                 await asyncio.gather(*jobs)
-                rows = extract.call_args.args[0]
-                self.assertTrue(all('timestamp' in row for row in rows))
-                for row in rows:
-                    self.assertEqual(row['timestamp'], expected[row['content']]['timestamp'])
-                    self.assertEqual(row['generation_status'], expected[row['content']]['generation_status'])
+                sources = extract.call_args.args[0]
+                self.assertIs(sources["single"], self.store)
+                self.assertEqual(set(sources), {"single", "group:g"} if merged else {"single"})
+                for source in sources.values():
+                    for row in source.memory_messages_after(0, 20):
+                        self.assertEqual(row['timestamp'], expected[row['content']]['timestamp'])
+                        self.assertEqual(row['generation_status'], expected[row['content']]['generation_status'])
 
     async def test_unresolved_relative_fact_is_not_saved_or_old_facts_deleted(self):
         previous = self.manager.facts.add('用户有一条应当保持原样的长期事实', source='manual')
+        sources = {"single": self.store}
+        await self.manager.auto_extract(sources, {}, self.app)
+        self.store.save_all([Message("user", "下个礼拜二有面试", TS, "Human")])
+        mid = self.store.get_all_with_id()[0]["id"]
+        evidence = [f"single:{mid}"]
         self.response = json.dumps([
-            {'content': '用户下个礼拜二需要参加重要面试', 'weight': 1.2},
-            {'content': '用户将于2026-01-20参加公司面试', 'weight': 1.2},
+            {'op': 'add', 'content': '用户下个礼拜二需要参加重要面试', 'weight': 1.2, 'evidence': evidence},
+            {'op': 'add', 'content': '用户将于2026-01-20参加公司面试', 'kind': 'event',
+             'event_date': '2026-01-20', 'weight': 1.2, 'evidence': evidence},
         ], ensure_ascii=False)
-        await self.manager.auto_extract([{'role': 'user', 'content': '下个礼拜二有面试', 'timestamp': TS}], {}, self.app)
+        await self.manager.auto_extract(sources, {}, self.app)
         contents = [f.content for f in self.manager.facts.get_all()]
         self.assertIn(previous.content, contents)
         self.assertIn('用户将于2026-01-20参加公司面试', contents)

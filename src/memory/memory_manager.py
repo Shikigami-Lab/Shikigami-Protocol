@@ -15,7 +15,7 @@ import time
 import traceback
 from datetime import date, timedelta
 from string import Template
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.config.prompt_loader import get_prompt
 from src.utils.memory_time import write_time_context
@@ -29,21 +29,14 @@ from src.utils.debug_logger import (
     log_secondary_llm_response,
     log_error,
     log_memory_startup,
-    log_fact_add,
-    log_vector_add,
-    log_vector_delete,
-    log_memory_extract,
     log_summary_generate,
 )
+from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates
 from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
-
-
-# 前置过滤：时间相对词（此类事实时效性差，跳过）
-_STALE_WORDS = frozenset(["刚才", "今天", "昨天", "刚刚", "这次", "这会儿", "现在", "今晚", "刚好"])
 
 
 def _is_memory_turn(message: Any) -> bool:
@@ -57,16 +50,6 @@ def _is_memory_turn(message: Any) -> bool:
         return message.get(key, default) if isinstance(message, dict) else getattr(message, key, default)
     role = value("role")
     return role == "user" or (role == "assistant" and value("generation_status", "completed") == "completed")
-
-
-def _passes_filters(content: str) -> bool:
-    """长度过滤 + 时间相对词过滤。"""
-    if len(content.replace(" ", "")) < 12:
-        return False
-    for word in _STALE_WORDS:
-        if word in content:
-            return False
-    return True
 
 
 def _vector_document_for_fact(fact: Any) -> str:
@@ -90,34 +73,6 @@ def _vector_metadata_for_fact(fact: Any, extra: Optional[Dict[str, Any]] = None)
     if extra:
         meta.update(extra)
     return meta
-
-
-def _extraction_format_block() -> str:
-    """事实提取输出格式说明，从 config/system_prompts.yaml 读取。"""
-    return get_prompt("memory.extraction_format")
-
-
-def _consolidation_appendix(fact_list: str) -> str:
-    """记忆合并任务说明，从 config/system_prompts.yaml 读取，替换 $fact_list。"""
-    return Template(get_prompt("memory.consolidation")).safe_substitute(fact_list=fact_list)
-
-
-# 向后兼容别名（内部代码仍可用，外部不导出）
-def _get_extraction_format_block() -> str:
-    return _extraction_format_block()
-
-
-def _normalize_keywords(val: Any) -> List[str]:
-    """将 LLM 返回的 keywords/关键词 规范为最多 2 个非空字符串的列表，供写入 tags。"""
-    if val is None:
-        return []
-    if isinstance(val, list):
-        out = [str(x).strip() for x in val if str(x).strip()][:2]
-        return out
-    s = str(val).strip()
-    if not s:
-        return []
-    return [x for x in s.split() if x][:2]
 
 
 class MemoryManager:
@@ -186,7 +141,8 @@ class MemoryManager:
 
         # turn_counter（用于 auto_extract 频率控制）
         self._meta_path = os.path.join(storage_root, "memory_meta.json")
-        self._turn_counter: int = self._load_turn_counter()
+        self._extraction_lock = asyncio.Lock()
+        self._fact_index_lock = asyncio.Lock()
 
         # 启动日志
         vec_ok = bool(self.vectors and self.vectors.is_available())
@@ -257,7 +213,7 @@ class MemoryManager:
         按 weight 降序再按 updated_at 降序。只返回 content/weight/updated_at 字段。
         """
         from datetime import datetime
-        all_facts = self.facts.get_all()
+        all_facts = self.facts.get_recallable()
         filtered = [f for f in all_facts if f.weight >= min_weight]
         # 有情感注记的排前面
         filtered.sort(
@@ -286,135 +242,113 @@ class MemoryManager:
         if not self.vectors or not self.vectors.is_available():
             logger.warning("[MemoryManager] sync_facts_to_vectors: 向量库不可用")
             return 0
-        existing = await asyncio.to_thread(self.vectors.get_all_fact_ids)
+        existing = await asyncio.to_thread(self.vectors.get_all)
+        by_id = {row["metadata"]["fact_id"]: row for row in existing
+                 if (row.get("metadata") or {}).get("fact_id")}
         count = 0
-        for fact in self.facts.get_all():
-            if fact.id in existing:
+        for fact in self.facts.get_active():
+            if fact.id in by_id and self.fact_vector_matches(fact, by_id[fact.id]):
                 continue
-            meta = _vector_metadata_for_fact(fact)
-            doc = _vector_document_for_fact(fact)
-            await asyncio.to_thread(self.vectors.add, doc, metadata=meta)
-            log_vector_add(self._profile_id, doc, fact_id=fact.id)
-            count += 1
-        logger.info("[MemoryManager] sync_facts_to_vectors 完成：新增 %d 条（共 %d 条事实）",
-                    count, self.facts.count())
+            count += int(await self.reembed_fact(fact.id))
         return count
 
-    async def auto_extract(self, recent_turns: List[Dict], profile: Dict, app,
-                           emotion_context: Optional[Dict] = None) -> None:
-        """LLM 自动提取事实（fire-and-forget 任务）。
+    def get_current_address_fact(self):
+        return next((fact for fact in self.facts.get_active() if fact.kind == "address"), None)
 
-        emotion_context: 可选，来自 EmotionEngine 的当前状态快照，
-                         用于给向量记忆附加情感标签（18.1 情感记忆图谱）。
-        """
-        if not self._cfg.get("enabled"):
+    @staticmethod
+    def fact_vector_matches(fact, vector) -> bool:
+        # Older vector entries predate the canonical document format.
+        return not fact.kind or vector.get("document") == _vector_document_for_fact(fact)
+
+    def _fact_index_cleanup(self):
+        now = time.time()
+        active = {f.id: f for f in self.facts.get_active(now)}
+        expired = sum(not f.archived and f.expires_at is not None and f.expires_at <= now
+                      for f in self.facts.get_all())
+        obsolete = []
+        if self.vectors and self.vectors.is_available():
+            for vector in self.vectors.get_all():
+                fact_id = (vector.get("metadata") or {}).get("fact_id")
+                if fact_id and (fact_id not in active or not self.fact_vector_matches(active[fact_id], vector)):
+                    obsolete.append(vector["id"])
+        return len(active), expired, obsolete
+
+    def preview_fact_index(self) -> dict:
+        active, expired, obsolete = self._fact_index_cleanup()
+        return {"active": active, "expired": expired, "vectors_removed": len(obsolete)}
+
+    async def maintain_fact_index(self) -> dict:
+        """Prune vectors for unavailable or changed facts without requesting embeddings."""
+        async with self._fact_index_lock:
+            active, expired, obsolete = await asyncio.to_thread(self._fact_index_cleanup)
+            removed = 0
+            for vector_id in obsolete:
+                removed += int(bool(await asyncio.to_thread(self.vectors.delete, vector_id)))
+        return {"active": active, "expired": expired, "vectors_removed": removed}
+
+    async def auto_extract(self, sources: Dict[str, Any], profile: Dict, app,
+                           emotion_context: Optional[Dict] = None, *, first_message=None) -> None:
+        """Extract each source's new messages once, committing facts and cursors together."""
+        if not self._cfg.get("enabled") or self._cfg.get("extraction_llm_preset") == "__none__":
             return
 
-        freq = int(self._cfg.get("extraction_frequency", 5))
-        self._turn_counter += 1
-        self._save_turn_counter()
+        async with self._extraction_lock:
+            if not sources:
+                return
+            trigger = first_message[0] if first_message else next(iter(sources))
+            frequency = max(1, int(self._cfg.get("extraction_frequency", 5)))
+            cursors = self.facts.source_cursors()
+            unseen = trigger not in cursors
+            due = self._increment_extraction_counter(trigger) % frequency == 0
+            if not unseen and not due:
+                return
 
-        if self._turn_counter % freq != 0:
-            return
+            revision, cursors, facts = self.facts.extraction_snapshot()
+            if trigger not in cursors:
+                tail = sources[trigger].memory_tail_id()
+                cursors[trigger] = min(tail, first_message[1] - 1) if first_message else tail
 
-        logger.info("[MemoryManager] auto_extract 触发 (turn=%d profile=%s)",
-                    self._turn_counter, self._profile_id)
+            rows = []
+            next_cursors = dict(cursors)
+            if due:
+                limit = max(2, 40 // max(1, len(sources)))
+                for source, store in sources.items():
+                    # Another store may already contain a user message whose first reply
+                    # is still streaming. Initialize that store on its own callback.
+                    if source not in cursors:
+                        continue
+                    fresh = store.memory_messages_after(cursors[source], limit)
+                    if fresh:
+                        next_cursors[source] = fresh[-1]["id"]
+                    rows.extend(dict(row, source=source) for row in fresh if _is_memory_turn(row))
+                rows.sort(key=lambda row: (row["timestamp"], row["source"], row["id"]))
 
-        try:
-            facts_list = await self._extract_facts_llm(recent_turns, profile, app)
-        except Exception as e:
-            logger.error("[MemoryManager] _extract_facts_llm 失败: %s", e)
-            log_error("memory", str(e), {"profile_id": self._profile_id}, traceback_str=traceback.format_exc())
-            return
+            if not any(row["role"] == "user" for row in rows):
+                if unseen or next_cursors != cursors:
+                    self.facts.apply_extraction(revision, facts, next_cursors)
+                return
 
-        # ── 批内去重：同次提取结果中的近似重复直接丢弃 ──────────────────────
-        deduped: List[Dict] = []
-        seen_tokens: List[set] = []
-        for item in facts_list:
-            toks = set(item.get("content", "").lower().split())
-            if not toks:
-                continue
-            if any(len(toks & s) / len(toks | s) > 0.7 for s in seen_tokens if s):
-                continue
-            deduped.append(item)
-            seen_tokens.append(toks)
-        facts_list = deduped
-
-        # 构建情感 metadata 片段（仅在 emotion_context 有值时附加）
-        emotion_meta: Dict[str, Any] = {}
-        if emotion_context:
-            emotion_meta["ai_emotion"]   = emotion_context.get("primary_emotion", "")
-            emotion_meta["ai_energy"]    = float(emotion_context.get("energy_level", 80.0))
-            # user_sentiment 预留字段（待 NLI 分类器接入后填充）
-            if emotion_context.get("user_sentiment"):
-                emotion_meta["user_sentiment"] = emotion_context["user_sentiment"]
-
-        threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
-        added_count = 0
-        for item in facts_list:
-            content = (item.get("content", "") or "").strip()[:50]  # 单条事实不超过50字
-            category = item.get("category", "other")
-            emotional_note = item.get("emotional_note", "")
-            # weight 0-2，与 score 公式兼容
-            raw_weight = item.get("weight")
-            if raw_weight is None:
-                raw_weight = item.get("confidence")  # 兼容旧格式：若仍有 confidence 可按 (x/5)*2 转为 0-2
+            references = {f'{row["source"]}:{row["id"]}': row for row in rows}
+            candidates = choose_candidates(facts, rows)
             try:
-                w = float(raw_weight) if raw_weight is not None else 1.0
-                if 0 <= w <= 2:
-                    weight = round(w, 2)
-                else:
-                    # 兼容旧 1-5 的 confidence：映射到 0-2
-                    if 1 <= w <= 5:
-                        weight = round((w - 1) / 4 * 2, 2)  # 1->0, 5->2
-                    else:
-                        weight = round(max(0.0, min(2.0, w)), 2)
-            except (TypeError, ValueError):
-                weight = 1.0
+                operations = await self._extract_facts_llm(rows, profile, app, candidates=candidates)
+            except Exception:
+                logger.warning("[MemoryManager] Extraction failed; pending messages kept (profile=%s)", self._profile_id)
+                return
 
-            tags = item.get("keywords", [])
-            if not isinstance(tags, list):
-                tags = _normalize_keywords(tags)
-
-            if not _passes_filters(content):
-                continue
-            # weight 阈值：小于等于阈值的不采纳
-            if weight <= threshold:
-                logger.debug("[MemoryManager] 低权重事实跳过 (weight=%.2f <= %.2f): %.40s",
-                             weight, threshold, content)
-                continue
-
-            fact = self.facts.add(content, category=category, source="auto",
-                                  emotional_note=emotional_note, tags=tags, weight=weight)
-            if fact:
-                added_count += 1
-                log_fact_add(
-                    self._profile_id,
-                    fact.id,
-                    fact.content,
-                    fact.category,
-                    fact.source,
-                    weight=fact.weight,
-                    tags=fact.tags,
-                    pinned=fact.pinned,
-                    emotional_note=fact.emotional_note,
-                    updated_at=fact.updated_at,
-                    is_manual=fact.is_manual,
-                )
-                # 同步写向量库：嵌入文本 = 事实正文 + tags，参与语义阈值；metadata 不含 weight/pinned
-                if self.vectors and self.vectors.is_available():
-                    vec_meta = _vector_metadata_for_fact(fact, extra=emotion_meta)
-                    doc = _vector_document_for_fact(fact)
-                    await asyncio.to_thread(self.vectors.add, doc, metadata=vec_meta)
-                    log_vector_add(self._profile_id, doc, fact_id=fact.id)
-
-        log_memory_extract(self._profile_id, self._turn_counter,
-                           len(facts_list), added_count)
-        logger.info("[MemoryManager] auto_extract 完成 profile=%s extracted=%d added=%d",
-                    self._profile_id, len(facts_list), added_count)
-        # 人格演化触发已移出此处：旧实现挂在 auto_extract 末尾，会被 memory 总开关
-        # 绑死，且 turn_counter % interval 的判定在频率不整除时会永远命不中。
-        # 现由 chat.py::_fire_persona_evolution_check 按消息计数独立触发。
+            if not all(sources[row["source"]].has_memory_evidence(row) for row in rows):
+                return
+            try:
+                changed = apply_operations(facts, operations, references, candidates,
+                                           float(self._cfg.get("extraction_weight_threshold", 0.5)))
+            except ValueError:
+                logger.warning("[MemoryManager] Invalid extraction evidence; pending messages kept")
+                return
+            if not self.facts.apply_extraction(revision, facts, next_cursors):
+                return
+            if self.vectors and self.vectors.is_available():
+                for fact_id in changed:
+                    await self.reembed_fact(fact_id, emotion_context=emotion_context)
 
     def _build_day_summary_context(self, date_str: str, msg_count: int, profile: Dict, app) -> Dict[str, str]:
         """收集日摘要所需的上下文变量：角色名、近期日记、好感状态、活跃度备注。"""
@@ -529,10 +463,9 @@ class MemoryManager:
 
         def _msg_role(m): return m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
         def _msg_content(m): return m.get("content", "") if isinstance(m, dict) else getattr(m, "content", "")
-        def _msg_sender(m): return (m.get("sender") if isinstance(m, dict) else getattr(m, "sender", None)) or ""
 
         user_name = getattr(getattr(app, "state", None) and getattr(app.state, "config", None), "user_name", "用户") or "用户"
-        def _is_human(m): return _msg_sender(m).strip() == user_name or (not _msg_sender(m).strip() and _msg_role(m) == "user")
+        def _is_human(m): return _msg_role(m) == "user"
 
         if quiet:
             day_msgs = []
@@ -679,181 +612,28 @@ class MemoryManager:
             log_error("memory", str(e), {"profile_id": self._profile_id, "op": "day_summary"}, traceback_str=traceback.format_exc())
         return None
 
-    async def run_consolidation_batch(
-        self, app: Any, profile: Dict[str, Any], batch: List[Any]
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """将一批「已很淡」的事实交给 LLM 合并为 1～2 条新事实，新摘要入库 + 移除旧事实向量（事实库不删）。
-        返回 (成功, detail)；detail 含 added/added_contents/vectors_removed/vectors_removed_contents/count，
-        供记忆变更日志记录，失败或无事可做时为 {}。"""
-        if not batch:
-            return True, {}
-        valid_categories = {"habit", "preference", "taboo", "relationship", "location", "milestone", "ai_insight", "other"}
-        fact_list = "\n".join(
-            f"{f.content} [{getattr(f, 'category', 'other')}] [{getattr(f, 'emotional_note', '')}]"
-            for f in batch
-        )
-        base_prompt = (profile.get("memory_config") or {}).get("extraction_prompt") or self._cfg.get("extraction_prompt") or "从对话中提取事实，保持角色口吻。"
-        base_prompt = self._expand_card_macros(base_prompt, profile, app)
-        system_content = base_prompt + _consolidation_appendix(fact_list) + _extraction_format_block()
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": get_prompt("memory.consolidation_user")},
-        ]
-        raw = ""
-        try:
-            from src.llm.registry import get_provider
-            extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
-            # 特殊值："__none__"=不做合并；""=使用激活模型
-            if extraction_preset_name == "__none__":
-                return False, {}
-            if extraction_preset_name:
-                preset = app.state.config.get_llm_preset(extraction_preset_name)
-            else:
-                preset = app.state.config.get_active_llm_preset()
-            _model = (preset or {}).get("model", "unknown")
-            log_secondary_llm_call(
-                role="memory_consolidation",
-                messages=messages,
-                model=_model,
-                gen_kwargs={},
-                session_id=self._profile_id,
-            )
-            llm = get_provider(preset)
-            t0 = time.time()
-            async for token in llm.stream_chat(messages):
-                raw += token
-            log_secondary_llm_response(
-                role="memory_consolidation",
-                response=raw,
-                model=_model,
-                session_id=self._profile_id,
-                duration_ms=int((time.time() - t0) * 1000),
-            )
-        except Exception as e:
-            logger.warning("[MemoryManager] 合并 LLM 调用失败 profile=%s: %s", self._profile_id, e)
-            return False, {}
-        raw = raw.strip()
-        for prefix in ("```json", "```"):
-            if raw.startswith(prefix):
-                raw = raw[len(prefix):].strip()
-            if raw.endswith("```"):
-                raw = raw[:-3].strip()
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("[MemoryManager] 合并 JSON 解析失败 profile=%s，重试一次", self._profile_id)
-            try:
-                from src.llm.registry import get_provider as _get_provider
-                _preset = app.state.config.get_llm_preset(extraction_preset_name) if extraction_preset_name else app.state.config.get_active_llm_preset()
-                _llm = _get_provider(_preset)
-                messages_retry = messages + [{"role": "user", "content": "请严格只输出 JSON 数组，不要任何解释。"}]
-                raw = ""
-                async for token in _llm.stream_chat(messages_retry):
-                    raw += token
-                raw = raw.strip()
-                for p in ("```json", "```"):
-                    if raw.startswith(p):
-                        raw = raw[len(p):].strip()
-                if raw.endswith("```"):
-                    raw = raw[:-3].strip()
-                data = json.loads(raw)
-            except Exception as e2:
-                logger.warning("[MemoryManager] 合并重试仍失败 profile=%s: %s", self._profile_id, e2)
-                return False, {}
-        if not isinstance(data, list):
-            return False, {}
-        min_old_updated = min(f.updated_at for f in batch)
-        valid_items = []
-        # 合并产出是 1～2 条概括性陈述，允许比「单条提取 50 字」更长，上限 500 字
-        CONSOLIDATION_CONTENT_MAX = 500
-        for item in data[:2]:
-            content = (item.get("content") or "").strip()
-            if not content or len(content) > CONSOLIDATION_CONTENT_MAX:
-                continue
-            cat = item.get("category", "other")
-            if cat not in valid_categories:
-                cat = "other"
-            try:
-                w = float(item.get("weight", 1.0))
-                weight = round(max(0.0, min(2.0, w)), 2)
-            except (TypeError, ValueError):
-                weight = 1.0
-            emotional_note = (item.get("emotional_note") or "")[:15]
-            tags = item.get("keywords", [])
-            if not isinstance(tags, list):
-                tags = _normalize_keywords(tags)
-            valid_items.append({"content": content, "category": cat, "weight": weight, "emotional_note": emotional_note, "tags": tags})
-        if not valid_items:
-            return False, {}
-        added = []
-        for it in valid_items:
-            fact = self.facts.add(
-                it["content"],
-                category=it["category"],
-                weight=it["weight"],
-                source="auto",
-                emotional_note=it["emotional_note"],
-                tags=it["tags"],
-                updated_at=min_old_updated,
-            )
-            if not fact:
-                logger.warning("[MemoryManager] 合并写新事实失败（重复或错误）profile=%s", self._profile_id)
-                return False, {}
-            added.append(fact)
-            log_fact_add(
-                self._profile_id,
-                fact.id,
-                fact.content,
-                fact.category,
-                "consolidation",
-                weight=fact.weight,
-                tags=fact.tags,
-                pinned=fact.pinned,
-                emotional_note=fact.emotional_note or "",
-                updated_at=fact.updated_at,
-                is_manual=fact.is_manual,
-            )
-            if self.vectors and self.vectors.is_available():
-                doc = _vector_document_for_fact(fact)
-                meta = _vector_metadata_for_fact(fact)
-                await asyncio.to_thread(self.vectors.add, doc, metadata=meta, skip_dedup=True)
-                log_vector_add(self._profile_id, doc, fact_id=fact.id)
-        # 事实库为永久 archive：合并只新增摘要事实，不删除被合并的旧事实（仅手动删除可删事实）。
-        # 仅从向量库移除旧事实的向量，避免检索时同时命中旧条与摘要造成重复。
-        old_ids = [f.id for f in batch]
-        if self.vectors and self.vectors.is_available():
-            n_vec = self.vectors.delete_by_fact_ids(old_ids)
-            log_vector_delete(self._profile_id, n_vec, "consolidation", fact_ids=old_ids)
-        logger.info(
-            "[MemoryManager] 合并完成 profile=%s 旧向量删除 %d 新事实写入 %d（事实库未删，永久保留）",
-            self._profile_id, len(old_ids), len(added),
-        )
-        # detail 供 memory_changelog 记录：added=新摘要 fact id；vectors_removed=被移除向量的旧事实 id；
-        # *_contents 为对应全文（日志展示用，不截断）
-        detail = {
-            "added": [f.id for f in added],
-            "added_contents": [f.content for f in added],
-            "vectors_removed": list(old_ids),
-            "vectors_removed_contents": [f.content for f in batch],
-            "count": len(added),
-        }
-        return True, detail
-
-    async def reembed_fact(self, fact_id: str) -> bool:
-        """把某条仍在档案里的事实重新嵌入向量库（记忆变更回滚用）。"""
+    async def reembed_fact(self, fact_id: str, emotion_context: Optional[Dict] = None) -> bool:
+        """Replace the index for a changed fact, including legacy rollback callers."""
         if not (self.vectors and self.vectors.is_available()):
             return False
-        fact = self.facts.get_by_id(fact_id)
-        if not fact:
-            return False
-        try:
-            doc = _vector_document_for_fact(fact)
-            meta = _vector_metadata_for_fact(fact)
-            await asyncio.to_thread(self.vectors.add, doc, metadata=meta, skip_dedup=True)
-            return True
-        except Exception as e:
-            logger.warning("[MemoryManager] reembed_fact 失败 %s: %s", fact_id, e)
-            return False
+        async with self._fact_index_lock:
+            fact = self.facts.get_by_id(fact_id)
+            if not fact:
+                return False
+            try:
+                await asyncio.to_thread(self.vectors.delete_by_fact_ids, [fact_id])
+                if not fact.is_active() or self.facts.get_by_id(fact_id) is not fact:
+                    return False
+                extra = {}
+                if emotion_context:
+                    extra["ai_emotion"] = emotion_context.get("primary_emotion", "")
+                    extra["ai_energy"] = emotion_context.get("energy_level", 80.0)
+                meta = _vector_metadata_for_fact(fact, extra)
+                return bool(await asyncio.to_thread(self.vectors.add, _vector_document_for_fact(fact),
+                                                    metadata=meta, skip_dedup=True))
+            except Exception:
+                logger.warning("[MemoryManager] Reindex failed for fact %s", fact_id)
+                return False
 
     def get_summary_range_preview(
         self,
@@ -1034,193 +814,90 @@ class MemoryManager:
 
     # ── 私有方法 ──────────────────────────────────────────────────────────────
 
-    async def _extract_facts_llm(self, recent_turns: List[Dict],
-                                 profile: Dict, app) -> List[Dict]:
-        """LLM 提取事实列表，返回 [{content, category}]。认用户用 sender。"""
-        if not recent_turns:
+    async def _extract_facts_llm(self, recent_turns: List[Dict], profile: Dict, app,
+                                 *, candidates=()) -> List[Dict]:
+        source_turns = [message for message in recent_turns if _is_memory_turn(message)]
+        if not source_turns:
             return []
-
-        user_name = getattr(getattr(app, "state", None) and getattr(app.state, "config", None), "user_name", "用户") or "用户"
         persona_name = profile.get("display_name") or profile.get("name", "AI")
-        user_label = "用户"
-
-        def _is_human(m):
-            s = (m.get("sender") or "").strip()
-            return s == user_name or (not s and m.get("role") == "user")
-
-        source_turns = [m for m in recent_turns if _is_memory_turn(m)]
         conv_text = "\n".join(
-            f"{user_label if _is_human(m) else persona_name}: {m.get('content', '')}"
-            for m in source_turns
+            f'[{row.get("source", "single")}:{row.get("id", "?")}] '
+            f'{("用户" if row["role"] == "user" else row.get("sender") or persona_name)}: '
+            f'{row["content"][:1500]}'
+            for row in source_turns
         )
-        if not conv_text.strip():
-            logger.warning(
-                "[MemoryManager] recent_turns 中无 user/assistant 消息，跳过提取 (profile=%s len=%s)",
-                self._profile_id, len(recent_turns),
-            )
-            return []
 
         custom_prompt = self._expand_card_macros(self._cfg.get("extraction_prompt", ""), profile, app)
         if custom_prompt:
-            extraction_prompt = custom_prompt.replace("{conversation}", conv_text)
-            # 若自定义模板里没有占位符 {conversation}，replace 不会插入对话，导致模型只收到人设而输出角色话而非 JSON
-            if conv_text.strip() and conv_text not in extraction_prompt:
-                logger.warning(
-                    "[MemoryManager] extraction_prompt 中未包含 {conversation}，已强制追加对话 (profile=%s)",
-                    self._profile_id,
-                )
-                extraction_prompt = extraction_prompt.rstrip() + "\n\n对话内容：\n" + conv_text
-            # 无论自定义内容如何，末尾统一追加格式块与采纳阈值说明
-            threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
-            extraction_prompt = extraction_prompt.rstrip() + _extraction_format_block()
-            extraction_prompt += f"\n当前采纳阈值：weight 需大于 {threshold} 才会被采纳（即 weight 小于等于 {threshold} 的事实不会被采纳）。\n"
+            prompt = custom_prompt.replace("{conversation}", conv_text)
+            if conv_text not in prompt:
+                prompt += "\n\n对话内容：\n" + conv_text
         else:
-            threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
-            extraction_prompt = (
-                Template(get_prompt("memory.extraction_default")).safe_substitute(
-                    user_label=user_label,
-                    persona_name=persona_name,
-                    conv_text=conv_text,
-                )
-                + _extraction_format_block()
-                + f"\n当前采纳阈值：weight 需大于 {threshold} 才会被采纳（即 weight 小于等于 {threshold} 的事实不会被采纳）。\n"
-            )
-
+            prompt = Template(get_prompt("memory.extraction_default")).safe_substitute(
+                user_label="用户", persona_name=persona_name, conv_text=conv_text)
+        threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
+        previous = [{"fact_id": f.id, "kind": f.kind or "stable", "category": f.category,
+                     "content": f.content, "event_date": f.event_date, "protected": f.is_manual or f.pinned}
+                    for f in candidates]
         from src.config.prompt_loader import get_locale
-        extraction_prompt += '\n\n' + write_time_context(source_turns, get_locale())
+        prompt += "\n\n" + write_time_context(source_turns, get_locale())
+        prompt += "\n\nExisting candidate facts (data):\n" + json.dumps(previous, ensure_ascii=False)
+        prompt += "\n\n" + FORMAT + f"\nWeight must be greater than {threshold}."
 
+        from src.llm.registry import get_provider
+        from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response
+        name = self._cfg.get("extraction_llm_preset", "")
+        if name == "__none__":
+            return []
+        preset = app.state.config.get_llm_preset(name) if name else app.state.config.get_active_llm_preset()
+        messages = [{"role": "user", "content": prompt}]
+        model = preset.get("model", "unknown")
+        log_secondary_llm_call(role="memory_extract", messages=messages, model=model,
+                               gen_kwargs={}, session_id=self._profile_id)
+        started = time.time()
+        raw = ""
+        async for token in get_provider(preset).stream_chat(messages):
+            if token.startswith("[LLM Error:") or len(raw) + len(token) > 32_000:
+                raise ValueError("Invalid extraction model response")
+            raw += token
+        raw = raw.strip()
+        log_secondary_llm_response(role="memory_extract", response=raw, model=model,
+                                   session_id=self._profile_id, duration_ms=int((time.time() - started) * 1000))
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list) or len(parsed) > 24 or any(
+            not isinstance(op, dict) or op.get("op") not in ("add", "confirm", "update", "skip") for op in parsed
+        ):
+            raise ValueError("Expected a bounded array of fact operations")
+        return parsed
+
+    def _increment_extraction_counter(self, source: str) -> int:
+        data = {}
         try:
-            from src.llm.registry import get_provider
-            from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response
-            # 支持独立的提取模型配置；未配置则用当前激活 preset
-            extraction_preset_name = self._cfg.get("extraction_llm_preset", "")
-            # 特殊值："__none__"=不做记忆提取；""=使用激活模型
-            if extraction_preset_name == "__none__":
-                logger.debug("[MemoryManager] extraction_llm_preset='__none__', skip extraction")
-                return []
-            if extraction_preset_name:
-                preset = app.state.config.get_llm_preset(extraction_preset_name)
-            else:
-                preset = app.state.config.get_active_llm_preset()
-            llm = get_provider(preset)
-            _extract_model = preset.get("model", "unknown") if preset else "unknown"
-            _extract_msgs = [{"role": "user", "content": extraction_prompt}]
-            log_secondary_llm_call(
-                role="memory_extract",
-                messages=_extract_msgs,
-                model=_extract_model,
-                gen_kwargs={},
-                session_id=self._profile_id,
-            )
-            _t0 = time.time()
-            raw = ""
-            _llm_exc = None
-            for _attempt in range(2):  # 最多重试 1 次
-                try:
-                    raw = ""
-                    async for token in llm.stream_chat(_extract_msgs):
-                        raw += token
-                    _llm_exc = None
-                    break
-                except Exception as _e:
-                    _llm_exc = _e
-                    if _attempt == 0:
-                        logger.warning("[MemoryManager] _extract_facts_llm stream 失败，重试: %s", _e)
-                        import asyncio as _asyncio
-                        await _asyncio.sleep(3.0)
-            if _llm_exc:
-                raise _llm_exc
-
-            log_secondary_llm_response(
-                role="memory_extract",
-                response=raw,
-                model=_extract_model,
-                session_id=self._profile_id,
-                duration_ms=int((time.time() - _t0) * 1000),
-            )
-
-            # 解析 JSON，兼容两种格式：
-            #   新格式：[{"content": "...", "category": "..."}]
-            #   旧格式：{"facts": ["字符串1", "字符串2"]}
-            raw = raw.strip()
-            if raw.startswith("```"):
-                lines = raw.splitlines()
-                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            parsed = json.loads(raw)
-
-            # 统一为 [{"content": ..., "category": ...}]
-            if isinstance(parsed, dict) and "facts" in parsed:
-                parsed = parsed["facts"]
-            if not isinstance(parsed, list):
-                logger.warning("[MemoryManager] 事实提取结果非数组结构，跳过: %.60s", str(parsed)[:60])
-                return []
-
-            _VALID_CATEGORIES = frozenset([
-                "habit", "preference", "taboo", "relationship",
-                "location", "milestone", "ai_insight", "other",
-            ])
-            result = []
-            for item in parsed:
-                if isinstance(item, str):
-                    result.append({
-                        "content": item, "category": "other",
-                        "emotional_note": "", "weight": 1.0, "keywords": [],
-                    })
-                elif isinstance(item, dict) and item.get("content"):
-                    category = item.get("category", "other")
-                    if category not in _VALID_CATEGORIES:
-                        logger.debug("[MemoryManager] 未知 category '%s'，归入 other", category)
-                        category = "other"
-                    # weight 0-2；兼容旧字段 confidence(1-5) 转为 0-2
-                    raw_w = item.get("weight")
-                    if raw_w is not None:
-                        try:
-                            w = max(0.0, min(2.0, float(raw_w)))
-                        except (TypeError, ValueError):
-                            w = 1.0
-                    else:
-                        c = item.get("confidence")
-                        if c is not None:
-                            try:
-                                c = max(0, min(5, int(c)))
-                                w = (c - 1) / 4 * 2 if c >= 1 else 0.0  # 1->0, 5->2
-                            except (TypeError, ValueError):
-                                w = 1.0
-                        else:
-                            w = 1.0
-                    result.append({
-                        "content": item.get("content", "").strip(),
-                        "category": category,
-                        "emotional_note": str(item.get("emotional_note") or "").strip()[:15],
-                        "weight": w,
-                        "keywords": _normalize_keywords(item.get("keywords") or item.get("关键词")),
-                    })
-            return result
-        except json.JSONDecodeError as e:
-            logger.warning("[MemoryManager] 事实提取 JSON 解析失败: %s | raw=%.100s", e, raw)
-        except Exception as e:
-            logger.error("[MemoryManager] _extract_facts_llm 失败: %s", e)
-            log_error("memory", str(e), {"profile_id": self._profile_id, "op": "extract_llm"}, traceback_str=traceback.format_exc())
-        return []
-
-    def _load_turn_counter(self) -> int:
-        try:
-            if os.path.exists(self._meta_path):
-                with open(self._meta_path, "r", encoding="utf-8") as f:
-                    return int(json.load(f).get("turn_counter", 0))
-        except Exception:
+            with open(self._meta_path, encoding="utf-8") as fp:
+                data = json.load(fp)
+        except (OSError, ValueError):
             pass
-        return 0
-
-    def _save_turn_counter(self):
+        if not isinstance(data, dict):
+            data = {}
+        counters = data.get("extraction_turns")
+        if not isinstance(counters, dict):
+            counters = {}
+        previous = counters.get(source, data.get("turn_counter", 0) if source == "single" else 0)
+        current = (previous if type(previous) is int and previous >= 0 else 0) + 1
+        counters[source] = current
+        data["extraction_turns"] = counters
+        tmp = self._meta_path + ".tmp"
         try:
             os.makedirs(os.path.dirname(self._meta_path), exist_ok=True)
-            tmp = self._meta_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"turn_counter": self._turn_counter}, f)
+            with open(tmp, "w", encoding="utf-8") as fp:
+                json.dump(data, fp)
             os.replace(tmp, self._meta_path)
-        except Exception as e:
-            logger.warning("[MemoryManager] 保存 turn_counter 失败: %s", e)
+        except OSError as error:
+            logger.warning("[MemoryManager] Could not save extraction cadence: %s", error)
+        return current
 
     def shutdown(self) -> None:
         """Best-effort release resources for profile deletion.

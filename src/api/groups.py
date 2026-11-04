@@ -471,7 +471,7 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
                     # 群聊也触发记忆提取：该人格的 fact/向量写入（recent_turns 来自本群 store）
                     try:
                         from src.api.chat import _fire_memory_tasks
-                        _fire_memory_tasks(session, store, request.app, shown_fact_ids=None)
+                        _fire_memory_tasks(session, store, request.app, group_id=group_id, user_message_id=user_message_id)
                     except Exception as mem_err:
                         logger.warning("[group_chat] _fire_memory_tasks 失败: %s", mem_err)
                     prev_sender = display_name

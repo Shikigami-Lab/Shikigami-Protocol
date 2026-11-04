@@ -34,7 +34,12 @@ class ReflectionUserPersonaSegment(PromptSegment):
         portrait_enabled = portrait_cfg.get("enabled", True)
         portrait_text = (portrait_block.get("content") or "").strip() if portrait_enabled else ""
 
-        if not any([name, introduction, portrait_text]):
+        manager = ctx.memory_manager
+        current_address = None
+        if portrait_enabled and portrait_cfg.get("address_forms_enabled", True) and manager and manager._cfg.get("enabled"):
+            current_address = manager.get_current_address_fact()
+
+        if not any([name, introduction, portrait_text, current_address]):
             return SegmentResult(messages=[])
 
         lines = ["【你所认识的人】"]
@@ -42,6 +47,9 @@ class ReflectionUserPersonaSegment(PromptSegment):
             lines.append(f"他叫{name}。")
         if introduction:
             lines.append(introduction)
+
+        if current_address:
+            lines.append("当前称呼偏好（优先于旧画像和旧对话） " + current_address.content)
 
         if portrait_text:
             lines.append("")

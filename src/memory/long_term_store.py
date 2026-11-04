@@ -1,21 +1,33 @@
 """长期事实存储 — profiles/{id}/long_term_facts.json
 
-事实永久保存，无 TTL，无自动删除：
-  - add() 发现重复时跳过，不修改任何已有事实
-  - get_top_n() 只排序切片，不删除
-  - 唯一删除入口：delete(fact_id)，由用户或命令系统显式调用
+事实原文和旧版本保留，日常使用按有效期过滤。
 """
 import json
 import logging
 import math
 import os
+import re
+import threading
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import List, Optional
 from src.utils.memory_time import has_floating_date
 
 logger = logging.getLogger(__name__)
+
+_WRITE_LOCK = threading.Lock()
+_LEGACY_ADDRESS = re.compile(
+    r"^用户.{0,10}(?:称呼|叫)(?:\s*AI\s*|你|我|角色)(?:为|作|做)?\s*\S"
+    r"|^(?:the )?user.{0,26}(?:calls?|address(?:es)?) (?:the ai|you|the character)\b",
+    re.IGNORECASE,
+)
+
+
+def _disk_stamp(stat):
+    return stat.st_ino, stat.st_size, stat.st_mtime_ns
+
 
 _VALID_CATEGORIES = frozenset({
     "habit", "preference", "taboo", "relationship",
@@ -36,6 +48,18 @@ class LongTermFact:
     tags: List[str] = field(default_factory=list)
     pinned: bool = False
     emotional_note: str = ""     # AI 对这条事实的情感注记，如"令人担心"，提取时生成，可为空
+
+    kind: str = ""
+    event_date: Optional[str] = None
+    expires_at: Optional[float] = None
+    evidence: List[dict] = field(default_factory=list)
+    versions: List[dict] = field(default_factory=list)
+    archived: bool = False
+
+    def is_active(self, now: Optional[float] = None) -> bool:
+        return not self.archived and (
+            self.expires_at is None or self.expires_at > (time.time() if now is None else now)
+        )
 
     def score(self) -> float:
         """排序得分：weight * 0.7 + recency * 0.3"""
@@ -59,6 +83,12 @@ class LongTermFact:
             tags=d.get("tags", []),
             pinned=bool(d.get("pinned", False)),
             emotional_note=str(d.get("emotional_note", "")),
+            kind=d.get("kind") or "",
+            event_date=d.get("event_date"),
+            expires_at=d.get("expires_at") if type(d.get("expires_at")) in (int, float) else None,
+            evidence=list(d.get("evidence") or []),
+            versions=list(d.get("versions") or []),
+            archived=bool(d.get("archived", False)),
         )
 
 
@@ -68,6 +98,9 @@ class LongTermStore:
     def __init__(self, storage_root: str):
         self._path = os.path.join(storage_root, "long_term_facts.json")
         self._facts: List[LongTermFact] = []
+        self._cursors: dict[str, int] = {}
+        self._revision = 0
+        self._disk_stamp = None
         self._load()
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -78,6 +111,7 @@ class LongTermStore:
             updated_at: Optional[float] = None) -> Optional[LongTermFact]:
         """添加新事实。重复时 skip（不修改、不删除已有事实），返回 None。
         updated_at: 可选，合并摘要时传入被合并事实的最旧时间以保持 recency 语义。"""
+        self._refresh()
         content = content.strip()
         if not content:
             return None
@@ -99,8 +133,8 @@ class LongTermStore:
         )
         if updated_at is not None:
             fact.updated_at = float(updated_at)
-        self._facts.append(fact)
-        self._save()
+        if not self._commit([*self._facts, fact], self._cursors):
+            return None
         logger.info("[LongTermStore] 新增事实 id=%s category=%s source=%s", fact.id, fact.category, fact.source)
         return fact
 
@@ -109,9 +143,11 @@ class LongTermStore:
         只有 content / category 变更才刷新 updated_at（影响 score 衰减）。
         pinned / weight / tags 为元数据，不影响时间戳。
         """
+        self._refresh()
         fact = self._get_by_id(fact_id)
         if not fact:
             return False
+        fact = deepcopy(fact)
         semantic_changed = False
         for k, v in kwargs.items():
             if k == "content" and v:
@@ -129,44 +165,71 @@ class LongTermStore:
                 fact.pinned = bool(v)
         if semantic_changed:
             fact.updated_at = time.time()
-        self._save()
-        return True
+        return self._commit([fact if f.id == fact_id else f for f in self._facts], self._cursors)
 
     def delete(self, fact_id: str) -> bool:
         """按 ID 删除事实（唯一删除入口）。"""
+        self._refresh()
         before = len(self._facts)
-        self._facts = [f for f in self._facts if f.id != fact_id]
-        if len(self._facts) < before:
-            self._save()
+        remaining = [f for f in self._facts if f.id != fact_id]
+        if len(remaining) < before and self._commit(remaining, self._cursors):
             logger.info("[LongTermStore] 删除事实 id=%s", fact_id)
             return True
         return False
 
     def get_all(self) -> List[LongTermFact]:
+        self._refresh()
         return list(self._facts)
+
+    def get_active(self, now: Optional[float] = None) -> List[LongTermFact]:
+        self._refresh()
+        now = time.time() if now is None else now
+        return [fact for fact in self._facts if fact.is_active(now)]
+
+    def get_recallable(self, now: Optional[float] = None) -> List[LongTermFact]:
+        active = self.get_active(now)
+        if not any(f.kind == "address" for f in active):
+            return active
+        return [f for f in active if f.kind or f.source != "auto" or f.is_manual or f.pinned
+                or not _LEGACY_ADDRESS.search(f.content)]
+
+    def source_cursors(self) -> dict[str, int]:
+        self._refresh()
+        return dict(self._cursors)
+
+    def extraction_snapshot(self):
+        self._refresh()
+        return self._revision, dict(self._cursors), deepcopy(self._facts)
+
+    def apply_extraction(self, revision: int, facts: List[LongTermFact], cursors: dict[str, int]) -> bool:
+        return self._commit(facts, cursors, expected_revision=revision)
 
     def get_top_n(self, n: int) -> List[LongTermFact]:
         """返回 prompt 用事实：全部 pinned + 按 score 降序填充剩余配额。"""
-        pinned = [f for f in self._facts if f.pinned]
+        active = self.get_active()
+        pinned = [f for f in active if f.pinned]
         non_pinned = sorted(
-            (f for f in self._facts if not f.pinned),
+            (f for f in active if not f.pinned),
             key=lambda f: f.score(), reverse=True
         )
         remaining = max(0, n - len(pinned))
         return pinned + non_pinned[:remaining]
 
     def count(self) -> int:
+        self._refresh()
         return len(self._facts)
 
     def clear_all(self) -> int:
         """清空所有事实，返回删除数量。"""
+        self._refresh()
         n = len(self._facts)
-        self._facts = []
-        self._save()
+        if not self._commit([], self._cursors):
+            return 0
         logger.info("[LongTermStore] 清空全部事实 (%d 条)", n)
         return n
 
     def count_by_source(self) -> dict:
+        self._refresh()
         result = {"manual": 0, "auto": 0, "reflection": 0}
         for f in self._facts:
             src = f.source if f.source in result else "auto"
@@ -192,6 +255,7 @@ class LongTermStore:
 
     def get_by_id(self, fact_id: str) -> Optional[LongTermFact]:
         """按 ID 查找事实（公开接口）。"""
+        self._refresh()
         return self._get_by_id(fact_id)
 
     def _get_by_id(self, fact_id: str) -> Optional[LongTermFact]:
@@ -200,31 +264,66 @@ class LongTermStore:
                 return f
         return None
 
+    def _refresh(self):
+        try:
+            current = _disk_stamp(os.stat(self._path))
+        except FileNotFoundError:
+            current = None
+        if current != self._disk_stamp:
+            with _WRITE_LOCK:
+                self._load()
+
     def _load(self):
-        if not os.path.exists(self._path):
-            self._facts = []
-            return
         try:
             with open(self._path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
-            self._facts = [LongTermFact.from_dict(d) for d in data.get("facts", [])]
-        except Exception as e:
-            logger.error("[LongTermStore] 加载失败 %s: %s", self._path, e)
-            self._facts = []
+                stamp = _disk_stamp(os.fstat(fp.fileno()))
+            facts = [LongTermFact.from_dict(d) for d in data.get("facts", [])]
+            cursors = {key: value for key, value in (data.get("source_cursors") or {}).items()
+                       if type(value) is int and value >= 0}
+        except FileNotFoundError:
+            facts, cursors, stamp = [], {}, None
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            logger.error("[LongTermStore] Could not load facts: %s", error)
+            return
+        self._facts, self._cursors, self._disk_stamp = facts, cursors, stamp
+        self._revision += 1
 
-    def _save(self):
-        """原子写入（写 .tmp 后 rename）。"""
+    def _commit(self, facts: List[LongTermFact], cursors: dict[str, int],
+                *, expected_revision: Optional[int] = None) -> bool:
+        """Atomically replace only the version this store instance loaded."""
+        with _WRITE_LOCK:
+            if expected_revision is not None and self._revision != expected_revision:
+                return False
+            return self._replace_file(facts, cursors)
+
+    def _replace_file(self, facts: List[LongTermFact], cursors: dict[str, int]) -> bool:
         tmp = self._path + ".tmp"
         try:
+            try:
+                current = _disk_stamp(os.stat(self._path))
+            except FileNotFoundError:
+                current = None
+            if current != self._disk_stamp:
+                logger.warning("[LongTermStore] Fact file changed since this store was loaded")
+                return False
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
             with open(tmp, "w", encoding="utf-8") as fp:
-                json.dump({"facts": [f.to_dict() for f in self._facts]}, fp,
+                json.dump({"facts": [f.to_dict() for f in facts], "source_cursors": cursors}, fp,
                           ensure_ascii=False, indent=2)
+                fp.flush()
+                stamp = _disk_stamp(os.fstat(fp.fileno()))
             os.replace(tmp, self._path)
-        except Exception as e:
-            logger.error("[LongTermStore] 保存失败: %s", e)
+        except (OSError, TypeError, ValueError) as error:
+            logger.error("[LongTermStore] Could not save facts: %s", error)
             if os.path.exists(tmp):
                 try:
                     os.remove(tmp)
                 except OSError:
                     pass
+            return False
+        self._disk_stamp = stamp
+        self._facts = facts
+        self._cursors = dict(cursors)
+        self._revision += 1
+        return True

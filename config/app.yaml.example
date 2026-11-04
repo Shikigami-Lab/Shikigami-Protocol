@@ -158,14 +158,8 @@ memory:
   vector_historical_limit: 2
   daily_run_at_hour: 0
   daily_run_at_minute: 5
+  # Daily index cleanup. Expiration is enforced on read even when cleanup is off.
   daily_forgetting_enabled: true
-  daily_decay_factor: 0.998
-  daily_decay_min_weight: 0.1
-  daily_reinforcement_enabled: false
-  daily_consolidation_enabled: true
-  daily_consolidation_after_days: 30
-  daily_consolidation_weight_below: 1.0
-  daily_consolidation_batch_max: 15
 
 # ── Background Reflection ─────────────────────────────────────────────────────
 reflection:

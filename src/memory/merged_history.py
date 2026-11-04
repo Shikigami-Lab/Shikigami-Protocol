@@ -81,6 +81,23 @@ def _merge_enabled_and_caps(profile: Dict[str, Any]) -> tuple:
     return True, max_utterances, max_groups, merged_cap
 
 
+def memory_extraction_sources(session, app, profile, group_id=None, group_store=None):
+    """Separate physical source IDs for durable extraction cursors."""
+    merge, _, max_groups, _ = _merge_enabled_and_caps(profile)
+    if group_id is not None and not merge:
+        return {f"group:{group_id}": group_store}
+    sources = {"single": session.conversation_store}
+    manager = getattr(app.state, "group_manager", None)
+    if merge and manager:
+        for gid in manager.get_group_ids_for_profile(session.profile_id)[:max_groups]:
+            store = manager.get_conversation_store(gid)
+            if store:
+                sources[f"group:{gid}"] = store
+    if group_id is not None and group_store is not None:
+        sources[f"group:{group_id}"] = group_store
+    return sources
+
+
 def get_merged_recent_messages(
     session: Any,
     app: Any,

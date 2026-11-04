@@ -370,7 +370,7 @@ async def get_forgetting_preview(profile_id: str, request: Request):
 
 @router.post("/{profile_id}/forgetting/run")
 async def run_forgetting_now(profile_id: str, request: Request):
-    """手动执行一次遗忘任务（衰减、强化、孤儿清理），与「写日记」类似。仅对已加载的 session 有效。"""
+    """手动整理已加载人格的事实索引。"""
     from datetime import date, timedelta
 
     from src.core.daily_memory_job import run_forgetting_for_profile
@@ -388,9 +388,9 @@ async def run_forgetting_now(profile_id: str, request: Request):
         log_app_event("forgetting_run_skip", profile_id=profile_id, reason="profile_not_loaded")
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found or not loaded")
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    await run_forgetting_for_profile(profile_id, request.app, yesterday, force=True)
+    result = await run_forgetting_for_profile(profile_id, request.app, yesterday, force=True)
     log_app_event("forgetting_run_done", profile_id=profile_id)
-    return {"ok": True, "message": "已执行一次遗忘任务（衰减、强化、孤儿清理）"}
+    return {"ok": True, "skipped": result is None, "maintenance": result}
 
 
 # ── 记忆变更日志 + 回滚 ───────────────────────────────────────────────────────

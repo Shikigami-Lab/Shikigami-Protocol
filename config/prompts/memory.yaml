@@ -7,89 +7,22 @@ memory:
 
   extraction_default:
     zh: |
-      请从以下对话中提取关于${user_label}的长期、持久性事实（习惯、偏好、关系定义、禁忌等）。
-      要求：
-      1. 只提取会长期有效的事实，不提取一次性事件或临时状态
-      2. 只提取关于用户的事实，不提取关于AI自身想法或感受的内容
-      3. 每条事实用一句话描述，单条不超过50字，以"用户"为主语
-      4. 指定分类：habit/preference/taboo/relationship/location/milestone/other
-      5. emotional_note：这件事让${persona_name}产生的感受，5字以内，如"令人担心""感觉亲切""有些心疼"，无明显感受则留空
-      6. weight：重要性 0-2 浮点数，0=完全没用，2=很有用；无把握或低价值请给较低分
+      整理以下对话中用户明确表达的偏好、习惯、边界、关系和有后续用途的事件。
+      日常闲聊、单次消费、玩笑和推测留在原始对话里。重复提及已有内容时优先确认旧条目。
+      只有用户明确更正了同一条事实时才更新。区分短期安排、已经发生的事和持久偏好。
+      用一句简洁的陈述记录，避免混入 $persona_name 自己的猜测。
 
       对话内容：
       $conv_text
     en: |
-      Please extract long-term, persistent facts about ${user_label} from the following conversation (habits, preferences, relationship definitions, taboos, etc.).
-      Requirements:
-      1. Only extract facts that will remain valid long-term; do not extract one-time events or temporary states
-      2. Only extract facts about the user; do not extract content about the AI's own thoughts or feelings
-      3. Each fact in one sentence, max 50 characters, with "the user" as subject
-      4. Assign a category: habit/preference/taboo/relationship/location/milestone/other
-      5. emotional_note: how this makes ${persona_name} feel, max 5 characters (e.g. "worrying" "feels close" "heartbreaking"); leave empty if no clear feeling
-      6. weight: importance 0-2 float, 0=completely useless, 2=very useful; give lower scores when unsure or low value
+      Record durable preferences, habits, boundaries and relationships stated by the user,
+      plus dated events or temporary information that will be useful later.
+      Leave small talk, routine purchases, jokes and speculation in the conversation.
+      Confirm existing records when the user repeats them. Update only explicit corrections.
+      Keep plans separate from completed events. Avoid guesses by $persona_name.
 
       Conversation:
       $conv_text
-
-# ── 提取输出格式说明（所有提取 prompt 末尾统一追加）────────────────────────
-
-  extraction_format:
-    zh: |
-
-      ## 输出格式（必须严格遵守）
-      返回 JSON 数组，每个元素为对象，且仅包含以下字段：
-      - content: 事实描述，单条不超过50字
-      - category: 分类，取值 habit / preference / taboo / relationship / location / milestone / ai_insight / other
-      - emotional_note: 此事对角色产生的感受，5字以内，如「令人担心」「感觉亲切」，无则空字符串
-      - weight: 重要性，0-2 的浮点数，0=完全没用/不应采纳，2=很有用/高价值；无把握或低价值请给较低分
-      - keywords: 约2个关键词，空格分隔，如 "面试 紧张"，无则空字符串
-      示例：[{"content": "...", "category": "other", "emotional_note": "", "weight": 1.2, "keywords": ""}]
-      若无可提取的事实，返回空数组 []。
-    en: |
-
-      ## Output format (must be strictly followed)
-      Return a JSON array where each element is an object containing only the following fields:
-      - content: fact description, max 50 characters
-      - category: one of habit / preference / taboo / relationship / location / milestone / ai_insight / other
-      - emotional_note: how this affects the character, max 5 chars (e.g. "worrying" "feels close"), empty string if none
-      - weight: importance, float 0-2, where 0=completely useless/should not adopt, 2=very useful/high value; give lower scores when unsure
-      - keywords: ~2 keywords, space-separated (e.g. "interview nervous"), empty string if none
-      Example: [{"content": "...", "category": "other", "emotional_note": "", "weight": 1.2, "keywords": ""}]
-      If no facts can be extracted, return an empty array [].
-
-# ── 记忆合并 ──────────────────────────────────────────────────────────────────
-
-  consolidation:
-    zh: |
-      ## 本次任务：长期记忆合并（非从对话提取）
-
-      你不是在从新对话里提取事实，而是在做**记忆整理**。下面是一批**已经存在**的长期记忆事实（来自较久以前），请将它们合并成 **1～2 条** 概括性陈述，替代这批旧事实。要求：
-
-      1. **只提炼、合并**：新陈述必须完全基于下面列出的事实，不得添加原事实中未出现的人名、地点、具体事件或时间。
-      2. **口吻一致**：保持你（角色）一贯的记忆记录风格与称呼（如「"自己的名字"记得…」「"用户的称呼"」等），与上方提取规则一致。
-      3. **中性、可长期有效**：这些事实的时间背景已较久远，合并后的陈述应保持中性、去掉过强时效词，便于长期保留。
-      4. **条数**：最多输出 2 条；若无法合并成有意义的一条可返回空数组 []。
-      5. **长度**：合并后的每条 content 约 80～100 字，以便概括多条旧事实（不必压缩到 50 字以内）。
-      6. **输出**：只输出 JSON 数组，不要任何解释、前缀或后缀。格式由下方「输出格式」统一规定。
-
-      下面是被选中的、待合并的已有事实（每行一条，格式：content [category] [emotional_note]）：
-
-      $fact_list
-    en: |
-      ## Current task: Long-term memory consolidation (not extracting from conversation)
-
-      You are not extracting facts from new conversations — you are doing **memory housekeeping**. Below is a batch of **already existing** long-term memory facts (from some time ago). Please consolidate them into **1-2** summary statements to replace this batch of old facts. Requirements:
-
-      1. **Only distill and consolidate**: new statements must be entirely based on the facts listed below; do not add names, places, specific events, or times that don't appear in the originals.
-      2. **Consistent voice**: maintain the character's usual memory-recording style and address forms, consistent with the extraction rules above.
-      3. **Neutral, long-term valid**: the temporal context of these facts is already old — consolidated statements should be neutral, remove strong time-bound words, suitable for long-term retention.
-      4. **Count**: output at most 2 items; return an empty array [] if they cannot be meaningfully consolidated.
-      5. **Length**: each consolidated content ~80-100 characters to summarize multiple old facts (no need to compress to 50).
-      6. **Output**: only output the JSON array, no explanations, prefixes, or suffixes. Format defined by the "Output format" section below.
-
-      The selected facts to consolidate (one per line, format: content [category] [emotional_note]):
-
-      $fact_list
 
 # ── 日摘要 ────────────────────────────────────────────────────────────────────
 

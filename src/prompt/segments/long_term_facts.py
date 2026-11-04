@@ -7,7 +7,6 @@
 非钉选总量不超过 max_facts_in_prompt。
 
 情感注记：与当前情绪匹配或带 emotional_note 的 fact 在槽内优先；并在 block 前加一句显式强调。
-执行后将已展示的 fact_ids 写入 ctx.extras["shown_fact_ids"]，供槽内去重等使用。
 """
 import json
 import logging
@@ -19,6 +18,7 @@ from typing import Any, Dict, List
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 from src.utils.paths import get_project_root
+from src.memory.fact_operations import normalize, rank_related
 from src.utils.memory_time import read_time_notice, source_time
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,9 @@ class LongTermFactsSegment(PromptSegment):
 
         now = time.time()
         recent_cutoff = recent_days * 86400
-        all_facts = mgr.facts.get_all()
+        current_address = ctx.extras.get("current_address_fact_id")
+        all_facts = [f for f in mgr.facts.get_recallable(now) if f.id != current_address]
+        query = ctx.user_msg.strip()
 
         # ── 槽1：Pinned（无上限，不占用非钉选配额） ─────────────────────────
         pinned = [f for f in all_facts if f.pinned]
@@ -136,10 +138,10 @@ class LongTermFactsSegment(PromptSegment):
         shown_ids = {f.id for f in pinned}
 
         # ── 槽2：近期（< recent_days 天） ────────────────────────────────────
-        recent = sorted(
+        recent = rank_related(
             [f for f in all_facts if not f.pinned and (now - f.updated_at) < recent_cutoff],
-            key=lambda f: f.score(), reverse=True
-        )[:min(recent_quota, budget)]
+            query, min(recent_quota, budget),
+        )
         shown_ids |= {f.id for f in recent}
         budget -= len(recent)
 
@@ -149,7 +151,6 @@ class LongTermFactsSegment(PromptSegment):
         if slot3_cap > 0:
             candidates = [f for f in all_facts if not f.pinned and f.id not in shown_ids]
             id_to_fact = {f.id: f for f in candidates}
-            query = ctx.user_msg.strip()
 
             if query and candidates:
                 bm25_ranked = []
@@ -159,7 +160,9 @@ class LongTermFactsSegment(PromptSegment):
                 bm25 = getattr(mgr, "bm25", None)
                 if bm25 and bm25.is_available():
                     try:
-                        bm25_ranked = bm25.search(candidates, query, limit=slot3_cap * 4)
+                        lexical = {fact.id for fact in rank_related(candidates, query, len(candidates))}
+                        bm25_ranked = [(fid, score) for fid, score in bm25.search(candidates, query, limit=slot3_cap * 4)
+                                       if fid in lexical]
                     except Exception as e:
                         logger.debug("[LongTermFactsSegment] BM25 search 失败: %s", e)
 
@@ -169,7 +172,7 @@ class LongTermFactsSegment(PromptSegment):
                         for r in mgr.vectors.search(query, limit=min(slot3_cap * 4, 60)):
                             fid = r.get("metadata", {}).get("fact_id")
                             dist = r.get("distance", 1.0)
-                            if fid and fid in id_to_fact and dist < semantic_dist:
+                            if fid in id_to_fact and dist < semantic_dist and mgr.fact_vector_matches(id_to_fact[fid], r):
                                 vec_ranked.append((fid, dist))
                     except Exception as e:
                         logger.debug("[LongTermFactsSegment] semantic search 失败: %s", e)
@@ -185,8 +188,7 @@ class LongTermFactsSegment(PromptSegment):
                             shown_ids.add(fid)
 
             if not semantic:
-                # 降级：两路均无结果（或无 query）时按 score 填充
-                semantic = sorted(candidates, key=lambda f: f.score(), reverse=True)[:slot3_cap]
+                semantic = rank_related(candidates, query, slot3_cap)
 
         # 槽内二次排序：与当前情绪匹配的 emotional_note 最优先，其次有 emotional_note 的优先
         current_emotion = _get_current_emotion(ctx.session.profile_id)
@@ -196,10 +198,13 @@ class LongTermFactsSegment(PromptSegment):
             return (0 if match else 1, 0 if has_note else 1)
         recent.sort(key=_emotion_sort_key)
         semantic.sort(key=_emotion_sort_key)
-        top_facts = pinned + recent + semantic
-
-        # 写入 ctx.extras 供向量 segment 去重
-        ctx.extras["shown_fact_ids"] = {f.id for f in top_facts}
+        top_facts = []
+        seen = set()
+        for fact in pinned + recent + semantic:
+            key = (normalize(fact.content), fact.event_date)
+            if key not in seen:
+                seen.add(key)
+                top_facts.append(fact)
 
         if not top_facts:
             return SegmentResult(fired=False)
@@ -222,7 +227,7 @@ class LongTermFactsSegment(PromptSegment):
                 seen_labels.add(label)
             for f in groups[cat]:
                 note = getattr(f, "emotional_note", "")
-                time_str = '记录更新于 ' + source_time(f.updated_at)
+                time_str = ('事件日期 ' + f.event_date) if f.event_date else ('记录更新于 ' + source_time(f.updated_at))
                 suffix = f"（{note}，{time_str}）" if note else f"（{time_str}）"
                 lines.append(f"{idx}. {f.content}{suffix}")
                 idx += 1
@@ -233,7 +238,7 @@ class LongTermFactsSegment(PromptSegment):
                 continue
             for f in facts:
                 note = getattr(f, "emotional_note", "")
-                time_str = '记录更新于 ' + source_time(f.updated_at)
+                time_str = ('事件日期 ' + f.event_date) if f.event_date else ('记录更新于 ' + source_time(f.updated_at))
                 suffix = f"（{note}，{time_str}）" if note else f"（{time_str}）"
                 lines.append(f"{idx}. {f.content}{suffix}")
                 idx += 1

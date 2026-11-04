@@ -2385,6 +2385,13 @@ textarea.form-input {
   min-width: 60px;
   word-break: break-word;
 }
+.mem-fact-versions {
+  flex: 1 1 100%;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.mem-fact-versions summary { cursor: pointer; }
+.mem-fact-versions div { padding: 4px 0 0 12px; overflow-wrap: anywhere; }
 .mem-fact-content.pinned {
   color: var(--accent);
   font-weight: 500;

@@ -116,12 +116,20 @@ class UserPersonaSegment(PromptSegment):
         # table is kept exact, while the portrait is rewritten on every refresh.
         address_line = ""
         if portrait_enabled and portrait_cfg.get("address_forms_enabled", True):
+            app = ctx.extras.get("app")
+            managers = getattr(app.state, "memory_managers", {}) if app else {}
+            manager = managers.get(ctx.session.profile_id) if managers else None
+            current_address = manager.get_current_address_fact() if manager and manager._cfg.get("enabled") else None
             address_line = format_mutual_address_facts(
                 name,
-                portrait_block,
+                {**portrait_block, "address_forms": {}} if current_address else portrait_block,
                 locale=get_locale(),
                 style_address_form=style_address_form,
             )
+            if current_address:
+                ctx.extras["current_address_fact_id"] = current_address.id
+                current_line = "当前称呼偏好（优先于旧画像和旧对话） " + current_address.content
+                address_line = "\n".join(filter(None, (address_line, current_line)))
         elif name or style_address_form:
             # With the portrait off, still state how the character addresses the user.
             address_line = format_mutual_address_facts(

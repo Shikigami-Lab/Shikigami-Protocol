@@ -4888,6 +4888,10 @@
                 <template v-else>
                   <span class="mem-cat-badge">{{ fact.category || 'other' }}</span>
                   <span :class="['mem-fact-content', fact.pinned ? 'pinned' : '']">{{ fact.content }}</span>
+                  <span v-if="fact.event_date" class="mem-cat-badge">{{ t('memFactEventDate') }} {{ fact.event_date }}</span>
+                  <span v-if="fact.archived || (fact.expires_at && fact.expires_at * 1000 <= Date.now())" class="mem-cat-badge">
+                    {{ t(fact.archived ? 'memFactArchived' : 'memFactExpired') }}
+                  </span>
                   <span v-if="fact.emotional_note" class="mem-emotional-badge">{{ fact.emotional_note }}</span>
                   <span :class="['mem-source-badge', fact.source === 'manual' ? 'manual' : 'auto']">{{ fact.source }}</span>
                   <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null ? Math.round(Number(fact.weight) * 100) / 100 : 1 }}</span>
@@ -4895,6 +4899,10 @@
                   <button :class="['icon-btn', fact.pinned ? 'pinned-active' : '']" :title="fact.pinned ? t('titlePinned') : t('titleNotPinned')" @click="toggleMemoryFactPin(fact)"><app-icon name="pin" :size="14"></app-icon></button>
                   <button class="icon-btn" :title="t('titleEditFact')" @click="startEditMemoryFact(fact)"><app-icon name="pencil" :size="14"></app-icon></button>
                   <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryFact(fact.id)"><app-icon name="x" :size="14"></app-icon></button>
+                  <details v-if="fact.versions?.length" class="mem-fact-versions">
+                    <summary>{{ t('memFactEarlierVersions') }} · {{ fact.versions.length }}</summary>
+                    <div v-for="(version, index) in fact.versions" :key="index">{{ version.content }}</div>
+                  </details>
                 </template>
               </div>
             </div>
@@ -4911,61 +4919,31 @@
               </button>
             </div>
             <div class="s-card memory-maintenance-card">
-              <div class="s-card-title">{{ t('memSectDailyForgetting') }}</div>
+              <div class="s-card-title">{{ t('memSectDailyMaintenance') }}</div>
+              <p class="mem-cfg-hint">{{ t('hintMemoryMaintenanceRun') }}</p>
               <div class="memory-maintenance-actions">
                 <button type="button" class="s-btn s-btn-secondary" :disabled="forgettingPreviewLoading || !memoryProfileId"
                         @click="loadForgettingPreview(memoryProfileId)">{{ forgettingPreviewLoading ? '…' : t('btnPreviewForgetting') }}</button>
-                <button type="button" class="s-btn s-btn-secondary" :disabled="forgettingRunLoading"
+                <button type="button" class="s-btn s-btn-secondary" :disabled="forgettingRunLoading || !memoryProfileId"
                         @click="runForgettingNow()">{{ forgettingRunLoading ? t('btnRunningForgetting') : t('btnRunForgetting') }}</button>
               </div>
-            <div v-if="forgettingPreview && forgettingPreview.skip" class="mem-forgetting-preview mem-diary-preview">
-              <div class="mem-diary-preview-title">{{ t('memForgettingSkipTitle') }}</div>
-              <p class="mem-cfg-hint">{{ forgettingPreview.reason }}</p>
-              <div v-if="forgettingPreview.portrait_refresh" class="mem-forgetting-preview-table" style="margin-top:8px;">
-                <div class="mem-diary-preview-row mem-diary-preview-header"><span>{{ t('memForgettingStepCol') }}</span><span>{{ t('memForgettingStatusCol') }}</span></div>
-                <div class="mem-diary-preview-row">
-                  <span>{{ locale === 'en' ? 'User portrait refresh' : '用户画像刷新' }}</span>
-                  <span>{{ forgettingPreview.portrait_refresh.enabled ? (forgettingPreview.portrait_refresh.would_run ? (locale === 'en' ? 'Will refresh' : '将刷新') : forgettingPreview.portrait_refresh.reason) : (locale === 'en' ? 'Not enabled' : '未启用') }}</span>
+              <div v-if="forgettingPreview && forgettingPreview.skip" class="mem-forgetting-preview mem-diary-preview">
+                <div class="mem-diary-preview-title">{{ t('memForgettingSkipTitle') }}</div>
+                <p class="mem-cfg-hint">{{ memoryMaintenanceSkipReason(forgettingPreview) }}</p>
+              </div>
+              <div v-else-if="forgettingPreview" class="mem-forgetting-preview mem-diary-preview">
+                <div class="mem-diary-preview-title">{{ t('memMaintenancePreviewTitle') }}</div>
+                <div class="mem-forgetting-preview-table">
+                  <div class="mem-diary-preview-row">
+                    <span>{{ t('memMaintenanceExpiredFacts') }}</span>
+                    <span>{{ memItemCountText(forgettingPreview.expired_fact_count) }}</span>
+                  </div>
+                  <div class="mem-diary-preview-row">
+                    <span>{{ t('memMaintenanceStaleVectors') }}</span>
+                    <span>{{ forgettingPreview.orphan_cleanup.enabled ? memItemCountText(forgettingPreview.orphan_cleanup.would_delete_count) : t('memMaintenanceVectorUnavailable') }}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div v-else-if="forgettingPreview && !forgettingPreview.skip" class="mem-forgetting-preview mem-diary-preview">
-              <div class="mem-diary-preview-title">{{ t('memForgettingRunTitle') }} {{ forgettingPreview.yesterday }}）</div>
-              <div class="mem-forgetting-preview-table">
-                <div class="mem-diary-preview-row mem-diary-preview-header"><span>{{ t('memForgettingStepCol') }}</span><span>{{ t('memForgettingStatusCol') }}</span></div>
-                <div class="mem-diary-preview-row">
-                  <span>{{ t('memForgettingStepDaySummary') }}</span>
-                  <span>{{ forgettingPreview.day_summary.enabled ? (forgettingPreview.day_summary.would_run ? t('memForgettingEnabledWouldRun') : forgettingPreview.day_summary.reason) : t('memForgettingNotEnabled') }}</span>
-                </div>
-                <div class="mem-diary-preview-row">
-                  <span>{{ t('memForgettingStepDecay') }}</span>
-                  <span>{{ forgettingPreview.decay.enabled ? memItemCountText(forgettingPreview.decay.would_affect_count) : t('memForgettingNotEnabled') }}</span>
-                </div>
-                <div class="mem-diary-preview-row">
-                  <span>{{ t('memForgettingStepOrphan') }}</span>
-                  <span>{{ forgettingPreview.orphan_cleanup.enabled ? memItemCountText(forgettingPreview.orphan_cleanup.would_delete_count) : t('memForgettingNotEnabled') }}</span>
-                </div>
-                <div class="mem-diary-preview-row">
-                  <span>{{ t('memForgettingStepReinforcement') }}</span>
-                  <span>{{ forgettingPreview.reinforcement.enabled ? memItemCountText(forgettingPreview.reinforcement.would_affect_count) : t('memForgettingNotEnabled') }}</span>
-                </div>
-                <div class="mem-diary-preview-row">
-                  <span>{{ t('memForgettingStepConsolidation') }}</span>
-                  <span>{{ forgettingPreview.consolidation.enabled ? (forgettingPreview.consolidation.would_run ? formatConsolidationForgettingLine(forgettingPreview.consolidation) : t('memForgettingNoConsolidation')) : t('memForgettingNotEnabled') }}</span>
-                </div>
-                <div v-if="forgettingPreview.portrait_refresh" class="mem-diary-preview-row">
-                  <span>{{ locale === 'en' ? 'User portrait refresh' : '用户画像刷新' }}</span>
-                  <span>{{ forgettingPreview.portrait_refresh.enabled ? (forgettingPreview.portrait_refresh.would_run ? (locale === 'en' ? 'Will refresh' : '将刷新') : forgettingPreview.portrait_refresh.reason) : (locale === 'en' ? 'Not enabled' : '未启用') }}</span>
-                </div>
-              </div>
-              <div v-if="forgettingPreview.consolidation.would_run && forgettingPreview.consolidation.preview_facts && forgettingPreview.consolidation.preview_facts.length" class="mem-forgetting-preview-facts">
-                <div class="mem-diary-preview-title" style="margin-top:8px;">{{ t('memForgettingMergePreviewTitle') }}</div>
-                <ul style="margin:0;padding-left:1.2em;font-size:12px;color:var(--text-secondary);">
-                  <li v-for="(text, i) in forgettingPreview.consolidation.preview_facts" :key="i">{{ text }}</li>
-                </ul>
-              </div>
-            </div>
-
             </div>
 
             <!-- Memory change history -->
@@ -5275,89 +5253,15 @@
               </select>
             </div>
             <div class="form-hint" style="margin-bottom:10px;">{{ t('hintDailyRunAt') }}</div>
-            <div class="hint-block" style="border-left-color:var(--border);margin-bottom:12px;">{{ t('hintDailyForgettingVectorNote') }}</div>
 
-            <!-- 权重衰减 inset -->
-            <div style="background:var(--bg-app);border-radius:6px;padding:10px 12px;border:1px solid var(--border);margin-bottom:8px;">
-              <div class="param-row">
-                <span class="param-label" style="font-weight:500;">{{ t('lblEnableDailyForgetting') }}</span>
-                <label class="toggle-switch">
-                  <input type="checkbox" :aria-label="t('lblEnableDailyForgetting')" v-model="memoryGlobalForm.daily_forgetting_enabled" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableDailyForgetting') }}</div>
-              <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.daily_forgetting_enabled }">
-                <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.decay"
-                     @click="memGlobalAdvOpen.decay = !memGlobalAdvOpen.decay" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
-                  {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.decay ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
-                </div>
-                <div v-show="memGlobalAdvOpen.decay">
-                  <div class="param-row" style="margin-top:8px;">
-                    <span class="param-label">{{ t('lblDecayFactor') }}</span>
-                    <input type="number" class="seg-num-input" min="0.9" max="1" step="0.001"
-                           v-model.number="memoryGlobalForm.daily_decay_factor" style="width:72px;" :disabled="!memoryGlobalForm.daily_forgetting_enabled" />
-                  </div>
-                  <div class="form-hint">{{ t('hintDecayFactor') }}</div>
-                  <div class="param-row" style="margin-top:8px;">
-                    <span class="param-label">{{ t('lblDecayMinWeight') }}</span>
-                    <input type="number" class="seg-num-input" min="0" max="1" step="0.05"
-                           v-model.number="memoryGlobalForm.daily_decay_min_weight" style="width:64px;" :disabled="!memoryGlobalForm.daily_forgetting_enabled" />
-                  </div>
-                  <div class="form-hint">{{ t('hintDecayMinWeight') }}</div>
-                </div>
-              </div>
+            <div class="param-row">
+              <span class="param-label">{{ t('lblEnableDailyForgetting') }}</span>
+              <label class="toggle-switch">
+                <input type="checkbox" :aria-label="t('lblEnableDailyForgetting')" v-model="memoryGlobalForm.daily_forgetting_enabled" />
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-
-            <!-- 强化 inset -->
-            <div style="background:var(--bg-app);border-radius:6px;padding:10px 12px;border:1px solid var(--border);margin-bottom:8px;">
-              <div class="param-row">
-                <span class="param-label" style="font-weight:500;">{{ t('lblEnableReinforcement') }}</span>
-                <label class="toggle-switch">
-                  <input type="checkbox" :aria-label="t('lblEnableReinforcement')" id="mem_global_reinforcement" v-model="memoryGlobalForm.daily_reinforcement_enabled" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableReinforcement') }}</div>
-            </div>
-
-            <!-- 合并为摘要 inset -->
-            <div style="background:var(--bg-app);border-radius:6px;padding:10px 12px;border:1px solid var(--border);">
-              <div class="param-row">
-                <span class="param-label" style="font-weight:500;">{{ t('lblEnableConsolidation') }}</span>
-                <label class="toggle-switch">
-                  <input type="checkbox" :aria-label="t('lblEnableConsolidation')" id="mem_global_consolidation" v-model="memoryGlobalForm.daily_consolidation_enabled" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableConsolidation') }}</div>
-              <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.daily_consolidation_enabled }">
-                <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.consolidation"
-                     @click="memGlobalAdvOpen.consolidation = !memGlobalAdvOpen.consolidation" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
-                  {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.consolidation ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
-                </div>
-                <div v-show="memGlobalAdvOpen.consolidation">
-                  <div class="param-row" style="margin-top:8px;">
-                    <span class="param-label">{{ t('lblConsolidationAfterDays') }}</span>
-                    <input type="number" class="seg-num-input" min="7" max="365"
-                           v-model.number="memoryGlobalForm.daily_consolidation_after_days" style="width:64px;" :disabled="!memoryGlobalForm.daily_consolidation_enabled" />
-                  </div>
-                  <div class="form-hint">{{ t('hintConsolidationAfterDays') }}</div>
-                  <div class="param-row" style="margin-top:8px;">
-                    <span class="param-label">{{ t('lblConsolidationWeightBelow') }}</span>
-                    <input type="number" class="seg-num-input" min="0" max="1" step="0.1"
-                           v-model.number="memoryGlobalForm.daily_consolidation_weight_below" style="width:64px;" :disabled="!memoryGlobalForm.daily_consolidation_enabled" />
-                  </div>
-                  <div class="form-hint">{{ t('hintConsolidationWeightBelow') }}</div>
-                  <div class="param-row" style="margin-top:8px;">
-                    <span class="param-label">{{ t('lblConsolidationBatchMax') }}</span>
-                    <input type="number" class="seg-num-input" min="5" max="30"
-                           v-model.number="memoryGlobalForm.daily_consolidation_batch_max" style="width:64px;" :disabled="!memoryGlobalForm.daily_consolidation_enabled" />
-                  </div>
-                  <div class="form-hint">{{ t('hintConsolidationBatchMax') }}</div>
-                </div>
-              </div>
-            </div>
+            <div class="form-hint">{{ t('hintEnableDailyForgetting') }}</div>
           </div><!-- end Maintenance card -->
 
           <!-- Global auto-save indicator -->
@@ -5519,63 +5423,7 @@
                   </select>
                 </div>
               </div>
-              <div class="mem-cfg-item">
-                <div class="param-row">
-                  <span class="param-label">{{ t('lblEnableReinforcement') }}</span>
-                  <select class="form-select" v-model="memoryTabProfileForm.daily_reinforcement_enabled" style="min-width:120px;">
-                    <option :value="null">{{ t('optInheritGlobal') }}</option>
-                    <option :value="true">{{ t('optOn') }}</option>
-                    <option :value="false">{{ t('optOff') }}</option>
-                  </select>
-                </div>
-              </div>
-              <div class="mem-cfg-item">
-                <div class="param-row">
-                  <span class="param-label">{{ t('lblEnableConsolidation') }}</span>
-                  <select class="form-select" v-model="memoryTabProfileForm.daily_consolidation_enabled" style="min-width:120px;">
-                    <option :value="null">{{ t('optInheritGlobal') }}</option>
-                    <option :value="true">{{ t('optOn') }}</option>
-                    <option :value="false">{{ t('optOff') }}</option>
-                  </select>
-                </div>
-                <p class="mem-cfg-hint">{{ t('hintProfileConsolidation') }}</p>
-              </div>
-              <div class="section-divider" role="button" tabindex="0" :aria-expanded="memProfileAdvOpen.forgetting"
-                   @click="memProfileAdvOpen.forgetting = !memProfileAdvOpen.forgetting" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:4px;">
-                {{ t('lblTtsAdvanced') }} <app-icon :name="memProfileAdvOpen.forgetting ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
-              </div>
-              <div v-show="memProfileAdvOpen.forgetting">
-                <div class="param-row" style="margin-top:8px;">
-                  <span class="param-label">{{ t('lblProfileDecayFactor') }}</span>
-                  <input type="number" class="seg-num-input" min="0.9" max="1" step="0.001"
-                         v-model="memoryTabProfileForm.daily_decay_factor" placeholder="0.998" style="width:72px;" />
-                </div>
-                <div class="form-hint">{{ t('hintProfileDecayFactor') }}</div>
-                <div class="param-row" style="margin-top:8px;">
-                  <span class="param-label">{{ t('lblProfileDecayMinWeight') }}</span>
-                  <input type="number" class="seg-num-input" min="0" max="1" step="0.05"
-                         v-model="memoryTabProfileForm.daily_decay_min_weight" placeholder="0.1" style="width:64px;" />
-                </div>
-                <div class="form-hint">{{ t('hintProfileDecayMinWeight') }}</div>
-                <div class="param-row" style="margin-top:8px;">
-                  <span class="param-label">{{ t('lblProfileConsolidationAfterDays') }}</span>
-                  <input type="number" class="seg-num-input" min="7" max="365"
-                         v-model="memoryTabProfileForm.daily_consolidation_after_days" placeholder="30" style="width:64px;" />
-                </div>
-                <div class="form-hint">{{ t('hintProfileConsolidationAfterDays') }}</div>
-                <div class="param-row" style="margin-top:8px;">
-                  <span class="param-label">{{ t('lblProfileConsolidationWeightBelow') }}</span>
-                  <input type="number" class="seg-num-input" min="0" max="1" step="0.1"
-                         v-model="memoryTabProfileForm.daily_consolidation_weight_below" placeholder="0.3" style="width:64px;" />
-                </div>
-                <div class="form-hint">{{ t('hintProfileConsolidationWeightBelow') }}</div>
-                <div class="param-row" style="margin-top:8px;">
-                  <span class="param-label">{{ t('lblProfileConsolidationBatchMax') }}</span>
-                  <input type="number" class="seg-num-input" min="5" max="30"
-                         v-model="memoryTabProfileForm.daily_consolidation_batch_max" placeholder="15" style="width:64px;" />
-                </div>
-                <div class="form-hint">{{ t('hintProfileConsolidationBatchMax') }}</div>
-              </div>
+              <p class="mem-cfg-hint">{{ t('hintEnableDailyForgetting') }}</p>
             </div>
 
             <!-- Group Recap -->

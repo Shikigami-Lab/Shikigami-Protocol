@@ -66,7 +66,8 @@ async def handle_recall(query: str, session, app) -> CommandResult:
     seen_contents: set = set()
 
     # 事实库关键词匹配（精确包含）
-    facts = mgr.facts.get_all()
+    facts = mgr.facts.get_recallable()
+    active_by_id = {fact.id: fact for fact in facts}
     fact_matches = [f for f in facts if query in f.content]
     for f in fact_matches[:limit]:
         hours = (import_time() - f.updated_at) / 3600
@@ -81,6 +82,9 @@ async def handle_recall(query: str, session, app) -> CommandResult:
         for r in vec_results:
             if len(results) >= limit:
                 break
+            fid = (r.get("metadata") or {}).get("fact_id")
+            if fid and (fid not in active_by_id or not mgr.fact_vector_matches(active_by_id[fid], r)):
+                continue
             doc = r.get("document", "")
             dist = r.get("distance", 1.0)
             if dist < _VEC_DIST_THRESHOLD and doc not in seen_contents:

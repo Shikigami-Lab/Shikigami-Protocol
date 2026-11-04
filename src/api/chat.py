@@ -104,7 +104,6 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             _ensure_mem_mgr(request, session.profile_id)
 
             n_turns = get_effective_max_history_turns(request.app, session.profile_id)
-            build_extras = {}
             messages = build_messages(
                 session,
                 body.message,
@@ -112,7 +111,6 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 n_history_turns=n_turns,
                 preset=preset,
                 app=request.app,
-                out_extras=build_extras,
             )
             if body.continue_run_id and not use_agent:
                 raise ValueError('Enable AI tools to continue a task')
@@ -360,8 +358,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
                     # ── P6: 记忆 fire-and-forget 任务 ────────────────────────────────
                     try:
-                        shown_ids = build_extras.get("shown_fact_ids") if isinstance(build_extras.get("shown_fact_ids"), (set, list)) else None
-                        _fire_memory_tasks(session, store, request.app, shown_fact_ids=shown_ids)
+                        _fire_memory_tasks(session, store, request.app, user_message_id=user_message_id)
                     except Exception as mem_err:
                         logger.warning("[chat] _fire_memory_tasks 失败: %s", mem_err)
 
@@ -601,34 +598,8 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
     )
 
 
-def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
-    """启动 P6 记忆相关的 fire-and-forget 异步任务。shown_fact_ids 为本轮注入 prompt 的 fact id 集合，用于每日强化。"""
-    # 本日被使用的 fact_id 写入 memory_meta（供每日遗忘任务强化/不衰减）
-    if shown_fact_ids and session.profile_id:
-        try:
-            from datetime import datetime as _dt
-            import json as _json
-            import os as _os
-            meta_path = _os.path.join(session.storage_root, "memory_meta.json")
-            today = _dt.now().strftime("%Y-%m-%d")
-            data = {}
-            if _os.path.exists(meta_path):
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as _f:
-                        data = _json.load(_f)
-                except Exception:
-                    pass
-            by_date = data.get("used_fact_ids_by_date") or {}
-            existing = set(by_date.get(today) or [])
-            existing.update(shown_fact_ids)
-            by_date[today] = list(existing)
-            data["used_fact_ids_by_date"] = by_date
-            _os.makedirs(_os.path.dirname(meta_path), exist_ok=True)
-            with open(meta_path, "w", encoding="utf-8") as _f:
-                _json.dump(data, _f, ensure_ascii=False, indent=2)
-        except Exception as _e:
-            logger.debug("[chat] 写入 used_fact_ids 失败: %s", _e)
-
+def _fire_memory_tasks(session, store, app, *, group_id=None, user_message_id=None):
+    """Schedule fact extraction and the separate day summary."""
     from src.api.memory import get_or_create_manager_for_session
     mgr = get_or_create_manager_for_session(app, session)
     if mgr is None:
@@ -664,22 +635,15 @@ def _fire_memory_tasks(session, store, app, shown_fact_ids=None):
         primary_emotion=(emotion_context.get("primary_emotion") or ""),
     )
 
-    freq = int(mgr._cfg.get("extraction_frequency", 5))
-    mem = (profile.get("memory_config") or {})
-    merge_enabled = mem.get("group_chat_merge_into_history") is not False and getattr(getattr(app, "state", None), "group_manager", None)
-    if merge_enabled:
-        from src.memory.merged_history import get_merged_recent_messages, get_merged_messages_for_date
-        merged_recent = get_merged_recent_messages(session, app, profile, freq, cap=None)
-        recent_turns = [dict(m) for m in merged_recent]
-    else:
-        recent_turns = store.get_recent_with_ts(freq)
-    # 用局部变量固定 lambda 闭包（避免循环/重用时变量逸出）
-    _turns, _profile, _app, _ec = recent_turns, profile, app, emotion_context
+    from src.memory.merged_history import memory_extraction_sources, get_merged_messages_for_date
+    sources = memory_extraction_sources(session, app, profile, group_id, store)
+    merge_enabled = (profile.get("memory_config") or {}).get("group_chat_merge_into_history") is not False
+    source = f"group:{group_id}" if group_id is not None else "single"
+    first_message = (source, user_message_id) if user_message_id is not None else None
     asyncio.create_task(_fire_task(
-        lambda: mgr.auto_extract(_turns, _profile, _app, emotion_context=_ec),
+        lambda: mgr.auto_extract(sources, profile, app, emotion_context=emotion_context, first_message=first_message),
         "memory_extract",
-        retries=1,
-        retry_delay=5.0,
+        retries=0,
     ))
 
     # day_summary：检测昨天有无对话+摘要（合并开启时用按日合并）
