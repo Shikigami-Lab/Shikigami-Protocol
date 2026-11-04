@@ -1415,7 +1415,8 @@ const App = {
       const text = (this.inputText || '').trim();
       const hasImage = !!this.pendingScreenshot;
       if ((!text && !hasImage) || this.isStreaming) return;
-      if (this.agentContinueRunId && (this.agentOwnTaskActive || text.startsWith('/'))) { this.statusText = this.t('agentContinueBlocked'); return; }
+      const backgroundReply = this.agentOwnTaskActive || this.agentDetachedReplyPending;
+      if (this.agentContinueRunId && (backgroundReply || text.startsWith('/'))) { this.statusText = this.t('agentContinueBlocked'); return; }
       if (text.startsWith('/')) this._recordRecentCommand(text);
 
       if (this.currentGroupId) {
@@ -1427,7 +1428,7 @@ const App = {
       // must reuse context.requestId rather than minting an ID per fetch attempt.
       const context = { sessionId: this.currentSessionId, viewVersion: this.agentViewVersion,
         runKey: null, requestId: createChatRequestId(),
-        continueRunId: this.agentContinueRunId || undefined, conversationOnly: this.agentOwnTaskActive || undefined };
+        continueRunId: this.agentContinueRunId || undefined, conversationOnly: backgroundReply || undefined };
       this.agentChatContext = context;
       const controller = new AbortController();
       const displayText = text || '请根据当前画面回复';
@@ -1581,6 +1582,7 @@ const App = {
         this.isStreaming = false;
         this.streamingText = '';
       } finally {
+        if (context.detached) delete this.agentDetachedReplies[context.requestId];
         if (this.agentChatIsVisible(context)) {
           if (!context.replyDone) this.preserveChatReply(context);
           this._chatAbortController = null;

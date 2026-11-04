@@ -374,18 +374,23 @@ test('detach never aborts, background task forces a plain foreground reply and o
   assert.equal(oldContext.detached, true);
   assert.equal(requests[0].signal.aborted, false);
   assert.equal(model.isStreaming, false);
+  // Execution is done, but the detached chat model is still writing its reply.
+  reads.shift()(frame([{ agent_event: event(2, 'completed') }])); await tick();
+  assert.equal(model.agentOwnTaskActive, false);
+  assert.equal(model.agentDetachedReplyPending, true);
   model.inputText = 'new conversation';
   const next = model.sendMessage(); await tick();
   assert.equal(requests[1].body.conversation_only, true);
   assert.notEqual(requests[0].body.request_id, requests[1].body.request_id);
   const oldRead = reads.shift(), newRead = reads.shift();
   newRead(frame([{ token: 'New reply' }])); await tick();
-  oldRead(frame([{ token: 'LATE OLD TOKEN' }, { agent_event: event(2, 'completed') }, { done: true }])); await tick();
+  oldRead(frame([{ token: 'LATE OLD TOKEN' }, { done: true }])); await tick();
   assert.equal(model.streamingText, 'New reply');
   assert.equal(model.isStreaming, true);
   // The foreground read was enqueued before the detached read.
   const finishNew = reads.shift(), finishOld = reads.shift();
   finishOld({ done: true }); await old;
+  assert.equal(model.agentDetachedReplyPending, false);
   assert.equal(model.isStreaming, true);
   finishNew(frame([{ done: true }])); await tick();
   reads.shift()({ done: true }); await next;

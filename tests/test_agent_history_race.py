@@ -1,10 +1,8 @@
 """History invalidation races: real runtime/SQLite, synthetic worker, no model calls.
 
-Run with Python -B. Harness tests compile the current production chat branch.
-Foreground tests execute the actual endpoint with a synthetic plain provider.
+Run with Python -B. Chat tests execute the actual endpoint with synthetic models.
 Prompt/config loading and background effects are replaced; no real data is read.
 """
-import ast
 import asyncio
 from contextlib import ExitStack
 from copy import deepcopy
@@ -23,35 +21,10 @@ from src.core.broadcast import broadcast
 from src.memory.conversation_store import ConversationStore
 
 
-ROOT = Path(__file__).resolve().parents[1]
 PRESET = {"base_url": "https://fixture.invalid/v1", "model": "fixture",
           "api_key": "synthetic-history-race-key"}
 MESSAGES = [{"role": "system", "content": "Synthetic context"},
             {"role": "user", "content": "Synthetic request"}]
-
-
-def chat_agent_branch():
-    """Execute the actual streaming/finalization branch without starting the app."""
-    path = ROOT / "src/api/chat.py"
-    source = ast.parse(path.read_text(encoding="utf-8-sig"))
-    endpoint = next(node for node in source.body
-                    if isinstance(node, ast.AsyncFunctionDef) and node.name == "chat_endpoint")
-    branches = [node for node in ast.walk(endpoint)
-                if isinstance(node, ast.If) and isinstance(node.test, ast.Name)
-                and node.test.id == "agent_run"
-                and any(isinstance(child, ast.AsyncFor) for child in node.body)]
-    if len(branches) != 1:
-        raise AssertionError("Expected exactly one production agent stream/finalization branch")
-    wrapper = ast.parse(
-        "async def finalize(agent_runtime, agent_run, session, store, body):\n"
-        "    full_response = ''\n"
-        "    response_saved = False\n"
-    ).body[0]
-    wrapper.body.extend(branches[0].body)
-    namespace = {"json": json, "time": time, "broadcast": broadcast}
-    module = ast.fix_missing_locations(ast.Module(body=[wrapper], type_ignores=[]))
-    exec(compile(module, str(path), "exec"), namespace)
-    return namespace["finalize"]
 
 
 class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
@@ -82,7 +55,6 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                                     profile_loader=lambda _: {"tool_configs": {"timer": {"enabled": True}}})
         self.app.state.agent_runtime = self.runtime
         self.request = SimpleNamespace(app=self.app)
-        self.finalize = chat_agent_branch()
 
     async def asyncTearDown(self):
         await self.runtime.close()
@@ -91,22 +63,36 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
         return self.runtime.prepare(self.session, deepcopy(MESSAGES), dict(PRESET))
 
     async def cancelled_reply(self):
-        run = self.prepare()
+        from src.api import chat
+
+        async def first_reply(messages):
+            yield '<shikigami-task>{"goal":"Synthetic task"}</shikigami-task>'
 
         async def drive(item):
-            # Replace only external execution. Publication, SQL state, queue
-            # filtering, stream release, and chat persistence remain production.
-            await self.runtime._publish(item, {"type": "reply_delta", "text": "old-context partial"})
+            await self.runtime._publish(item, {"type": "started"})
+            await self.runtime._publish(item, {"type": "reply_delta", "text": "private task text"})
             await self.runtime._publish(item, {"type": "cancelled"})
             await item.queue.put(None)
 
-        guard = patch.object(self.runtime, "_drive", side_effect=drive)
-        guard.start()
-        self.addCleanup(guard.stop)
-        stream = self.finalize(self.runtime, run, self.session, self.store,
-                               SimpleNamespace(client_id="fixture", request_id="fixture"))
-        first = json.loads((await stream.__anext__()).removeprefix("data: ").strip())
-        self.assertEqual(first["token"], "old-context partial")
+        self.session.save_runtime_state = Mock()
+        for guard in (
+            patch.object(self.runtime, "_drive", side_effect=drive),
+            patch("src.api.agent._same_origin"),
+            patch("src.api.memory._get_or_create_manager"),
+            patch.object(chat, "get_effective_max_history_turns", return_value=10),
+            patch.object(chat, "build_messages", return_value=deepcopy(MESSAGES)),
+            patch.object(chat, "get_provider", return_value=SimpleNamespace(stream_chat=first_reply)),
+            patch.object(chat, "log_chat_request"),
+            patch.object(chat, "log_llm_call"),
+        ):
+            self.enterContext(guard)
+        response = await chat.chat_endpoint(self.request, chat.ChatRequest(
+            message="Synthetic task request", session_id="alpha", request_id="fixture"))
+        stream = response.body_iterator
+        user = json.loads((await anext(stream)).removeprefix("data: "))
+        self.assertEqual(user["message_role"], "user")
+        started = json.loads((await anext(stream)).removeprefix("data: "))["agent_event"]
+        run = self.runtime._runs[started["run_id"]]
         await run.task
         self.assertEqual(self.runtime.store.get_run(run.id)["state"], "cancelled")
         return run, stream
@@ -155,7 +141,7 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                     done = await self.finish_reply(stream)
                     self.assertTrue(done["discard_partial"])
                     self.assertTrue(done["cancelled"])
-                    self.assertIsNone(done["message_id"])
+                    self.assertIsNone(done.get("message_id"))
                     append.assert_not_called()
                 self.assertFalse(self.runtime.context_valid(run))
                 with self.assertRaisesRegex(ValueError, "history is being changed"):
@@ -172,19 +158,18 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(deletion, return_exceptions=True)
                 await stream.aclose()
 
-    async def test_cancel_without_history_mutation_keeps_exactly_one_partial(self):
+    async def test_cancel_without_history_mutation_keeps_only_user_message(self):
         run, stream = await self.cancelled_reply()
         try:
             done = await self.finish_reply(stream)
             self.assertTrue(done["cancelled"])
             self.assertFalse(done["discard_partial"])
-            self.assertIsNotNone(done["message_id"])
-            self.assertEqual(self.store.get_recent(), [
-                {"role": "assistant", "content": "old-context partial", "sender": "Fixture",
-                 "id": done["message_id"], "agent_run_id": run.id,
-                 "generation_status": "cancelled"}])
-            self.assertEqual(self.runtime.store.get_run(run.id)["assistant_message_id"],
-                             done["message_id"])
+            self.assertIsNone(done.get("message_id"))
+            history = self.store.get_recent()
+            self.assertEqual([(row["role"], row["content"]) for row in history],
+                             [("user", "Synthetic task request")])
+            self.assertEqual(history[0]["agent_run_id"], run.id)
+            self.assertIsNone(self.runtime.store.get_run(run.id)["assistant_message_id"])
             self.assertTrue(self.runtime.context_valid(run))
         finally:
             await stream.aclose()

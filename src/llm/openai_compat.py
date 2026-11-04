@@ -21,8 +21,11 @@ def _normalize_base_url(base_url: str) -> str:
     path = parsed.path.rstrip("/")
     suffix = "/chat/completions"
     if path.lower().endswith(suffix):
-        path = path[:-len(suffix)] or "/"
-        return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+        path = path[:-len(suffix)]
+    if parsed.hostname == "generativelanguage.googleapis.com" and path in ("", "/v1beta"):
+        path = "/v1beta/openai"
+    if path != parsed.path.rstrip("/"):
+        return urlunsplit((parsed.scheme, parsed.netloc, path or "/", parsed.query, parsed.fragment))
     return value
 
 

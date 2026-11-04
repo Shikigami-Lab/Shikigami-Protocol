@@ -55,6 +55,7 @@ class _Run:
     before_files: dict = field(default_factory=dict)
     workspace_warning: str = ''
     autonomy_summary: str = ''
+    cancel_requested: bool = False
     model_preset: dict = field(default_factory=dict, repr=False)
 
 
@@ -153,8 +154,15 @@ class AgentRuntime:
         return (not self._mutations.get(run.profile_id, 0) and not run.invalidate_after
                 and self.store.is_current(run.id, run.profile_id))
 
+    @staticmethod
+    def _run_id_for_request(profile_id, request_id):
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, profile_id + ":" + request_id))
+
+    def user_task_exists(self, profile_id, request_id):
+        return bool(request_id and self.store.get_run(self._run_id_for_request(profile_id, request_id), profile_id))
+
     def prepare(self, session, messages, preset, *, client_id="", request_id="", continue_run_id="", origin="user"):
-        """Reserve authority before chat storage/streaming; never infer identity from model text."""
+        """Reserve authority before task execution; never infer identity from model text."""
         limits = self.settings
         if session.id != session.profile_id:
             raise ValueError('Harness group chat is not enabled in this phase')
@@ -166,7 +174,7 @@ class AgentRuntime:
             raise ValueError('Autonomous activity is not enabled for this character')
         if request_id and (not isinstance(request_id, str) or len(request_id) > 128):
             raise ValueError("Invalid request id")
-        run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, session.profile_id + ":" + request_id)) if request_id else str(uuid.uuid4())
+        run_id = self._run_id_for_request(session.profile_id, request_id) if request_id else str(uuid.uuid4())
         with self._state_lock:
             self._recover_cleanup(session.profile_id)
             if self._mutations.get(session.profile_id, 0):
@@ -257,10 +265,8 @@ class AgentRuntime:
             return
         kind = event.get("type")
         if kind == "reply_delta":
-            if not run.stopped.is_set():
-                if run.envelope.get('origin') == 'reflection':
-                    run.autonomy_summary = (getattr(run, 'autonomy_summary', '') + event.get('text', ''))[:2000]
-                await run.queue.put({"token": event.get("text", ""), "done": False})
+            if run.envelope.get('origin') == 'reflection' and not run.stopped.is_set():
+                run.autonomy_summary = (run.autonomy_summary + event.get('text', ''))[:2000]
             return
         projected = {"type": kind}
         for key in ("status", "tool_name", "call_id"):
@@ -300,6 +306,9 @@ class AgentRuntime:
                     kind = 'failed'
                     event = {'type': 'failed', 'error': 'Workspace result could not be verified; partial files may exist'}
                     projected['error'] = event['error']
+            if kind == 'completed' and run.cancel_requested:
+                kind = 'cancelled'
+                event = {'type': kind}
             # Do not persist a UI success before the final-state/outbox commit.
             # Readers derive this marker from the authoritative run state.
             projected.update(type='status', status='running', result={
@@ -308,7 +317,7 @@ class AgentRuntime:
         saved = self.store.append_event(run.id, projected)
         if terminal:
             autonomous = run.envelope.get('origin') == 'reflection'
-            outcome = ({'summary': safe_text(getattr(run, 'autonomy_summary', '')),
+            outcome = ({'summary': safe_text(run.autonomy_summary),
                         'artifacts': run.artifacts, 'artifacts_truncated': event.get('artifacts_truncated', False)}
                        if autonomous else None)
             self.store.finish_run(run.id, kind, projected.get('error'), publish_result=autonomous or run.used_tools or kind != 'completed',
@@ -558,6 +567,7 @@ class AgentRuntime:
         run = self._runs.get(run_id)
         if not run or run.profile_id != profile_id or run.terminal:
             return False
+        run.cancel_requested = True
         # Wait for any in-flight host-side timer transaction before declaring
         # quiescence. Cancelling a to_thread future alone cannot stop its thread.
         await asyncio.to_thread(self._mark_stopped, run)

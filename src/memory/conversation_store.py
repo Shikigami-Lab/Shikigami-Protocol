@@ -178,6 +178,16 @@ class ConversationStore:
                 """, (limit,))
         return message_id
 
+    def bind_user_task(self, message_id: int, run_id: str) -> None:
+        _validate_provenance(run_id, "completed")
+        with self._conn:
+            updated = self._conn.execute(
+                "UPDATE messages SET agent_run_id=? WHERE id=? AND role='user' AND agent_run_id IS NULL",
+                (run_id, message_id),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("Task request message is no longer available")
+
     def reset_context(self):
         """Mark current time as the context start point (non-destructive)."""
         self._context_since_ts = time.time()
