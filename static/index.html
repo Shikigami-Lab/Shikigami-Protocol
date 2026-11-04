@@ -11,12 +11,12 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20261105lucide1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261105lucide1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261105memoryviews1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261105lucide1"></script>
+  <script src="js/i18n.js?v=20261105memoryviews1"></script>
 </head>
 <body>
 
@@ -1033,12 +1033,12 @@
        @click="settingsDialogName === 'settings' && closeSettings()"></div>
 
   <!-- ════════════════ SETTINGS CANVAS ════════════════ -->
-  <div class="settings-drawer" :class="{ open: settingsOpen }" :inert="!settingsOpen">
-    <div ref="settingsDialog" class="canvas-layout" role="dialog" :aria-label="t('headerSettingsBtn')"
+  <div class="settings-drawer" :class="{ open: settingsOpen, 'memory-browser': isMemoryBrowser }" :inert="!settingsOpen">
+    <div ref="settingsDialog" class="canvas-layout" role="dialog" :aria-label="isMemoryBrowser ? t('memSubTabContent') : t('headerSettingsBtn')"
          :aria-modal="settingsDialogName === 'settings'" tabindex="-1" :inert="settingsDialogName !== 'settings'">
 
       <!-- Left navigation -->
-      <div class="canvas-nav">
+      <div v-if="!isMemoryBrowser" class="canvas-nav">
         <div class="canvas-nav-header">
           <span class="canvas-nav-title">{{ t('appName') }}</span>
           <button type="button" class="canvas-close-btn" data-settings-initial-focus
@@ -1065,13 +1065,14 @@
         <div class="canvas-content-header">
           <h2>{{ currentTabLabel }}</h2>
           <button type="button" class="canvas-mobile-close" data-settings-initial-focus
-                  @click="closeSettings()" :title="t('settingsClose')" :aria-label="t('settingsClose')"><app-icon name="x" :size="14"></app-icon></button>
+                  @click="closeSettings()" :title="t(isMemoryBrowser ? 'settingsCloseDialog' : 'settingsClose')"
+                  :aria-label="t(isMemoryBrowser ? 'settingsCloseDialog' : 'settingsClose')"><app-icon name="x" :size="14"></app-icon></button>
         </div>
         <!-- Tab body -->
         <div class="settings-body" ref="settingsBodyScroll">
 
       <!-- 确认条：删除人格/删除预设等在此确认；记忆面板有自己的确认条 -->
-      <div v-if="confirmingAction && activeTab !== 'memory'" class="confirm-bar">
+      <div v-if="confirmingAction && !isMemoryBrowser" class="confirm-bar">
         <span class="confirm-bar-msg">{{ t('settingsConfirmPrefix') }}{{ confirmingAction.label }}{{ confirmingAction.key === 'deleteProfile' ? t('profileDeleteScope') : t('settingsConfirmSuffix') }}</span>
         <button type="button" class="s-btn s-btn-danger" @click="executeAction">{{ t('settingsConfirmExecute') }}</button>
         <button type="button" class="s-btn s-btn-secondary" @click="cancelAction">{{ t('settingsConfirmCancel') }}</button>
@@ -4794,22 +4795,16 @@
       </div><!-- end System tab -->
 
 
-      <!-- ── Tab: 记忆 ── -->
-      <div v-if="activeTab === 'memory'" class="settings-tab-content memory-canvas-content">
-
-      <!-- 记忆子 Tab 导航 -->
-      <div class="memory-panel-tabs">
-        <button type="button" :aria-pressed="memoryPanelTab === 'content'" :class="{ active: memoryPanelTab === 'content' }" @click="memoryPanelTab='content'">{{ t('memSubTabContent') }}</button>
-        <button type="button" :aria-pressed="memoryPanelTab === 'settings'" :class="{ active: memoryPanelTab === 'settings' }" @click="memoryPanelTab='settings'">{{ t('memSubTabSettings') }}</button>
-      </div>
+      <!-- Memory browser and settings share the dialog shell. -->
+      <div v-if="activeTab === 'memory' || isMemoryBrowser" class="settings-tab-content memory-canvas-content">
       <div class="memory-canvas-body">
       <!-- 确认条：备份/清空等在此确认，手机端在记忆面板内可见 -->
-      <div v-if="confirmingAction" class="confirm-bar memory-panel-confirm-bar">
+      <div v-if="isMemoryBrowser && confirmingAction" class="confirm-bar memory-panel-confirm-bar">
         <span class="confirm-bar-msg">{{ t('memoryConfirm_' + confirmingAction.key).replace('{name}', profiles.find(p => p.profile_id === confirmingAction.data?.profileId)?.display_name || confirmingAction.data?.profileId || '') }}</span>
         <button type="button" class="s-btn s-btn-danger" @click="executeAction">{{ t('settingsConfirmExecute') }}</button>
         <button type="button" class="s-btn s-btn-secondary" @click="cancelAction">{{ t('settingsConfirmCancel') }}</button>
       </div>
-      <div v-show="memoryPanelTab === 'content'" class="memory-panel-content">
+      <div v-if="isMemoryBrowser" class="memory-panel-content">
         <!-- 记忆内容：人格选择、状态、操作、事实库/向量/摘要/历史 -->
         <div class="param-row" style="margin-bottom:10px;">
           <span class="param-label">{{ t('lblMemoryProfile') }}</span>
@@ -4909,18 +4904,20 @@
             </div>
           </template>
           <template v-if="memoryActiveSubTab === 'maintenance'">
-        <div class="memory-action-row">
-          <button class="s-btn s-btn-secondary memory-btn-backup" @click="initMemoryAction('backup', memoryProfileId)" :title="t('titleBackup')"><app-icon name="archive" :size="14"></app-icon> {{ t('btnBackup') }}</button>
-          <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearHistory', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearHistory') }}</button>
-          <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearFacts', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearFacts') }}</button>
-          <button class="s-btn s-btn-secondary memory-btn-danger" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="initMemoryAction('clearVectors', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearVectors') }}</button>
-          <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearSummaries', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearSummaries') }}</button>
-        </div>
-            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
-              <span style="font-size:11px;color:var(--text-secondary);">{{ t('memSectDailyForgetting') }}</span>
-              <button class="s-btn" style="font-size:12px;" :disabled="forgettingPreviewLoading || !(memoryProfileId)" @click="loadForgettingPreview(memoryProfileId)">{{ forgettingPreviewLoading ? '…' : t('btnPreviewForgetting') }}</button>
-              <button class="s-btn" style="font-size:12px;" :disabled="forgettingRunLoading" @click="runForgettingNow()">{{ forgettingRunLoading ? t('btnRunningForgetting') : t('btnRunForgetting') }}</button>
+            <div class="s-card memory-maintenance-card">
+              <button type="button" class="s-btn s-btn-secondary memory-btn-backup"
+                      @click="initMemoryAction('backup', memoryProfileId)" :title="t('titleBackup')">
+                <app-icon name="archive" :size="14"></app-icon> {{ t('btnBackup') }}
+              </button>
             </div>
+            <div class="s-card memory-maintenance-card">
+              <div class="s-card-title">{{ t('memSectDailyForgetting') }}</div>
+              <div class="memory-maintenance-actions">
+                <button type="button" class="s-btn s-btn-secondary" :disabled="forgettingPreviewLoading || !memoryProfileId"
+                        @click="loadForgettingPreview(memoryProfileId)">{{ forgettingPreviewLoading ? '…' : t('btnPreviewForgetting') }}</button>
+                <button type="button" class="s-btn s-btn-secondary" :disabled="forgettingRunLoading"
+                        @click="runForgettingNow()">{{ forgettingRunLoading ? t('btnRunningForgetting') : t('btnRunForgetting') }}</button>
+              </div>
             <div v-if="forgettingPreview && forgettingPreview.skip" class="mem-forgetting-preview mem-diary-preview">
               <div class="mem-diary-preview-title">{{ t('memForgettingSkipTitle') }}</div>
               <p class="mem-cfg-hint">{{ forgettingPreview.reason }}</p>
@@ -4969,7 +4966,9 @@
               </div>
             </div>
 
-            <!-- Memory change history: collapsed by default; when expanded it scrolls at a fixed height so the fact list below stays visible -->
+            </div>
+
+            <!-- Memory change history -->
             <div class="mem-changelog">
               <div class="mem-diary-preview-title mem-changelog-toggle">
                 <button type="button" class="mem-changelog-title-btn" :aria-expanded="memShowChangelog"
@@ -5019,6 +5018,16 @@
               </div>
               </div>
             </div>
+
+            <details class="s-card memory-maintenance-card memory-cleanup">
+              <summary><app-icon name="chevron-right" :size="14"></app-icon> {{ t('memCleanupTitle') }}</summary>
+              <div class="memory-maintenance-actions">
+                <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearHistory', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearHistory') }}</button>
+                <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearFacts', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearFacts') }}</button>
+                <button class="s-btn s-btn-secondary memory-btn-danger" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="initMemoryAction('clearVectors', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearVectors') }}</button>
+                <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearSummaries', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearSummaries') }}</button>
+              </div>
+            </details>
 
           </template>
 
@@ -5111,7 +5120,7 @@
           </template>
         </div>
       </div>
-      <div v-show="memoryPanelTab === 'settings'" class="memory-panel-settings">
+      <div v-else class="memory-panel-settings">
         <div class="memory-settings-form" style="max-width:100%;">
           <div class="memory-panel-tabs" style="margin-bottom:12px;padding:0;">
             <button type="button" :aria-pressed="memorySettingsScope === 'global'" :class="{ active: memorySettingsScope === 'global' }"
@@ -5751,7 +5760,7 @@
 <script src="js/api-paths.js?v=20261102trisync1"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261105lucide1"></script>
+<script src="js/settings.js?v=20261105memoryviews1"></script>
 <script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261105lucide1"></script>

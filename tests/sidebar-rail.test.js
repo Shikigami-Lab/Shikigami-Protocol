@@ -34,13 +34,12 @@ test('the compact sidebar owns both columns and only collapsed headers offer sho
 test('current-character Memory opens content for the chat character after another profile was viewed', () => {
   const state = Object.assign(settings.data(), {
     currentSessionId: 'chat-role', selectedProfileId: 'settings-role', memoryProfileId: 'previous-role',
-    activeTab: 'memory', memoryPanelTab: 'settings', memoryActiveSubTab: 'maintenance',
+    activeTab: 'memory', memoryActiveSubTab: 'maintenance',
     selectMemoryProfile: settings.methods.selectMemoryProfile,
     openSettings() {
-      assert.equal(this.activeTab, 'memory');
+      assert.equal(this.activeTab, 'memory-content');
       assert.equal(this.memoryProfileId, 'chat-role');
       assert.equal(this.memoryContentProfileId, 'chat-role');
-      assert.equal(this.memoryPanelTab, 'content');
       assert.equal(this.memoryActiveSubTab, 'facts');
       assert.equal(this.selectedProfileId, 'settings-role');
     },

@@ -1666,12 +1666,26 @@ textarea.form-input {
 .s-btn-danger:hover:not(:disabled) { opacity: 0.85; }
 
 /* ── Memory management buttons ── */
-.memory-action-row {
+.memory-browser .canvas-mobile-close { display: flex; margin-inline-start: auto; }
+.memory-maintenance-card { margin-bottom: 14px; }
+.memory-maintenance-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
 }
+.memory-maintenance-actions .s-btn {
+  max-width: 100%;
+  white-space: normal;
+}
+.memory-cleanup { margin-top: 14px; }
+.memory-cleanup summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.memory-cleanup[open] summary { margin-bottom: 10px; }
+.memory-cleanup[open] summary .app-icon { transform: rotate(90deg); }
 .memory-btn-backup {
   color: var(--accent, #7c6cf0) !important;
   border-color: var(--accent, #7c6cf0) !important;

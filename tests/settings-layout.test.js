@@ -22,7 +22,7 @@ test('proactive topic sources and screenshot controls live together in Behavior'
 
 test('Models links to the persona memory extraction editor without changing persona selection', () => {
   const models = panel('llm', 'tts');
-  const memory = html.slice(html.indexOf(`v-if="activeTab === 'memory'"`));
+  const memory = html.slice(html.indexOf(`v-if="activeTab === 'memory' || isMemoryBrowser"`));
   assert.ok(!models.includes('v-model="selectedProfileId"'));
   assert.ok(!models.includes('v-model="memoryTabProfileForm.extraction_llm_preset"'));
   assert.ok(memory.includes('v-model="memoryTabProfileForm.extraction_llm_preset"'));
@@ -73,4 +73,16 @@ test('settings tabs restore their own scroll without overriding direct section n
   switchTab('llm', 'onboarding');
   assert.equal(queue.length, 0);
   assert.equal(state.settingsScrollTargetTab, '');
+});
+
+
+test('memory browser and settings use distinct views and maintenance has a collapsed cleanup section', () => {
+  const browser = html.indexOf('class="memory-panel-content"');
+  const settings = html.indexOf('class="memory-panel-settings"');
+  assert.ok(browser > 0 && settings > browser);
+  assert.match(html.slice(browser - 65, browser), /v-if="isMemoryBrowser"/);
+  assert.match(html.slice(settings - 65, settings), /v-else/);
+  const maintenance = html.slice(html.indexOf("memoryActiveSubTab === 'maintenance'"), html.indexOf("memoryActiveSubTab === 'vectors'"));
+  assert.match(maintenance, /<details class="[^"]*memory-cleanup/);
+  assert.match(maintenance, /<button[^>]+class="s-btn s-btn-secondary"[^>]+@click="loadForgettingPreview/);
 });

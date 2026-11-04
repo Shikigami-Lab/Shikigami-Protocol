@@ -82,16 +82,14 @@ const SettingsMixin = {
         { id: 'llm',        labelZh: '模型',  labelEn: 'Models',     shortEn: 'Models',  icon: 'cpu' },
         { id: 'tts',        labelZh: '语音',  labelEn: 'Voice',      shortEn: 'Voice',   icon: 'mic' },
         { id: 'behavior',   labelZh: '行为',  labelEn: 'Behavior',   shortEn: 'Behavior', icon: 'sliders-horizontal' },
-        { id: 'memory',     labelZh: '记忆',  labelEn: 'Memory',     shortEn: 'Memory',  icon: 'brain' },
+        { id: 'memory',     labelZh: '记忆设置',  labelEn: 'Memory settings',     shortEn: 'Memory',  icon: 'brain' },
         { id: 'tools',      labelZh: '工具',  labelEn: 'Tools',      shortEn: 'Tools',   icon: 'wrench' },
         { id: 'system',     labelZh: '系统',  labelEn: 'System',     shortEn: 'System',  icon: 'monitor' },
       ],
       // Standard emotion keys (filled from GET /settings/emotion_keys)
       emotionStandardKeys: [],
 
-      // 记忆面板 — 现已整合进 canvas（memory tab），保留变量以兼容现有逻辑
-      memoryPanelOpen: false,
-      memoryPanelTab: 'content',  // 'content' | 'settings'
+      settingsTabBeforeMemory: 'profiles',
       memoryPanelLoading: false,  // 记忆内容/人格切换时加载中
       // Persona canvas state
       personaEmotionState: null,   // { primary_emotion, energy_level, user_sentiment }
@@ -765,7 +763,11 @@ const SettingsMixin = {
         .filter(k => !standard.includes(k));
       return [...standard, ...extra];
     },
+    isMemoryBrowser() {
+      return this.activeTab === 'memory-content';
+    },
     currentTabLabel() {
+      if (this.isMemoryBrowser) return this.t('memSubTabContent');
       const tab = this.settingsTabs.find(t => t.id === this.activeTab);
       if (!tab) return '';
       return this.locale === 'en' ? tab.labelEn : tab.labelZh;
@@ -971,15 +973,6 @@ const SettingsMixin = {
         this._loadPersonaState();
       }
     },
-    memoryPanelTab(tab) {
-      const isMemoryOpen = this.memoryPanelOpen || (this.settingsOpen && this.activeTab === 'memory');
-      if (tab === 'settings' && isMemoryOpen) {
-        this.loadMemoryGlobalConfig();
-        this.openMemoryView();
-      } else if (tab === 'content' && isMemoryOpen) {
-        this.openMemoryView();
-      }
-    },
     selectedProfileId(id) {
       if (id && this.activeTab === 'profiles' && this.settingsOpen) {
         this._loadPersonaState();
@@ -1085,7 +1078,7 @@ const SettingsMixin = {
 
     settingsScrollContainer(tab) {
       const body = this.$refs?.settingsBodyScroll;
-      if (tab === 'memory') return body?.querySelector('.memory-canvas-body');
+      if (tab === 'memory' || tab === 'memory-content') return body?.querySelector('.memory-canvas-body');
       return body;
     },
 
@@ -1106,10 +1099,7 @@ const SettingsMixin = {
     openSettingsSection(tab, target, subtab) {
       if (tab === 'behavior' && subtab) this.behaviorSubTab = subtab;
       if (tab === 'profiles' && subtab) this.profileSubTab = subtab;
-      if (tab === 'memory' && subtab) {
-        this.memoryPanelTab = subtab;
-        this.memorySettingsScope = 'persona';
-      }
+      if (tab === 'memory' && subtab === 'settings') this.memorySettingsScope = 'persona';
       this.settingsSectionTarget = target;
       if (this.activeTab !== tab) this.settingsScrollTargetTab = tab;
       this.activeTab = tab;
@@ -1208,9 +1198,17 @@ const SettingsMixin = {
       }
     },
 
-    openSettings() {
+    openSettings(options = {}) {
       this.$refs?.sidebarGroups?.hidePopover?.();
+      if (this.isMemoryBrowser && !options.memoryBrowser) this.activeTab = this.settingsTabBeforeMemory;
       this.settingsOpen = true;
+      this.confirmingAction = null;
+      if (options.memoryBrowser) {
+        this.loadProfiles().then(() => {
+          if (this.settingsOpen && this.isMemoryBrowser) this.openMemoryView();
+        });
+        return;
+      }
       if (this.activeTab === 'llm' || (this.activeTab === 'profiles' && this.profileSubTab === 'tools')) {
         this.loadAgentSettings(false, false);
       }
@@ -1218,7 +1216,6 @@ const SettingsMixin = {
         this.loadToolsConfig();
         this.loadAgentSettings();
       }
-      this.confirmingAction = null;
       {
         let t = localStorage.getItem('theme') || '';
         if (t === 'velvet_legacy') { t = 'velvet'; localStorage.setItem('theme', t); }
@@ -1387,10 +1384,10 @@ const SettingsMixin = {
     openMemoryPanel() {
       if (!this.currentSessionId || this.currentGroupId) return;
       this.selectMemoryProfile(this.currentSessionId);
-      this.memoryPanelTab = 'content';
       this.memoryActiveSubTab = 'facts';
-      this.activeTab = 'memory';
-      this.openSettings();
+      if (!this.isMemoryBrowser) this.settingsTabBeforeMemory = this.activeTab;
+      this.activeTab = 'memory-content';
+      this.openSettings({ memoryBrowser: true });
     },
 
     closeMemoryPanel() {
@@ -4513,7 +4510,7 @@ const SettingsMixin = {
       const profileId = hasProfile(this.memoryProfileId) ? this.memoryProfileId
         : hasProfile(this.currentSessionId) ? this.currentSessionId : this.profiles[0]?.profile_id || '';
       this.selectMemoryProfile(profileId);
-      if (this.memoryPanelTab === 'settings') return this.loadMemoryTabProfileConfig(profileId);
+      if (this.activeTab === 'memory') return this.loadMemoryTabProfileConfig(profileId);
       return this.loadMemoryData(profileId);
     },
 
