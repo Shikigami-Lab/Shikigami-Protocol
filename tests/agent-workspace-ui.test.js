@@ -567,12 +567,13 @@ test('terminal snapshot metadata survives event reduction and enables continuati
   assert.equal(model.agentContinueRunId, 'r1');
 });
 
-test('workspace template uses escaped text and blob image state, with no iframe or raw HTML', () => {
+test('workspace template uses escaped text, filtered Markdown and blob image state', () => {
   const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
   const section = html.match(/<aside\b[^>]*id="agent-workspace-drawer"[\s\S]*?<\/aside>/)[0];
   assert.ok(section.includes('{{ agentWorkspaceText }}'));
   assert.ok(section.includes(':src="agentWorkspaceImage"'));
-  assert.doesNotMatch(section, /v-html|<iframe|<object|<embed/);
+  assert.deepEqual(section.match(/v-html="[^"]*"/g), ['v-html="agentWorkspaceMarkdown"']);
+  assert.doesNotMatch(section, /<iframe|<object|<embed/);
   assert.equal(typeof realVue.compile(section, { decodeEntities: value => value }), 'function');
 });
 

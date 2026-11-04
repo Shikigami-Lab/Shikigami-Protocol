@@ -250,6 +250,7 @@ const App = {
       ttsEnabled: false,
       isElectron: IS_ELECTRON,
       sidebarOpen: window.innerWidth >= 769,
+      sidebarMobile: window.innerWidth < 769,
       appVersion: '…',   // 从 GET /version 拉取，设置页显示
 
       // TTS WebSocket
@@ -378,6 +379,8 @@ const App = {
   },
 
   async mounted() {
+    this._sidebarMedia = window.matchMedia('(max-width: 768px)');
+    this._sidebarMedia.addEventListener('change', this.onSidebarMediaChange);
     // Locale 优先级：服务端 ui_prefs > localStorage > 浏览器语言推断（仅当两者皆无有效值）
     let prefs = {};
     try {
@@ -482,11 +485,6 @@ const App = {
         if (Array.isArray(arr)) this.pinnedGroupIds = arr;
       }
     } catch (_) {}
-    if (window.innerWidth >= 769) {
-      this.sidebarOpen = true;
-      const appEl = document.getElementById('app');
-      if (appEl) appEl.setAttribute('data-sidebar-closed', 'false');
-    }
     let restoredGroup = false;
     try {
       const savedGroupId = localStorage.getItem('currentGroupId');
@@ -614,6 +612,7 @@ const App = {
   },
 
   unmounted() {
+    this._sidebarMedia?.removeEventListener('change', this.onSidebarMediaChange);
     if (this._captureErrorResetTimer) clearTimeout(this._captureErrorResetTimer);
     if (this._audioUnlockRef) {
       document.removeEventListener('click', this._audioUnlockRef);
@@ -666,19 +665,39 @@ const App = {
     /* ─────────────────── Sessions ─────────────────── */
 
     closeSidebar() {
+      this.$refs.sidebarGroups?.hidePopover();
       this.sidebarOpen = false;
-      const appEl = document.getElementById('app');
-      if (appEl) appEl.setAttribute('data-sidebar-closed', 'true');
+      this.$nextTick(() => this.$refs.sidebarToggle?.focus());
     },
     openSidebar() {
       this.sidebarOpen = true;
-      const appEl = document.getElementById('app');
-      if (appEl) appEl.setAttribute('data-sidebar-closed', 'false');
+      if (this.sidebarMobile) this.$nextTick(() => this.$refs.sidebarMobileClose?.focus());
     },
     toggleSidebar() {
-      this.sidebarOpen = !this.sidebarOpen;
-      const appEl = document.getElementById('app');
-      if (appEl) appEl.setAttribute('data-sidebar-closed', this.sidebarOpen ? 'false' : 'true');
+      if (this.sidebarOpen) this.closeSidebar();
+      else this.openSidebar();
+    },
+    onSidebarEscape() {
+      if (this.sidebarMobile && !this.$refs.sidebarGroups?.matches(':popover-open')) this.closeSidebar();
+    },
+    trapSidebarFocus(event) {
+      if (!this.sidebarMobile || !this.sidebarOpen || event.defaultPrevented || !this.$refs.chatSidebar) return;
+      const controls = this.settingsDialogControls(this.$refs.chatSidebar);
+      const first = controls[0], last = controls.at(-1);
+      if (!first || document.activeElement === (event.shiftKey ? first : last)) {
+        event.preventDefault();
+        ((event.shiftKey ? last : first) || this.$refs.sidebarMobileClose)?.focus();
+      }
+    },
+    onSidebarMediaChange({ matches }) {
+      const focused = document.activeElement;
+      this.sidebarMobile = matches;
+      if (!this.sidebarOpen) return;
+      if (matches && focused.closest('.chat-main')) {
+        this.$nextTick(() => this.$refs.sidebarMobileClose?.focus());
+      } else if (!matches && focused === this.$refs.sidebarMobileClose) {
+        this.$nextTick(() => this.$refs.sidebarToggle?.focus());
+      }
     },
 
     async loadSessions() {
@@ -827,6 +846,13 @@ const App = {
       }
     },
 
+    async moveSidebarRole(event, sessionId, direction) {
+      const button = event.currentTarget;
+      const saving = direction === 'up' ? this.moveSessionUp(sessionId) : this.moveSessionDown(sessionId);
+      // Moving a keyed row can blur its focused button.
+      await this.$nextTick(() => button.focus({ preventScroll: true }));
+      return saving;
+    },
     async moveSessionUp(sessionId) {
       const idx = this.sessions.findIndex(s => s.id === sessionId);
       if (idx <= 0) return;
@@ -846,7 +872,11 @@ const App = {
 
     async switchSession(sessionId) {
       const canDetach = !this.currentGroupId && !!this.agentChatContext?.runKey;
-      if (sessionId === this.currentSessionId || (this.isStreaming && !canDetach)) return;
+      if (sessionId === this.currentSessionId) {
+        if (this.sidebarMobile && this.sidebarOpen) this.closeSidebar();
+        return;
+      }
+      if (this.isStreaming && !canDetach) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionSwitch(), {
           method: 'POST',
@@ -876,7 +906,7 @@ const App = {
           this.subscribeEvents(sessionId);
           this.fetchStatus();
           this.fetchAseStatus();
-          this.sidebarOpen = false;
+          if (this.sidebarMobile && this.sidebarOpen) this.closeSidebar();
         }
       } catch (e) {
         this.statusText = `${this.t('statusSwitchFailed')}: ${e.message}`;
@@ -922,7 +952,7 @@ const App = {
       this.selectedCadenceProfileId = (group.participants && group.participants[0]) ? group.participants[0].profile_id : null;
       await this.loadGroupHistory(group.group_id);
       this.subscribeEvents('group:' + group.group_id);
-      this.sidebarOpen = false;
+      if (this.sidebarMobile && this.sidebarOpen) this.closeSidebar();
       if (this.selectedStatusProfileId) this.fetchStatus();
       if (this.selectedCadenceProfileId) this.fetchUserActivity();
     },
@@ -961,8 +991,13 @@ const App = {
       }
       this.statusText = this.t('statusGroupLeft');
     },
+    closeCreateGroupModal() {
+      this.showCreateGroupModal = false;
+      this.$nextTick(() => this.$refs.sidebarGroupsTrigger?.focus());
+    },
     async openCreateGroupModal() {
       this.showCreateGroupModal = true;
+      this.$nextTick(() => this.$refs.createGroupNameInput?.focus());
       this.createGroupName = '';
       this.createGroupSelectedIds = [];
       try {
@@ -1211,7 +1246,7 @@ const App = {
           return;
         }
         const group = await res.json();
-        this.showCreateGroupModal = false;
+        this.closeCreateGroupModal();
         await this.loadGroups();
         this.switchToGroup(group);
         this.statusText = this.t('statusGroupCreated').replace('{name}', name);

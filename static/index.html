@@ -10,17 +10,17 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261102trisync1" />
+  <link rel="stylesheet" href="css/styles.css?v=20261105chatlayout1" />
   <link rel="stylesheet" href="css/settings.css?v=20261105settings3" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261105settings3"></script>
+  <script src="js/i18n.js?v=20261105chatlayout1"></script>
 </head>
 <body>
 
-<div id="app" v-cloak :class="{ 'sidebar-closed': !sidebarOpen }" :data-sidebar-closed="!sidebarOpen ? 'true' : 'false'">
+<div id="app" v-cloak>
 
   <!-- ════════════════ SIDEBAR BACKDROP (mobile only) ════════════════ -->
   <div
@@ -30,82 +30,98 @@
   ></div>
 
   <!-- ════════════════ SIDEBAR ════════════════ -->
-  <aside class="sidebar" :class="{ open: sidebarOpen }" :inert="!!settingsDialogName || (agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId)">
-    <div class="sidebar-header">
-      <div class="app-logo" aria-hidden="true"><img src="icon.png" alt="" class="app-logo-img" onerror="this.style.display='none';this.nextElementSibling?.classList.add('use-fallback');" /><span class="app-logo-fallback">式</span></div>
-      <span class="app-name">Shikigami</span>
-    </div>
-
-    <div v-if="outOfSyncWithServer && !currentGroupId" class="sidebar-out-of-sync-hint">
-      {{ t('sidebarOutOfSync') }} <button type="button" class="sidebar-sync-inline-btn" @click="syncSessionsFromServer">↻</button> {{ t('sidebarOutOfSyncSuffix') }}
-    </div>
-    <div class="sidebar-section-label-row" style="margin-top:8px">
-      <span class="sidebar-section-label">{{ t('sidebarPersonalities') }}</span>
-      <button type="button" class="sidebar-sync-btn" :title="t('sidebarSyncTitle')" @click="syncSessionsFromServer">↻</button>
-    </div>
-    <!-- 人格列表：后续可改为按分组折叠，与设置页人格列表结构一致 -->
-    <div class="session-list">
-      <div
-        v-for="(session, sIdx) in sessions"
-        :key="session.id"
-        class="session-item session-item-draggable"
-        :class="{ active: session.id === currentSessionId, dragging: sessionDragging && sessionDragActiveId === session.id, 'drag-over': sessionDragOverId === session.id }"
-        :draggable="supportsHtml5Drag"
-        :data-session-id="session.id"
-        @click="!sessionDragging && switchSession(session.id)"
-        @dragstart="sessionDragStart($event, session.id)"
-        @dragend="sessionDragEnd"
-        @dragover.prevent="sessionDragOver($event, session.id)"
-        @dragleave="sessionDragOverId = null"
-        @drop.prevent="sessionDrop($event, session.id)"
-      >
-        <span
-          class="session-drag-handle"
-          :title="t('sessionDragTitle')"
-          @pointerdown.stop="sessionPointerDown($event, session.id)"
-        >⋮⋮</span>
-        <div class="session-move-btns" role="group" :aria-label="t('sessionMoveUp')">
-          <button type="button" class="session-move-btn" :title="t('sessionMoveUp')" :disabled="sIdx === 0" @click.stop="moveSessionUp(session.id)">▲</button>
-          <button type="button" class="session-move-btn" :title="t('sessionMoveDown')" :disabled="sIdx === sessions.length - 1" @click.stop="moveSessionDown(session.id)">▼</button>
+  <aside id="chat-sidebar" ref="chatSidebar" class="sidebar" :class="{ open: sidebarOpen }"
+         :aria-label="t('sidebarNavigation')" :role="sidebarMobile ? 'dialog' : null"
+         :aria-modal="sidebarMobile && sidebarOpen ? 'true' : null"
+         :inert="!sidebarOpen || showCreateGroupModal || !!settingsDialogName || (agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId)"
+         @keydown.esc="onSidebarEscape" @keydown.tab="trapSidebarFocus">
+    <nav class="sidebar-shortcuts" :aria-label="t('sidebarNavigation')">
+      <button type="button" ref="sidebarMobileClose" class="sidebar-shortcut sidebar-mobile-close"
+              :title="t('headerToggleSidebar')" :aria-label="t('headerToggleSidebar')"
+              aria-controls="chat-sidebar" aria-expanded="true" @click="closeSidebar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <button type="button" ref="sidebarGroupsTrigger" class="sidebar-shortcut" :class="{ on: currentGroupId }"
+              :title="t('sidebarGroups')" :aria-label="t('sidebarGroups')" popovertarget="sidebar-groups">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 5a3 3 0 0 1 0 6m5 9v-2a4 4 0 0 0-3-4"/></svg>
+      </button>
+      <section id="sidebar-groups" ref="sidebarGroups" class="sidebar-groups-popover" popover="auto"
+               :aria-label="t('sidebarGroups')">
+        <h2>{{ t('sidebarGroups') }}</h2>
+        <div class="group-list">
+          <div v-for="g in sortedGroups" :key="g.group_id" class="session-item group-item"
+               :class="{ active: currentGroupId === g.group_id }">
+            <button type="button" class="sidebar-group-select" :aria-current="currentGroupId === g.group_id ? 'true' : null"
+                    @click="$refs.sidebarGroups.hidePopover(); switchToGroup(g)">
+              <span class="session-name">{{ g.display_name || g.group_id }}</span>
+            </button>
+            <button type="button" class="group-pin-btn" :class="{ pinned: isGroupPinned(g.group_id) }"
+                    :aria-label="t('sidebarPinGroup').replace('{name}', g.display_name || g.group_id)"
+                    :aria-pressed="isGroupPinned(g.group_id)" :title="t('sidebarPinGroup').replace('{name}', g.display_name || g.group_id)"
+                    @click="toggleGroupPin(g.group_id)">&#128204;</button>
+          </div>
+          <button type="button" class="sidebar-create-group-btn"
+                  @click="$refs.sidebarGroups.hidePopover(); openCreateGroupModal()">{{ t('sidebarCreateGroup') }}</button>
         </div>
-        <div class="session-avatar">
-          <img v-if="session.avatar" :src="session.avatar" class="avatar-img" />
-          <span v-else>{{ session.display_name.charAt(0) }}</span>
+      </section>
+      <button v-if="sidebarOpen" type="button" ref="agentWorkspaceOpener" class="sidebar-shortcut agent-workspace-opener"
+              :class="{ on: agentWorkspaceOpen }" :disabled="!!currentGroupId || !currentSessionId"
+              :title="t('agentWorkspace')" :aria-label="t('agentWorkspace')"
+              :aria-describedby="agentActiveTaskCount ? 'sidebar-workspace-task-count' : null"
+              :aria-expanded="agentWorkspaceOpen" aria-controls="agent-workspace-drawer" @click="toggleAgentWorkspace">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span v-if="agentActiveTaskCount" id="sidebar-workspace-task-count" class="agent-task-count sidebar-task-count">{{ agentActiveTaskCount }}</span>
+      </button>
+      <button type="button" class="sidebar-shortcut" :disabled="!!currentGroupId || !currentSessionId"
+              :title="t('memSubTabContent')" :aria-label="t('memSubTabContent')" @click="openMemoryPanel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6a9 9 0 0 0-9-2v15a9 9 0 0 1 9 2 9 9 0 0 1 9-2V4a9 9 0 0 0-9 2zm0 0v15"/></svg>
+      </button>
+      <button v-if="sidebarOpen" type="button" ref="settingsTrigger" class="sidebar-shortcut gear-btn"
+              :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')" @click="openSettings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l.6 2.4 2 .9L20 5.5l2 3.5-1.7 1.8v2.4L22 15l-2 3.5-2.4-.8-2 .9L15 21H9l-.6-2.4-2-.9-2.4.8L2 15l1.7-1.8v-2.4L2 9l2-3.5 2.4.8 2-.9z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span>
+      </button>
+    </nav>
+    <div class="sidebar-characters" role="group" :aria-label="t('sidebarPersonalities')">
+      <div class="session-list">
+        <div v-for="session in sessions" :key="session.id" class="session-item session-item-draggable"
+             :class="{ active: !currentGroupId && session.id === currentSessionId, dragging: sessionDragging && sessionDragActiveId === session.id, 'drag-over': sessionDragOverId === session.id }"
+             :draggable="supportsHtml5Drag" :data-session-id="session.id"
+             @dragstart="sessionDragStart($event, session.id)" @dragend="sessionDragEnd"
+             @dragover.prevent="sessionDragOver($event, session.id)" @dragleave="sessionDragOverId = null"
+             @drop.prevent="sessionDrop($event, session.id)">
+          <button type="button" class="sidebar-role-button" :aria-label="session.display_name" :title="session.display_name"
+                  :aria-current="!currentGroupId && session.id === currentSessionId ? 'true' : null"
+                  aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @click="!sessionDragging && switchSession(session.id)"
+                  @keydown.alt.up.prevent="moveSidebarRole($event, session.id, 'up')"
+                  @keydown.alt.down.prevent="moveSidebarRole($event, session.id, 'down')">
+            <span class="session-avatar" aria-hidden="true">
+              <img v-if="session.avatar" :src="session.avatar" class="avatar-img" alt="" draggable="false" />
+              <span v-else>{{ session.display_name.charAt(0) }}</span>
+            </span>
+          </button>
+          <span class="session-drag-handle" aria-hidden="true" :title="t('sidebarReorderRoles')"
+                @pointerdown.stop="sessionPointerDown($event, session.id)">&#8942;</span>
         </div>
-        <span class="session-name">{{ session.display_name }}</span>
-        <span v-if="session.is_current" class="active-dot"></span>
       </div>
-    </div>
-    <div class="sidebar-section-label-row" style="margin-top:8px">
-      <span class="sidebar-section-label">{{ t('sidebarGroups') }}</span>
-    </div>
-    <div class="group-list">
-      <div
-        v-for="g in sortedGroups"
-        :key="g.group_id"
-        class="session-item group-item"
-        :class="{ active: currentGroupId === g.group_id }"
-        @click="switchToGroup(g)"
-      >
-        <button type="button" class="group-pin-btn" :class="{ pinned: isGroupPinned(g.group_id) }" :title="isGroupPinned(g.group_id) ? (locale === 'en' ? 'Unpin' : '取消置顶') : (locale === 'en' ? 'Pin' : '置顶')" @click.stop="toggleGroupPin(g.group_id)">📌</button>
-        <div class="session-avatar group-avatar">👥</div>
-        <span class="session-name">{{ g.display_name || g.group_id }}</span>
-        <span v-if="currentGroupId === g.group_id" class="active-dot"></span>
-      </div>
-      <button type="button" class="sidebar-create-group-btn" @click="openCreateGroupModal" :title="t('createGroupTitle')">{{ t('sidebarCreateGroup') }}</button>
+      <button type="button" class="sidebar-sync-btn" :class="{ 'sync-needed': outOfSyncWithServer && !currentGroupId }"
+              :aria-label="t('sidebarSyncTitle')"
+              :title="outOfSyncWithServer && !currentGroupId ? t('sidebarOutOfSync') + ' ' + t('sidebarSyncTitle') : t('sidebarSyncTitle')"
+              @click="syncSessionsFromServer">&#8635;</button>
     </div>
   </aside>
 
   <!-- ════════════════ 创建群组弹窗 ════════════════ -->
-  <div class="create-group-overlay" :class="{ open: showCreateGroupModal }" @click.self="showCreateGroupModal = false"></div>
-  <div class="create-group-modal" :class="{ open: showCreateGroupModal }" :inert="!!settingsDialogName || !showCreateGroupModal">
+  <div class="create-group-overlay" :class="{ open: showCreateGroupModal }" @click.self="closeCreateGroupModal"></div>
+  <div class="create-group-modal sidebar-create-group-modal" :class="{ open: showCreateGroupModal }" :inert="!!settingsDialogName || !showCreateGroupModal"
+       role="dialog" aria-modal="true" :aria-label="t('createGroupTitle')" @keydown.esc.stop="closeCreateGroupModal">
     <div class="create-group-header">
       <span>{{ t('createGroupTitle') }}</span>
-      <button type="button" class="create-group-close" @click="showCreateGroupModal = false">✕</button>
+      <button type="button" class="create-group-close" :aria-label="t('createGroupCancel')" @click="closeCreateGroupModal">✕</button>
     </div>
     <div class="create-group-body">
       <label class="create-group-label">{{ t('createGroupNameLabel') }}</label>
-      <input type="text" class="create-group-input" v-model="createGroupName" :placeholder="t('createGroupNamePlaceholder')" />
+      <input ref="createGroupNameInput" type="text" class="create-group-input" v-model="createGroupName" :placeholder="t('createGroupNamePlaceholder')" />
       <label class="create-group-label">{{ t('createGroupParticipantsLabel') }}</label>
       <div class="create-group-participants">
         <label v-for="p in createGroupProfiles" :key="p.profile_id" class="create-group-participant-item">
@@ -115,7 +131,7 @@
       </div>
     </div>
     <div class="create-group-footer">
-      <button type="button" class="s-btn s-btn-secondary" @click="showCreateGroupModal = false">{{ t('createGroupCancel') }}</button>
+      <button type="button" class="s-btn s-btn-secondary" @click="closeCreateGroupModal">{{ t('createGroupCancel') }}</button>
       <button type="button" class="s-btn s-btn-primary" @click="createGroupSubmit" :disabled="createGroupSelectedIds.length === 0">{{ t('createGroupCreate') }}</button>
     </div>
   </div>
@@ -249,12 +265,13 @@
   </div>
 
   <!-- ════════════════ MAIN ════════════════ -->
-  <main class="chat-main" :inert="!!settingsDialogName || (agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId)">
+  <main class="chat-main" :style="{ '--agent-workspace-width': agentWorkspaceWidth + 'px' }" :inert="(sidebarMobile && sidebarOpen) || showCreateGroupModal || !!settingsDialogName || (agentWorkspaceOpen && agentDrawerNarrow && !currentGroupId && !!currentSessionId)">
 
     <!-- Header -->
     <header class="chat-header">
       <div class="header-left">
-        <button type="button" class="hamburger-btn" @click.stop="toggleSidebar" :title="t('headerToggleSidebar')">
+        <button type="button" ref="sidebarToggle" class="hamburger-btn" @click.stop="toggleSidebar"
+                :aria-label="t('headerToggleSidebar')" aria-controls="chat-sidebar" :aria-expanded="sidebarOpen" :title="t('headerToggleSidebar')">
           <span></span><span></span><span></span>
         </button>
         <div class="header-avatar">
@@ -265,7 +282,7 @@
         <button v-if="isGroupChat" type="button" class="header-back-single-btn" @click="leaveGroupChat" :title="t('statusGroupLeft')">{{ t('headerBackToSingle') }}</button>
       </div>
       <div class="header-right">
-        <button v-if="!currentGroupId && currentSessionId" ref="agentWorkspaceOpener" type="button"
+        <button v-if="!sidebarOpen && !currentGroupId && currentSessionId" ref="agentWorkspaceOpener" type="button"
                 class="toolbar-btn agent-workspace-opener" :class="{ on: agentWorkspaceOpen }"
                 :title="t('agentWorkspace')" :aria-label="t('agentWorkspace')"
                 :aria-expanded="agentWorkspaceOpen" aria-controls="agent-workspace-drawer" @click="toggleAgentWorkspace">
@@ -505,7 +522,7 @@
             </div>
           </div>
         </div>
-        <button ref="settingsTrigger" class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
+        <button v-if="!sidebarOpen" ref="settingsTrigger" class="gear-btn" @click="openSettings" :title="t('headerSettingsBtn')" :aria-label="t('headerSettingsBtn')">⚙<span v-if="setupGuide && !setupGuide.llm_preset_configured" class="gear-badge"></span></button>
       </div>
     </header>
 
@@ -584,6 +601,19 @@
                 </svg>
               </button>
             </div>
+            <button v-for="path in messageAgentArtifacts(msg)" :key="'artifact:' + path" type="button"
+                    class="agent-output-card" :title="path" @click="openAgentArtifact(path)">
+              <span class="agent-output-icon" aria-hidden="true">
+                <svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.2">
+                  <path d="M3 1.5h6l4 4v11H3z M9 1.5v4h4 M5.3 9h5.5 M5.3 12h5.5" />
+                </svg>
+              </span>
+              <span class="agent-output-label">
+                <strong>{{ path.split('/').at(-1) }}</strong>
+                <small v-if="path.includes('/')">{{ path.slice(0, path.lastIndexOf('/')) }}</small>
+              </span>
+              <span class="agent-output-action">{{ t('agentArtifactPreview') }} <span aria-hidden="true">›</span></span>
+            </button>
             <agent-task-card v-for="run in messageAgentRuns(msg)" :key="agentRunKey(run)"
               :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
               :event-label="agentEventLabel" :event-text="agentEventText"
@@ -878,8 +908,16 @@
        aria-hidden="true" @click="closeAgentWorkspace"></div>
   <aside v-if="!currentGroupId && currentSessionId" v-show="agentWorkspaceOpen" ref="agentWorkspaceDrawer"
          class="agent-workspace-drawer" id="agent-workspace-drawer" role="dialog" :inert="!!settingsDialogName"
+         :style="{ '--agent-workspace-width': agentWorkspaceWidth + 'px' }" :class="{ 'is-resizing': agentWorkspaceResize }"
          :aria-modal="agentDrawerNarrow" aria-labelledby="agent-workspace-title" tabindex="-1"
          @keydown.esc.stop.prevent="closeAgentWorkspace" @keydown.tab="trapAgentWorkspaceFocus">
+    <div v-if="!agentDrawerNarrow" class="agent-workspace-resize" role="separator" tabindex="0"
+         aria-orientation="vertical" aria-controls="agent-workspace-drawer" :aria-label="t('agentWorkspaceResize')"
+         :title="t('agentWorkspaceResize')" :aria-valuemin="agentWorkspaceMinWidth"
+         :aria-valuemax="agentWorkspaceMaxWidth" :aria-valuenow="agentWorkspaceWidth"
+         @pointerdown="startAgentWorkspaceResize" @pointermove="moveAgentWorkspaceResize"
+         @pointerup="finishAgentWorkspaceResize" @pointercancel="finishAgentWorkspaceResize"
+         @lostpointercapture="finishAgentWorkspaceResize" @keydown="resizeAgentWorkspaceWithKey"></div>
     <div class="agent-workspace-header">
       <h2 id="agent-workspace-title">{{ t('agentWorkspace') }}</h2>
       <button ref="agentWorkspaceClose" type="button" class="toolbar-btn" :title="t('agentWorkspaceClose')"
@@ -898,24 +936,24 @@
     </div>
     <div class="agent-workspace-body">
       <div v-show="agentWorkspaceTab === 'files'" id="agent-files-panel" role="tabpanel" aria-labelledby="agent-files-tab" tabindex="0" class="agent-workspace-details">
-        <p class="form-hint">{{ t('agentWorkspaceHint') }}</p>
-        <div class="agent-actions">
-          <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceLoading" @click="refreshAgentWorkspace">{{ t('agentWorkspaceRefresh') }}</button>
-          <label class="s-btn s-btn-small s-btn-secondary agent-upload" :class="{ 'agent-upload-disabled': agentWorkspaceLocked }">
-            {{ t('agentWorkspaceUpload') }}
-            <input type="file" :aria-label="t('agentWorkspaceUpload')" :disabled="agentWorkspaceLocked" @change="uploadAgentWorkspaceFile" />
-          </label>
-        </div>
-        <p v-if="agentOwnTaskActive" class="form-hint">{{ t('agentWorkspaceLocked') }}</p>
-        <p v-else-if="!agentRunsKnown[currentSessionId] || agentRunErrors[currentSessionId]" class="form-hint">{{ t('agentWorkspaceChecking') }}</p>
-        <p v-if="agentWorkspaceError" class="agent-error" role="alert">{{ agentWorkspaceError }}</p>
-        <p v-if="agentWorkspaceInventoryHint" class="form-hint agent-warning" role="status">{{ agentWorkspaceInventoryHint }}</p>
-        <p v-if="agentWorkspaceLoading" role="status">{{ t('loading') }}</p>
-        <p v-else-if="!agentWorkspaceFiles.length && !agentWorkspaceError && !agentWorkspaceInventoryHint">{{ t('agentWorkspaceEmpty') }}</p>
-        <div class="agent-workspace-layout">
+        <div v-if="!agentWorkspaceSelected" class="agent-file-browser">
+          <p ref="agentWorkspaceFileList" tabindex="-1" class="form-hint">{{ t('agentWorkspaceHint') }}</p>
+          <div class="agent-actions">
+            <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceLoading" @click="refreshAgentWorkspace">{{ t('agentWorkspaceRefresh') }}</button>
+            <label class="s-btn s-btn-small s-btn-secondary agent-upload" :class="{ 'agent-upload-disabled': agentWorkspaceLocked }">
+              {{ t('agentWorkspaceUpload') }}
+              <input type="file" :aria-label="t('agentWorkspaceUpload')" :disabled="agentWorkspaceLocked" @change="uploadAgentWorkspaceFile" />
+            </label>
+          </div>
+          <p v-if="agentOwnTaskActive" class="form-hint">{{ t('agentWorkspaceLocked') }}</p>
+          <p v-else-if="!agentRunsKnown[currentSessionId] || agentRunErrors[currentSessionId]" class="form-hint">{{ t('agentWorkspaceChecking') }}</p>
+          <p v-if="agentWorkspaceError" class="agent-error" role="alert">{{ agentWorkspaceError }}</p>
+          <p v-if="agentWorkspaceInventoryHint" class="form-hint agent-warning" role="status">{{ agentWorkspaceInventoryHint }}</p>
+          <p v-if="agentWorkspaceLoading" role="status">{{ t('loading') }}</p>
+          <p v-else-if="!agentWorkspaceFiles.length && !agentWorkspaceError && !agentWorkspaceInventoryHint">{{ t('agentWorkspaceEmpty') }}</p>
           <ul v-if="agentWorkspaceFiles.length" class="agent-file-list">
             <li v-for="file in agentWorkspaceFiles" :key="file.path">
-              <button type="button" class="agent-file-button" :aria-pressed="agentWorkspaceSelected?.path === file.path" @click="selectAgentWorkspaceFile(file)">
+              <button type="button" class="agent-file-button" @click="selectAgentWorkspaceFile(file, { focus: true })">
                 <span>{{ file.path }}</span>
                 <small>{{ t('agentWorkspaceCategory_' + agentWorkspaceFileMetadata(file).category) }}<span v-if="file.pinned === true"> · {{ t('agentWorkspacePinned') }}</span></small>
                 <small v-if="file.description">{{ file.description }}</small><small>{{ file.size }} B · {{ agentRunTime(file.modified) }}</small>
@@ -923,10 +961,26 @@
               </button>
             </li>
           </ul>
-          <div v-if="agentWorkspaceSelected" class="agent-file-preview">
-            <div class="agent-actions"><strong>{{ agentWorkspaceSelected.path }}</strong>
-              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceSelected.oversized === true" @click="downloadAgentWorkspaceFile">{{ t('agentWorkspaceDownload') }}</button>
-            </div>
+        </div>
+        <div v-else :key="agentWorkspaceSelected.path" class="agent-file-preview">
+          <button ref="agentWorkspaceBack" class="agent-file-back" type="button" @click="returnToAgentWorkspaceFiles">
+            <span aria-hidden="true">‹</span> {{ t('agentWorkspaceBackToFiles') }}
+          </button>
+          <div class="agent-actions agent-file-title"><h3>{{ agentWorkspaceSelected.path }}</h3>
+            <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceSelected.oversized === true" @click="downloadAgentWorkspaceFile">{{ t('agentWorkspaceDownload') }}</button>
+          </div>
+          <p v-if="agentWorkspaceError" class="agent-error" role="alert">{{ agentWorkspaceError }}</p>
+          <p v-if="agentWorkspacePreviewBusy" role="status">{{ t('loading') }}</p>
+          <p v-if="agentWorkspacePreviewHint" class="form-hint">{{ agentWorkspacePreviewHint }}</p>
+          <img v-if="agentWorkspaceImage" :src="agentWorkspaceImage" :alt="agentWorkspaceSelected.path" />
+          <div v-else-if="agentWorkspaceMarkdown" class="agent-file-markdown" v-html="agentWorkspaceMarkdown"></div>
+          <pre v-else-if="agentWorkspaceText" class="agent-file-text">{{ agentWorkspaceText }}</pre>
+          <p v-else-if="!agentWorkspacePreviewBusy && !agentWorkspacePreviewHint && !agentWorkspaceError"
+             class="form-hint">{{ t('agentWorkspaceEmptyFile') }}</p>
+          <p v-if="agentOwnTaskActive" class="form-hint">{{ t('agentWorkspaceLocked') }}</p>
+          <p v-else-if="!agentRunsKnown[currentSessionId] || agentRunErrors[currentSessionId]" class="form-hint">{{ t('agentWorkspaceChecking') }}</p>
+          <details class="agent-file-disclosure">
+            <summary>{{ t('agentWorkspaceProperties') }}</summary>
             <form class="agent-file-metadata" @submit.prevent="saveAgentWorkspaceMetadata">
               <fieldset :disabled="agentWorkspaceLocked">
                 <label for="agent-file-description">{{ t('agentWorkspaceDescription') }}</label>
@@ -939,22 +993,18 @@
                 <button type="submit" class="s-btn s-btn-small s-btn-secondary">{{ t('agentWorkspaceMetadataSave') }}</button>
               </fieldset>
             </form>
-            <p v-if="agentWorkspacePreviewBusy" role="status">{{ t('loading') }}</p>
-            <p v-if="agentWorkspacePreviewHint" class="form-hint">{{ agentWorkspacePreviewHint }}</p>
-            <img v-if="agentWorkspaceImage" :src="agentWorkspaceImage" :alt="agentWorkspaceSelected.path" />
-            <pre v-else-if="agentWorkspaceText">{{ agentWorkspaceText }}</pre>
-            <details>
-              <summary>{{ t('agentWorkspaceVersions') }} · {{ agentWorkspaceVersions.length }}</summary>
-              <p v-if="agentWorkspaceVersionError" class="agent-error" role="alert">{{ agentWorkspaceVersionError }}</p>
-              <p v-else-if="!agentWorkspaceVersions.length && !agentWorkspacePreviewBusy" class="form-hint">{{ t('agentWorkspaceNoVersions') }}</p>
-              <div v-for="version in agentWorkspaceVersions" :key="version.id" class="agent-version agent-actions">
-                <span>{{ agentRunTime(version.created_at) || t('agentWorkspaceSavedVersion') }}</span>
-                <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceLocked" @click="restoreAgentWorkspaceVersion(version)">{{ t('agentWorkspaceRestore') }}</button>
-                <p v-if="agentWorkspaceVersionHint(version)" class="form-hint agent-warning">{{ agentWorkspaceVersionHint(version) }}</p>
-              </div>
-            </details>
-          </div>
-          <p v-else-if="agentWorkspaceFiles.length" class="form-hint">{{ t('agentWorkspaceSelect') }}</p>
+          </details>
+          <details class="agent-file-disclosure">
+            <summary>{{ t('agentWorkspaceVersions') }}<template v-if="agentWorkspaceVersions && !agentWorkspaceVersionError"> · {{ agentWorkspaceVersions.length }}</template></summary>
+            <p v-if="agentWorkspaceVersionError" class="agent-error" role="alert">{{ agentWorkspaceVersionError }}</p>
+            <p v-else-if="!agentWorkspaceVersions" class="form-hint" role="status">{{ t('loading') }}</p>
+            <p v-else-if="!agentWorkspaceVersions.length" class="form-hint">{{ t('agentWorkspaceNoVersions') }}</p>
+            <div v-for="version in agentWorkspaceVersions" :key="version.id" class="agent-version agent-actions">
+              <span>{{ agentRunTime(version.created_at) || t('agentWorkspaceSavedVersion') }}</span>
+              <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentWorkspaceLocked" @click="restoreAgentWorkspaceVersion(version)">{{ t('agentWorkspaceRestore') }}</button>
+              <p v-if="agentWorkspaceVersionHint(version)" class="form-hint agent-warning">{{ agentWorkspaceVersionHint(version) }}</p>
+            </div>
+          </details>
         </div>
       </div>
       <div v-show="agentWorkspaceTab === 'plans'" id="agent-plans-panel" role="tabpanel" aria-labelledby="agent-plans-tab" tabindex="0">
@@ -5703,9 +5753,9 @@
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20261102trisync1"></script>
 <script src="js/components.js?v=20261105settings3"></script>
-<script src="js/settings.js?v=20261105settings3"></script>
-<script src="js/agent-ui.js?v=20261102trisync1"></script>
+<script src="js/settings.js?v=20261105chatlayout1"></script>
+<script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
-<script src="js/app.js?v=20261102trisync1"></script>
+<script src="js/app.js?v=20261105chatlayout1"></script>
 </body>
 </html>

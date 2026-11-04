@@ -9,6 +9,10 @@
   };
   const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled'];
   const workspaceTabs = ['files', 'plans', 'tasks'];
+  const workspaceWidthKey = 'agentWorkspaceWidth';
+  const minWorkspaceWidth = 320;
+  const maxWorkspaceWidth = 720;
+  const minWorkspaceChatWidth = 520;
   const fileCategories = ['note', 'work', 'material', 'other'];
   const textOf = value => typeof value === 'string' ? value : (value == null ? '' : JSON.stringify(value, null, 2));
   const keyOf = run => JSON.stringify([run.profile_id, run.session_id, run.run_id || run.id]);
@@ -50,6 +54,9 @@
       agentContinueRunId: '', agentHistorySequence: 0, agentCapabilities: capabilityKeys,
       agentWorkspaceOpen: false, agentWorkspaceFiles: [], agentWorkspaceInventory: {}, agentWorkspaceSelected: null,
       agentWorkspaceTab: 'files', agentDrawerNarrow: false,
+      agentWorkspaceWidth: 400, agentWorkspacePreferredWidth: 400,
+      agentWorkspaceMinWidth: minWorkspaceWidth, agentWorkspaceMaxWidth: maxWorkspaceWidth,
+      agentWorkspaceResize: null,
       agentArtifactOpenSequence: 0,
       agentWorkspaceVersions: [], agentWorkspaceText: '', agentWorkspaceImage: '',
       agentWorkspaceCategories: fileCategories, agentWorkspaceMetadata: { description: '', category: 'other', pinned: false },
@@ -72,6 +79,30 @@
         if (this.agentWorkspaceInventory.truncated === true) hints.push(this.t('agentWorkspaceListPartial'));
         if (this.agentWorkspaceInventory.over_byte_limit === true) hints.push(this.t('agentWorkspaceOverLimit'));
         return hints.join(' ');
+      },
+      agentWorkspaceMarkdown() {
+        const file = this.agentWorkspaceSelected;
+        if (!file || !this.agentWorkspaceText ||
+            !(/\.(md|markdown)$/i.test(file.path) || /^text\/markdown(?:;|$)/i.test(file.mime || ''))) return '';
+        try {
+          // Keep workspace content on a separate renderer. No HTML or embedded resources.
+          const parser = new root.marked.Marked({ breaks: true, gfm: true, renderer: {
+            html() { return ''; },
+            image({ tokens }) { return this.parser.parseInline(tokens); },
+            link({ href, tokens }) {
+              const label = this.parser.parseInline(tokens);
+              if (!/^https?:\/\//i.test(href)) return label;
+              let url;
+              try { url = new URL(href); } catch (_) { return label; }
+              if (url.username || url.password || url.origin === root.getBaseUrl?.() || url.origin === root.location?.origin) return label;
+              const escaped = url.href.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+              return `<a href="${escaped}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+            },
+          } });
+          return parser.parse(this.agentWorkspaceText);
+        } catch (_) {
+          return ''; // The template falls back to escaped source text.
+        }
       },
       agentOwnTaskActive() {
         return !this.currentGroupId && Object.values(this.agentRuns).some(run =>
@@ -101,10 +132,20 @@
         this._agentDrawerMedia = window.matchMedia('(max-width: 1000px)');
         this._agentDrawerMediaChanged = event => {
           this.agentDrawerNarrow = event.matches;
+          if (event.matches) this.finishAgentWorkspaceResize();
+          else this.syncAgentWorkspaceWidth();
           if (event.matches && this.agentWorkspaceOpen) this.$nextTick(() => this.$refs?.agentWorkspaceClose?.focus?.());
         };
         this.agentDrawerNarrow = this._agentDrawerMedia.matches;
         this._agentDrawerMedia.addEventListener('change', this._agentDrawerMediaChanged);
+        this.loadAgentWorkspaceWidth();
+        if (typeof ResizeObserver === 'function') {
+          const app = document.getElementById('app');
+          const sidebar = app?.querySelector(':scope > .sidebar');
+          this._agentWorkspaceResizeObserver = new ResizeObserver(() => this.syncAgentWorkspaceWidth());
+          if (app) this._agentWorkspaceResizeObserver.observe(app);
+          if (sidebar) this._agentWorkspaceResizeObserver.observe(sidebar);
+        }
       }
       this.syncAgentView(true);
       this.refreshAgentRuns();
@@ -114,9 +155,63 @@
       if (this._agentViewSync) this._agentViewSync.closed = true;
       clearInterval(this.agentPollTimer);
       this._agentDrawerMedia?.removeEventListener('change', this._agentDrawerMediaChanged);
+      this._agentWorkspaceResizeObserver?.disconnect();
       this.closeAgentWorkspace({ restoreFocus: false });
     },
     methods: {
+      loadAgentWorkspaceWidth() {
+        try {
+          const width = Number(localStorage.getItem(workspaceWidthKey));
+          if (width >= minWorkspaceWidth && width <= maxWorkspaceWidth) this.agentWorkspacePreferredWidth = width;
+        } catch (_) { /* Storage can be unavailable. */ }
+        this.syncAgentWorkspaceWidth();
+      },
+      syncAgentWorkspaceWidth() {
+        if (this.agentDrawerNarrow || typeof document === 'undefined') return;
+        const app = document.getElementById('app');
+        if (!app || !app.clientWidth) return;
+        const sidebar = app.querySelector(':scope > .sidebar');
+        const leftWidth = sidebar?.getBoundingClientRect().width || 0;
+        this.agentWorkspaceMaxWidth = Math.max(minWorkspaceWidth, Math.min(maxWorkspaceWidth,
+          Math.floor(app.clientWidth - leftWidth - minWorkspaceChatWidth)));
+        this.agentWorkspaceWidth = Math.min(this.agentWorkspacePreferredWidth, this.agentWorkspaceMaxWidth);
+      },
+      setAgentWorkspaceWidth(width) {
+        const next = Math.max(minWorkspaceWidth, Math.min(this.agentWorkspaceMaxWidth, Math.round(width)));
+        if (next === this.agentWorkspaceWidth) return false;
+        this.agentWorkspaceWidth = this.agentWorkspacePreferredWidth = next;
+        return true;
+      },
+      rememberAgentWorkspaceWidth() {
+        try { localStorage.setItem(workspaceWidthKey, String(this.agentWorkspacePreferredWidth)); }
+        catch (_) { /* The new width still applies to the current window. */ }
+      },
+      startAgentWorkspaceResize(event) {
+        if (event.button !== 0 || this.agentDrawerNarrow || this.agentWorkspaceResize) return;
+        this.syncAgentWorkspaceWidth();
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        this.agentWorkspaceResize = { id: event.pointerId, x: event.clientX, width: this.agentWorkspaceWidth, changed: false };
+      },
+      moveAgentWorkspaceResize(event) {
+        const drag = this.agentWorkspaceResize;
+        if (drag?.id !== event.pointerId) return;
+        if (this.setAgentWorkspaceWidth(drag.width + drag.x - event.clientX)) drag.changed = true;
+      },
+      finishAgentWorkspaceResize(event) {
+        const drag = this.agentWorkspaceResize;
+        if (!drag || (event && drag.id !== event.pointerId)) return;
+        this.agentWorkspaceResize = null;
+        if (drag.changed) this.rememberAgentWorkspaceWidth();
+      },
+      resizeAgentWorkspaceWithKey(event) {
+        if (this.agentDrawerNarrow || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        this.syncAgentWorkspaceWidth();
+        const width = { Home: minWorkspaceWidth, End: this.agentWorkspaceMaxWidth,
+          ArrowLeft: this.agentWorkspaceWidth + 20, ArrowRight: this.agentWorkspaceWidth - 20 }[event.key];
+        if (this.setAgentWorkspaceWidth(width)) this.rememberAgentWorkspaceWidth();
+      },
       agentTerminal: terminal,
       agentRunKey: keyOf,
       async syncAgentView(force = false) {
@@ -167,6 +262,18 @@
       messageAgentRuns(message) {
         if (this.currentGroupId || !message || message.session_id !== this.currentSessionId) return [];
         return this.agentMessageTasks.get(message) || [];
+      },
+      messageAgentArtifacts(message) {
+        if (message?.role !== 'assistant') return [];
+        const paths = new Set();
+        for (const run of this.messageAgentRuns(message)) {
+          if (!terminal(run.state) || !Array.isArray(run.artifacts)) continue;
+          for (const artifact of run.artifacts) {
+            const path = this.agentArtifactPath(artifact);
+            if (path) paths.add(path);
+          }
+        }
+        return [...paths];
       },
       agentViewChanged() {
         this.agentViewVersion++;
@@ -520,6 +627,7 @@
         this.agentWorkspaceMetadata = { description: '', category: 'other', pinned: false };
       },
       closeAgentWorkspace(options = {}) {
+        this.finishAgentWorkspaceResize();
         const wasOpen = this.agentWorkspaceOpen;
         this.agentArtifactOpenSequence++;
         this.agentWorkspaceEpoch++;
@@ -546,6 +654,7 @@
       },
       openAgentWorkspace(tab = 'files') {
         if (!this.currentSessionId || this.currentGroupId) return;
+        this.$refs?.sidebarGroups?.hidePopover?.();
         if (!this.agentWorkspaceOpen) this._agentDrawerOpener = typeof document === 'undefined' ? null : document.activeElement;
         this.agentWorkspaceTab = workspaceTabs.includes(tab) ? tab : 'files';
         this.agentWorkspaceOpen = true;
@@ -556,6 +665,8 @@
       selectAgentWorkspaceTab(tab) {
         if (!workspaceTabs.includes(tab) || this.currentGroupId || !this.currentSessionId) return;
         if (!this.agentWorkspaceOpen) return this.openAgentWorkspace(tab);
+        if (tab === 'files' && this.agentWorkspaceTab === 'files' && this.agentWorkspaceLoading) return;
+        if (tab !== 'files') this.agentArtifactOpenSequence++;
         this.agentWorkspaceTab = tab;
         if (tab === 'plans') return this.refreshTodos();
         if (tab === 'files') return this.refreshAgentWorkspace();
@@ -603,13 +714,39 @@
         if (!path || !this.currentSessionId || this.currentGroupId) return;
         const sequence = ++this.agentArtifactOpenSequence;
         const profile = this.currentSessionId;
+        const opener = typeof document === 'undefined' ? null : document.activeElement;
+        if (this.agentWorkspaceSelected) this.clearAgentWorkspaceSelection();
         const loading = this.openAgentWorkspace('files');
         const context = this.agentWorkspaceContext();
         await loading;
-        if (sequence !== this.agentArtifactOpenSequence || profile !== this.currentSessionId || !this.agentWorkspaceIsCurrent(context)) return;
+        if (sequence !== this.agentArtifactOpenSequence || profile !== this.currentSessionId ||
+            this.agentWorkspaceTab !== 'files' || !this.agentWorkspaceIsCurrent(context)) return;
         const file = this.agentWorkspaceFiles.find(file => file.path === path);
-        if (file) await this.selectAgentWorkspaceFile(file, { invalidateArtifact: false });
-        else if (!this.agentWorkspaceError) this.agentWorkspaceError = this.t('agentWorkspaceFileGone');
+        if (file && !this.agentWorkspaceError) {
+          const active = typeof document === 'undefined' ? null : document.activeElement;
+          const focus = active === opener || active === this.$refs?.agentWorkspaceClose;
+          await this.selectAgentWorkspaceFile(file, { invalidateArtifact: false, focus });
+        } else {
+          this.clearAgentWorkspaceSelection();
+          if (!this.agentWorkspaceError) this.agentWorkspaceError = this.t('agentWorkspaceFileGone');
+        }
+      },
+      clearAgentWorkspaceSelection() {
+        this.agentWorkspaceFileSequence++;
+        this.agentWorkspaceSelected = null;
+        this.agentWorkspacePreviewBusy = false;
+        this.clearAgentWorkspacePreview();
+      },
+      returnToAgentWorkspaceFiles() {
+        this.agentArtifactOpenSequence++;
+        this.clearAgentWorkspaceSelection();
+        this.agentWorkspaceError = '';
+        const context = this.agentWorkspaceContext();
+        this.$nextTick(() => {
+          if (this.agentWorkspaceIsCurrent(context) && this.agentWorkspaceTab === 'files' && !this.agentWorkspaceSelected) {
+            this.$refs?.agentWorkspaceFileList?.focus?.();
+          }
+        });
       },
       async refreshAgentWorkspace() {
         const context = this.agentWorkspaceContext(), sequence = ++this.agentWorkspaceListSequence;
@@ -620,16 +757,15 @@
           const data = await this.agentFetch(API_PATHS.agentWorkspaceFiles(context.profile));
           if (!this.agentWorkspaceIsCurrent(context) || sequence !== this.agentWorkspaceListSequence) return;
           if (!Array.isArray(data.files)) throw new Error(this.t('agentWorkspaceInvalid'));
-          this.agentWorkspaceFiles = data.files.filter(file => typeof file.path === 'string');
+          this.agentWorkspaceFiles = data.files.filter(file => this.agentArtifactPath(file?.path));
           this.agentWorkspaceInventory = { truncated: data.truncated === true, over_byte_limit: data.over_byte_limit === true };
           if (this.agentWorkspaceSelected) {
             const selected = this.agentWorkspaceSelected;
             const refreshed = this.agentWorkspaceFiles.find(file => file.path === selected.path);
             if (!refreshed) {
-              this.agentWorkspaceFileSequence++;
-              this.agentWorkspaceSelected = null;
-              this.clearAgentWorkspacePreview();
-            } else if (['oversized', 'previewable', 'size', 'modified'].some(key => refreshed[key] !== selected[key])) {
+              this.clearAgentWorkspaceSelection();
+              this.agentWorkspaceError = this.t('agentWorkspaceFileGone');
+            } else if (['oversized', 'previewable', 'size', 'modified', 'mime'].some(key => refreshed[key] !== selected[key])) {
               // A smaller replacement must clear the old read-limit state.
               await this.selectAgentWorkspaceFile(refreshed, { invalidateArtifact: false });
             } else {
@@ -654,8 +790,8 @@
         }
         return response;
       },
-      async selectAgentWorkspaceFile(file, { invalidateArtifact = true } = {}) {
-        if (!file || typeof file.path !== 'string') return;
+      async selectAgentWorkspaceFile(file, { invalidateArtifact = true, focus = false } = {}) {
+        if (!this.agentArtifactPath(file?.path)) return;
         if (invalidateArtifact) this.agentArtifactOpenSequence++;
         const context = this.agentWorkspaceContext(), sequence = ++this.agentWorkspaceFileSequence;
         if (!this.agentWorkspaceIsCurrent(context)) return;
@@ -664,13 +800,27 @@
         this.agentWorkspaceSelected = file;
         this.agentWorkspaceMetadata = this.agentWorkspaceFileMetadata(file);
         this.agentWorkspacePreviewBusy = true;
+        this.agentWorkspaceVersions = null;
         this.agentWorkspaceError = '';
+        if (focus) {
+          const active = typeof document === 'undefined' ? null : document.activeElement;
+          this.$nextTick(() => {
+            const focusStayed = typeof document === 'undefined' ||
+              document.activeElement === active || (active && !active.isConnected && document.activeElement === document.body);
+            if (focusStayed && current() && this.agentWorkspaceTab === 'files') this.$refs?.agentWorkspaceBack?.focus?.();
+          });
+        }
         const versions = (async () => {
           try {
             const data = await this.agentFetch(API_PATHS.agentWorkspaceVersions(context.profile, file.path));
             if (!Array.isArray(data.versions)) throw new Error(this.t('agentWorkspaceInvalid'));
-            if (current()) this.agentWorkspaceVersions = data.versions.filter(v => typeof v.id === 'string');
-          } catch (error) { if (current()) this.agentWorkspaceVersionError = error.message; }
+            if (current()) this.agentWorkspaceVersions = data.versions.filter(v => typeof v?.id === 'string');
+          } catch (error) {
+            if (current()) {
+              this.agentWorkspaceVersions = [];
+              this.agentWorkspaceVersionError = error.message;
+            }
+          }
         })();
         try {
           const unavailable = this.agentWorkspaceFileHint(file);
@@ -685,30 +835,32 @@
           if (/^image\/(png|jpeg|gif|webp|avif|bmp)$/.test(mime)) {
             this.agentWorkspaceImage = URL.createObjectURL(blob);
           } else if (/^(text\/|application\/(json|xml|javascript)|image\/svg\+xml)/.test(mime) ||
-              /\.(txt|md|csv|tsv|json|jsonl|py|js|ts|jsx|tsx|css|html|xml|svg|yaml|yml|toml|sh|sql|log)$/i.test(file.path)) {
+              /\.(txt|md|markdown|csv|tsv|json|jsonl|py|js|ts|jsx|tsx|css|html|xml|svg|yaml|yml|toml|sh|sql|log)$/i.test(file.path)) {
             const text = await blob.text();
             if (current()) this.agentWorkspaceText = text;
           } else this.agentWorkspacePreviewHint = this.t('agentWorkspaceDownloadOnly');
         } catch (error) { if (current()) this.agentWorkspaceError = error.message; }
         finally {
-          await versions;
           if (current()) this.agentWorkspacePreviewBusy = false;
+          await versions;
         }
       },
       async downloadAgentWorkspaceFile() {
         const file = this.agentWorkspaceSelected, context = this.agentWorkspaceContext();
-        if (!file || !this.agentWorkspaceIsCurrent(context)) return;
+        const sequence = this.agentWorkspaceFileSequence;
+        const current = () => this.agentWorkspaceIsCurrent(context) && sequence === this.agentWorkspaceFileSequence;
+        if (!this.agentArtifactPath(file?.path) || !current()) return;
         if (file.oversized === true) { this.agentWorkspacePreviewHint = this.agentWorkspaceFileHint(file); return; }
         try {
           const response = await this.agentWorkspaceResponse(API_PATHS.agentWorkspaceFile(context.profile, file.path, true));
           const blob = await response.blob();
-          if (!this.agentWorkspaceIsCurrent(context)) return;
+          if (!current()) return;
           const url = URL.createObjectURL(blob), link = document.createElement('a');
           link.href = url;
           link.download = file.path.split(/[\\/]/).pop();
           document.body.appendChild(link); link.click(); link.remove();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } catch (error) { if (this.agentWorkspaceIsCurrent(context)) this.agentWorkspaceError = error.message; }
+        } catch (error) { if (current()) this.agentWorkspaceError = error.message; }
       },
       agentWorkspaceFileMetadata(file) {
         return { description: typeof file?.description === 'string' ? file.description : '',
@@ -729,8 +881,9 @@
         const path = this.agentWorkspaceSelected?.path;
         const fileSequence = this.agentWorkspaceFileSequence;
         const roleContext = kind === 'metadata' ? this.todoViewContext() : null;
-        const current = () => this.agentWorkspaceIsCurrent(context) && (kind !== 'metadata' ||
-          (this.todoViewIsCurrent(roleContext) && this.agentWorkspaceSelected?.path === path && this.agentWorkspaceFileSequence === fileSequence));
+        const selectionIsCurrent = () => this.agentWorkspaceSelected?.path === path && this.agentWorkspaceFileSequence === fileSequence;
+        const current = () => this.agentWorkspaceIsCurrent(context) && (kind === 'upload' || selectionIsCurrent()) &&
+          (kind !== 'metadata' || this.todoViewIsCurrent(roleContext));
         this.agentWorkspaceMutationBusy = true;
         this.agentWorkspaceError = '';
         try {
@@ -758,14 +911,14 @@
             const body = new FormData(); body.append('profile_id', context.profile); body.append('file', value);
             await this.agentWorkspaceResponse(API_PATHS.agentWorkspaceUpload(), { method: 'POST', body });
           } else {
-            if (!path || !value?.id) return;
+            if (!this.agentArtifactPath(path) || !value?.id) return;
             await this.agentFetch(API_PATHS.agentWorkspaceRestore(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ profile_id: context.profile, path, version_id: value.id }) });
           }
           if (!this.agentWorkspaceIsCurrent(context)) return;
           await this.refreshAgentWorkspace();
           // Do not reopen a file the user changed while the operation was in flight.
-          if (kind === 'restore' && this.agentWorkspaceIsCurrent(context) && this.agentWorkspaceSelected?.path === path) {
+          if (kind === 'restore' && current()) {
             await this.selectAgentWorkspaceFile(this.agentWorkspaceFiles.find(file => file.path === path) || this.agentWorkspaceSelected);
           }
         } catch (error) { if (current()) this.agentWorkspaceError = error.message; }

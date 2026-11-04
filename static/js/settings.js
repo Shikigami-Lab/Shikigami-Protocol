@@ -1210,6 +1210,7 @@ const SettingsMixin = {
     },
 
     openSettings() {
+      this.$refs?.sidebarGroups?.hidePopover?.();
       this.settingsOpen = true;
       if (this.activeTab === 'llm' || (this.activeTab === 'profiles' && this.profileSubTab === 'tools')) {
         this.loadAgentSettings(false, false);
@@ -1385,9 +1386,12 @@ const SettingsMixin = {
     },
 
     openMemoryPanel() {
-      // 现已整合进 canvas，直接跳转到 memory tab
+      if (!this.currentSessionId || this.currentGroupId) return;
+      this.selectMemoryProfile(this.currentSessionId);
+      this.memoryPanelTab = 'content';
+      this.memoryActiveSubTab = 'facts';
+      this.activeTab = 'memory';
       this.openSettings();
-      this.$nextTick(() => { this.activeTab = 'memory'; });
     },
 
     closeMemoryPanel() {
