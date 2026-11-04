@@ -21,6 +21,10 @@ def model_route(preset):
             "target": urlunsplit((parsed.scheme, parsed.netloc, path + "/chat/completions", parsed.query, ""))}
 
 
+class ModelRequestLimitReached(RuntimeError):
+    """A new model request was denied by the configured per-run limit."""
+
+
 class ModelGateway:
     def __init__(self, preset, max_requests, *, authorize, client=None):
         self.route = model_route(preset)
@@ -34,6 +38,7 @@ class ModelGateway:
         self._max_tokens = min(requested_tokens, 4096) if type(requested_tokens) is int and requested_tokens > 0 else 4096
         self.max_requests = max_requests
         self.requests = 0
+        self.limit_reached = False
         self.authorize = authorize
         self.client = client
 
@@ -41,7 +46,8 @@ class ModelGateway:
         """Forward one streaming request, without retries or endpoint selection by the worker."""
         self.authorize()
         if self.requests >= self.max_requests:
-            raise RuntimeError("Model request limit reached")
+            self.limit_reached = True
+            raise ModelRequestLimitReached("Model request limit reached")
         expected = ("/v1beta/models/" + self.route["model"] + ":streamGenerateContent"
                     if self.route["native_google"] else "/v1/chat/completions")
         if request.get("method") != "POST" or urlsplit(request.get("path", "")).path != expected:

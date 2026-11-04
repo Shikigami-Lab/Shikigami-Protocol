@@ -16,7 +16,7 @@ import httpx
 
 from src.agent.context import build_turn_context
 from src.agent.link_store import LinkStore
-from src.agent.model_gateway import ModelGateway, model_route
+from src.agent.model_gateway import ModelGateway, ModelRequestLimitReached, model_route
 from src.agent.settings import normalize_settings
 from src.agent.capabilities import capabilities, native_tools, business_tools
 from src.agent.workspace import WorkspaceStore
@@ -339,6 +339,7 @@ class AgentRuntime:
         bridges = set()
         stderr_task = None
         deferred_terminal = None
+        timed_out = False
         async def respond(rid, stage, **fields):
             if stage == "chunk":
                 fields["data"] = base64.b64encode(fields["data"]).decode()
@@ -399,10 +400,12 @@ class AgentRuntime:
                             await respond(rid, "end")
                     except asyncio.CancelledError:
                         raise
-                    except Exception:
+                    except Exception as error:
                         try:
+                            detail = ('Model request limit reached' if isinstance(error, ModelRequestLimitReached)
+                                      else 'Request stopped, denied or failed')
                             await respond(rid, "start", status=409, content_type="application/json")
-                            await respond(rid, "chunk", data=b'{"error":{"message":"Request stopped, denied or failed"}}')
+                            await respond(rid, "chunk", data=json.dumps({'error': {'message': detail}}).encode())
                             await respond(rid, "end")
                         except Exception:
                             pass
@@ -431,9 +434,14 @@ class AgentRuntime:
                             raise RuntimeError("Harness could not complete this task")
                     await run.process.wait()
                 remaining = run.limits["timeout_seconds"] - (time.monotonic() - run.started_at)
-                if remaining <= 0:
-                    raise asyncio.TimeoutError()
-                await asyncio.wait_for(consume(), timeout=remaining)
+                try:
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError()
+                    await asyncio.wait_for(consume(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    # The SDK lifespan can wrap this exception in a TaskGroup.
+                    timed_out = True
+                    raise
                 if not run.terminal and deferred_terminal is None:
                     raise RuntimeError("Harness exited without a completed result")
         except asyncio.CancelledError:
@@ -472,6 +480,11 @@ class AgentRuntime:
                 if not future.done(): future.set_result(False)
             try:
                 if deferred_terminal:
+                    if deferred_terminal['type'] == 'failed' and not run.cleanup_failed:
+                        if timed_out:
+                            deferred_terminal['error'] = f"Task timed out after {run.limits['timeout_seconds']} seconds"
+                        elif run.gateway.limit_reached:
+                            deferred_terminal['error'] = f"Model request limit reached ({run.gateway.max_requests} requests)"
                     await self._publish(run, deferred_terminal)
             finally:
                 await run.queue.put(None)

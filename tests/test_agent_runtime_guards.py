@@ -225,6 +225,58 @@ class AgentRuntimeGuardTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             await asyncio.gather(effect, *([cancel] if cancel else []), return_exceptions=True)
 
+    async def test_expired_task_records_timeout_through_sdk_cleanup(self):
+        run = self.prepare()
+        run.started_at -= run.limits['timeout_seconds'] + 1
+        process = SimpleNamespace(returncode=0, wait=AsyncMock(return_value=0),
+                                  stderr=SimpleNamespace(read=AsyncMock(return_value=b'')))
+        with patch.object(self.runtime, 'status', new=AsyncMock(return_value={'available': True})), \
+                patch.object(self.runtime, '_command', return_value=['synthetic']), \
+                patch.object(self.runtime, '_send', new=AsyncMock()), \
+                patch.object(self.runtime, '_remove_container'), \
+                patch('src.agent.runtime.asyncio.create_subprocess_exec', new=AsyncMock(return_value=process)):
+            await self.runtime._drive(run)
+        row = self.runtime.store.get_run(run.id)
+        self.assertEqual(row['state'], 'failed')
+        self.assertEqual(row['error'], 'Task timed out after 120 seconds')
+
+    async def test_denied_model_request_records_the_budget_failure(self):
+        run = self.prepare()
+        run.gateway.requests = run.gateway.max_requests
+        replies = []
+        sent = asyncio.Event()
+        input_frames = iter([
+            {'kind': 'model_request', 'id': 'blocked-model-request'},
+            {'kind': 'event', 'event': {'type': 'failed'}},
+        ])
+
+        async def readline():
+            item = next(input_frames, None)
+            if not item:
+                return b''
+            if item['kind'] == 'event':
+                await sent.wait()
+            return json.dumps(item).encode() + b'\n'
+
+        async def send(item, message):
+            replies.append(message)
+            if message.get('kind') == 'response_end':
+                sent.set()
+
+        process = SimpleNamespace(returncode=0, wait=AsyncMock(return_value=0),
+                                  stdout=SimpleNamespace(readline=readline),
+                                  stderr=SimpleNamespace(read=AsyncMock(return_value=b'')))
+        with patch.object(self.runtime, 'status', new=AsyncMock(return_value={'available': True})), \
+                patch.object(self.runtime, '_command', return_value=['synthetic']), \
+                patch.object(self.runtime, '_send', side_effect=send), \
+                patch.object(self.runtime, '_remove_container'), \
+                patch('src.agent.runtime.asyncio.create_subprocess_exec', new=AsyncMock(return_value=process)):
+            await asyncio.wait_for(self.runtime._drive(run), 10)
+        row = self.runtime.store.get_run(run.id)
+        self.assertEqual(row['state'], 'failed')
+        self.assertEqual(row['error'], f'Model request limit reached ({run.gateway.max_requests} requests)')
+        self.assertTrue(any(reply.get('status') == 409 for reply in replies))
+
     async def test_drive_failure_waits_for_host_effect_and_process_cleanup_before_terminal(self):
         run = self.prepare()
         effect_entered, release = self.pause_host_effect()

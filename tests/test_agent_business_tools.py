@@ -458,6 +458,15 @@ class SearchProviderTests(unittest.IsolatedAsyncioTestCase):
             await self.searcher.search('query', raise_on_error=True)
         self.assertEqual([c.kwargs['backend'] for c in client.text.call_args_list], ['duckduckgo', 'yahoo'])
 
+    async def test_yandex_fallback_returns_results_after_both_primary_sources_fail(self):
+        self.engine_registry['text']['yandex'] = object()
+        client = self.ddg()
+        client.text.side_effect = [RuntimeError('No results found'), RuntimeError('provider failed'),
+            [{'title': 'Rust kernel release', 'href': 'https://example.test/release', 'body': 'Release notes'}]]
+        result = await self.searcher.search('Rust kernel release', raise_on_error=True)
+        self.assertEqual(result, [{'title': 'Rust kernel release', 'url': 'https://example.test/release', 'snippet': 'Release notes'}])
+        self.assertEqual([c.kwargs['backend'] for c in client.text.call_args_list], ['duckduckgo', 'yahoo', 'yandex'])
+
     async def test_empty_ddg_result_is_not_an_error_and_does_not_trigger_retry(self):
         client = self.ddg([])
         self.assertEqual(await self.searcher.search('query', raise_on_error=True), [])
@@ -530,7 +539,7 @@ class SearchProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.ddg_factory.reset_mock()
                 client = self.ddg([])
                 self.assertEqual(await self.searcher._search_ddg("synthetic", 3, raise_on_error=True), [])
-                self.ddg_factory.assert_called_once_with(proxy=expected, timeout=self.searcher._TIMEOUT)
+                self.ddg_factory.assert_called_once_with(proxy=expected, timeout=self.searcher._FREE_TIMEOUT)
                 client.text.assert_called_once_with("synthetic", max_results=3, backend="duckduckgo")
 
     async def test_ddg_proxy_credentials_do_not_enter_logs_or_exception_trace(self):

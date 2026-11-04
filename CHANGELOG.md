@@ -16,6 +16,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- [Tools] Add a bounded Yandex fallback when DuckDuckGo and Yahoo are unavailable, and report task timeout and model-request-limit failures separately.
 - [Memory] Preserve original message dates for fact extraction and portrait refreshes. Writers request fixed event dates and defer unresolved relative dates; chat and reflection distinguish memory update times from event dates without rewriting existing records.
 - [Tools] Complete the MCP SDK settings model before first use so its lifespan type resolves without a Pydantic warning.
 - [History] Original-chat search can locate the earliest saved chat day and read it in chronological pages. Results include local dates, paging bounds and an explicit continuation offset.

@@ -2,7 +2,7 @@
 
 数据源优先级：
   1. Serper.dev（需 WEBSEARCH_SERPER_API_KEY，结果最好）
-  2. 免费搜索（ddgs 包；DuckDuckGo 失败后最多尝试一次 Yahoo）
+  2. 免费搜索（ddgs 包；DuckDuckGo → Yahoo → Yandex，每路最多一次）
 
 返回格式：List[{title, snippet, url}]
 调用方不感知数据源来自哪里。
@@ -21,6 +21,7 @@ from src.tools.websearch.log_safety import install_search_log_filter
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 8.0  # seconds
+_FREE_TIMEOUT = 6.0  # Keep three free attempts plus Serper within the MCP timeout.
 _SERPER_URL = "https://google.serper.dev/search"
 
 
@@ -95,7 +96,7 @@ async def _search_ddg(query: str, max_results: int, *, raise_on_error: bool = Fa
 
     A provider challenge/transport failure is not a successful empty result.
     Never solve challenges or repeatedly retry the same provider. Each of the
-    two endpoints is attempted at most once, within the existing MCP timeout.
+    three endpoints is attempted at most once, within the existing MCP timeout.
     """
     log_tool_websearch_request(query, "ddg", max_results)
     t0 = time.monotonic()
@@ -108,19 +109,20 @@ async def _search_ddg(query: str, max_results: int, *, raise_on_error: bool = Fa
 
         # DDGS silently selects auto for unknown/disabled names. Check the
         # actual registry so a bounded fallback cannot expand to every engine.
-        backends = [name for name in ('duckduckgo', 'yahoo') if name in ENGINES.get('text', {})]
+        backends = [name for name in ('duckduckgo', 'yahoo', 'yandex') if name in ENGINES.get('text', {})]
         if not backends:
             raise SearchError('No supported free search provider is installed')
 
-        with DDGS(proxy=proxy, timeout=_TIMEOUT) as ddgs:
+        with DDGS(proxy=proxy, timeout=_FREE_TIMEOUT) as ddgs:
             install_search_log_filter()
             for index, backend in enumerate(backends):
                 # Cancellation cannot stop an already submitted HTTP request,
                 # but must prevent scheduling another provider afterwards.
                 await asyncio.sleep(0)
                 try:
-                    raw = await loop.run_in_executor(None,
-                        lambda name=backend: list(ddgs.text(query, max_results=max_results, backend=name)))
+                    raw = await asyncio.wait_for(loop.run_in_executor(None,
+                        lambda name=backend: list(ddgs.text(query, max_results=max_results, backend=name))),
+                        timeout=_FREE_TIMEOUT)
                     break
                 except Exception as error:
                     # DDGS uses the same "No results found" exception for
@@ -140,7 +142,7 @@ async def _search_ddg(query: str, max_results: int, *, raise_on_error: bool = Fa
             if r.get("title")
         ]
         if raise_on_error and raw and not results:
-            raise ValueError("DuckDuckGo returned no usable result rows")
+            raise ValueError("Free search returned no usable result rows")
         duration_ms = (time.monotonic() - t0) * 1000
         logger.debug("[websearch] %s 返回 %d 条 query=%s", backend, len(results), query)
         log_tool_websearch_result(query, backend, len(results), results, duration_ms)
