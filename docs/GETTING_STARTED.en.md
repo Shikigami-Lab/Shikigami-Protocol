@@ -31,8 +31,10 @@ The backend is a **Python process** — "the browser can use a VPN" does not mea
 **Recommended**:
 
 1. Open **Settings → System**.
-2. Enable **Use proxy**, enter: `http://127.0.0.1:<port>` (find the port in your proxy app's HTTP / Mixed Port setting).
-3. **Save** and **restart** the app (to apply the env variable).
+2. Enable **Use proxy**. If HTTP and HTTPS requests share one proxy, enter the same address in both fields, for example `http://127.0.0.1:<port>`. Use the HTTP or mixed port shown in your proxy app.
+3. Click **Save proxy settings**. If an existing service connection still uses the old address, restart the app to reconnect.
+
+To open settings through a reverse-proxy hostname, add it to `SHIKIGAMI_SETTINGS_TRUSTED_HOSTS` on the server. Separate multiple hostnames with commas. The reverse proxy must preserve the browser-facing `Host` and forward the HTTPS scheme through a trusted proxy connection.
 
 If you're unsure of the port: check the proxy app's local HTTP port setting, or run `netstat -ano | findstr LISTENING` in CMD and look for common proxy ports (`7890`, `10808`, etc.) on `127.0.0.1`.
 
@@ -46,11 +48,10 @@ You can also edit **`.env`** directly to set `HTTP_PROXY` / `HTTPS_PROXY` — sa
 |:---|:---|
 | **Onboarding** | **Step-by-step guide**: checklist, network, memory/TTS/STT; companion behavior points to settings — details in the “Emotion, energy…” section below. |
 | **Personas** | Persona card list, edit, **AI Wizard** generation, sidebar order, per-persona memory / engine overrides; **Prompt Editing** sub-tab includes Persona Evolution |
-| **LLM** | LLM preset management, API keys, local OpenAI-compatible URLs, auxiliary models (emotion / affinity) |
-| **Memory** | Long-term facts, vector memory toggle, embedding model (cloud Gemini or local BGE), diary and forgetting preview |
+| **LLM** | LLM preset management, API keys, local OpenAI-compatible URLs, models for analysis, reflection, tools, vision, and embeddings |
+| **Memory** | Facts, vectors, summaries, chat history, maintenance, and global or per-persona settings |
 | **TTS** | Voice engines: Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
-| **Behavior / Reflection** | Character inner monologue, proactive speech configuration |
-| **VLM** | Screen / visual understanding: model and screenshot strategy |
+| **Behavior** | My profile, reflection, proactive messages, topic sources, screenshot behavior, and character state |
 | **Tools** | Todos, timers, weather, trends, web search — plugin toggles and config |
 | **System** | Theme, proxy, HF mirror, offline toggle |
 

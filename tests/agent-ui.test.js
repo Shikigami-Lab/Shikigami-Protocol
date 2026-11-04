@@ -305,6 +305,7 @@ test('model settings load and persist the tool preset through agent settings', a
 
 test('autonomy validates integer ranges without making requests and saves valid limits', async () => {
   const { model } = harness();
+  model.activeTab = 'tools';
   model.agentSettingsLoaded = true;
   const calls = [];
   model.agentFetch = async (url, options) => {

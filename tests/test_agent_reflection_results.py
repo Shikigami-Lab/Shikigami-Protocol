@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from src.config.app_config import AppConfig
 from src.core.reflection import ReflectionEngine
 from src.core.session import Session
 from src.tools.timer.expire_handler import _on_expire
@@ -71,6 +72,22 @@ class ReflectionResultTests(unittest.IsolatedAsyncioTestCase):
 
     async def reflect(self):
         await self.engine._reflect(self.session, {})
+
+    async def test_reflection_falls_back_to_active_model_with_role_parameters(self):
+        primary = {"model": "fixture-primary", "temperature": 0.1}
+        active = {"model": "fixture-active", "temperature": 0.2}
+        self.app.state.config = AppConfig(default_llm="chat", llm_presets={"chat": active, "primary": primary},
+            secondary_models={"reflection": {"primary_preset": "primary", "fallback_preset": "__active__",
+                "gen_params": {"temperature": 0.3, "max_tokens": 420}}})
+        self.engine._get_preset.side_effect = ReflectionEngine._get_preset.__get__(self.engine)
+        self.engine._get_fallback_preset.side_effect = ReflectionEngine._get_fallback_preset.__get__(self.engine)
+        failed = SimpleNamespace(chat=mock.AsyncMock(return_value="[LLM Error: fixture]"))
+        with mock.patch("src.llm.registry.get_provider", side_effect=[failed, self.provider]) as provider:
+            await self.reflect()
+        self.assertEqual(provider.call_args_list, [mock.call(primary), mock.call(active)])
+        for chat in (failed.chat, self.provider.chat):
+            self.assertEqual(chat.await_args.kwargs, {"temperature": 0.3, "max_tokens": 420})
+        self.assertEqual(self.session.reflection_state["thought"], "The tea timer finished.")
 
     async def test_pending_character_plans_are_reflection_data_not_user_todos(self):
         from src.tools.todo.store import TodoStore

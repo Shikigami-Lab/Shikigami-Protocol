@@ -228,28 +228,34 @@ class AppConfig:
         }
         return {**defaults, **self.vlm}
 
-    def get_reflection_model_preset(self) -> Optional[Dict[str, Any]]:
-        """返回自省用 LLM preset；先试 primary，失败再试 fallback，均失败返回 None。"""
-        sec = self.secondary_models.get("reflection", {})
-        if not sec.get("enabled", True):
+    def get_vlm_model_preset(self) -> Optional[Dict[str, Any]]:
+        """Resolve a vision preset. Only the active sentinel may use the chat model."""
+        name = self.get_vlm_config()["model_preset"]
+        if name == "__active__":
+            return self.get_active_llm_preset() or None
+        if not name or name == "__none__":
             return None
-        primary_name = sec.get("primary_preset", "")
-        # 特殊值："__none__"=忽略该槽位；"__active__"=使用激活模型
-        if primary_name == "__active__":
-            return self.get_active_llm_preset()
-        if primary_name and primary_name != "__none__" and primary_name in self.llm_presets:
-            return self.llm_presets[primary_name]
-        fallback_name = sec.get("fallback_preset", "")
-        if fallback_name == "__active__":
-            return self.get_active_llm_preset()
-        if fallback_name and fallback_name != "__none__" and fallback_name in self.llm_presets:
-            return self.llm_presets[fallback_name]
+        return self.llm_presets.get(name)
+
+    def get_reflection_model_preset(self) -> Optional[Dict[str, Any]]:
+        """Return the first available reflection preset."""
+        for name in self.get_reflection_model_names():
+            if name and (preset := self.llm_presets.get(name)):
+                return preset
         return None
 
     def get_reflection_model_names(self) -> tuple:
-        """返回 (primary_preset_name, fallback_preset_name)。"""
+        """Resolve primary and fallback slots, using an empty name for an unset slot."""
         sec = self.secondary_models.get("reflection", {})
-        return (sec.get("primary_preset", ""), sec.get("fallback_preset", ""))
+        if not sec.get("enabled", True):
+            return self.default_llm, ""
+
+        def resolve(name):
+            if name == "__active__":
+                return self.default_llm
+            return "" if name == "__none__" else (name or "")
+
+        return resolve(sec.get("primary_preset")), resolve(sec.get("fallback_preset"))
 
     def get_stt_config(self) -> Dict[str, Any]:
         """返回 STT 配置，含默认值（SenseVoice / sherpa-onnx）。"""

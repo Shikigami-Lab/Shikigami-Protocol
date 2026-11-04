@@ -3,11 +3,95 @@
 所有依赖均懒导入，缺少时静默降级，不影响事实库和中期摘要。
 本地模型支持 device 配置：cuda / cpu / auto（默认 auto 即优先 GPU）。
 """
+import hashlib
 import logging
 import os
 from typing import List, Optional
 
+from src.utils.paths import get_project_root
+
 logger = logging.getLogger(__name__)
+
+GEMINI_EMBEDDING_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+EMBEDDING_KEY_ENV = "EMBEDDING_API_KEY"
+EMBEDDING_ENDPOINT_ENV = "EMBEDDING_API_KEY_ENDPOINT"
+EMBEDDING_KEY_MANAGED = "api_key_env_managed"
+_EMBEDDING_ENV_FILE = os.path.join(get_project_root(), ".env")
+
+
+def embedding_endpoint(config: dict) -> tuple[str, str]:
+    provider = config.get("provider", "gemini")
+    if provider not in ("gemini", "openai_compat"):
+        return provider, ""
+    url = (config.get("base_url") or "").strip()
+    if not url and provider == "gemini":
+        url = (config.get("gemini_base_url") or "").strip() or GEMINI_EMBEDDING_URL
+    if url and not url.endswith("/"):
+        url += "/"
+    return provider, url
+
+
+def embedding_endpoint_binding(config: dict) -> str:
+    provider, url = embedding_endpoint(config)
+    return hashlib.sha256(f"{provider}\n{url}".encode()).hexdigest()
+
+
+def embedding_key_binding(config: dict, key: str) -> str:
+    endpoint = embedding_endpoint_binding(config)
+    return "v1:" + hashlib.sha256(f"{endpoint}\0{key}".encode()).hexdigest()
+
+
+def bind_legacy_embedding_config(config: dict) -> None:
+    """Pin pre-existing credentials to the global startup endpoint before profile overrides."""
+    config["_legacy_key_endpoint"] = embedding_endpoint_binding(config)
+
+
+def embedding_credential_values(config: dict) -> dict:
+    if config.get(EMBEDDING_KEY_MANAGED) is not True:
+        return os.environ.copy()
+
+    from dotenv import dotenv_values
+
+    try:
+        return dotenv_values(_EMBEDDING_ENV_FILE, interpolate=False)
+    except (OSError, UnicodeError):
+        logger.warning("[embedding] Could not read the managed credential file")
+        return {}
+
+
+def resolve_dedicated_embedding_key(config: dict) -> str:
+    provider, url = embedding_endpoint(config)
+    if provider not in ("gemini", "openai_compat") or not url:
+        return ""
+    endpoint = embedding_endpoint_binding(config)
+    legacy_matches = (
+        config.get(EMBEDDING_KEY_MANAGED) is not True
+        and config.get("_legacy_key_endpoint", endpoint) == endpoint
+    )
+    if legacy_matches:
+        inline_key = config.get("api_key") or (config.get("gemini_api_key") if provider == "gemini" else "")
+        if inline_key and (key := inline_key.strip()):
+            return key
+    values = embedding_credential_values(config)
+    binding = values.get(EMBEDDING_ENDPOINT_ENV)
+    key = (values.get(EMBEDDING_KEY_ENV) or "").strip()
+    if key and (binding == embedding_key_binding(config, key) or (binding is None and legacy_matches)):
+        return key
+    return ""
+
+
+def resolve_embedding_api_key(config: dict, *, use_saved: bool = True) -> str:
+    provider, url = embedding_endpoint(config)
+    if provider not in ("gemini", "openai_compat") or not url:
+        return ""
+    if config.get("_key_resolved"):
+        return (config.get("api_key") or "").strip()
+    if use_saved and (key := resolve_dedicated_embedding_key(config)):
+        return key
+    # Shared Google credentials are only for Google's canonical Gemini endpoint.
+    if provider == "gemini" and url == GEMINI_EMBEDDING_URL:
+        return os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
+    return ""
 
 
 def _torch_importable() -> bool:
@@ -93,12 +177,7 @@ class EmbeddingProvider:
             logger.info("[EmbeddingProvider] 无可用 embedding 后端，向量层已禁用")
 
     def _try_init_gemini(self):
-        import os
-        api_key = (os.environ.get("GEMINI_API_KEY")
-                   or os.environ.get("GOOGLE_API_KEY")
-                   or os.environ.get("EMBEDDING_API_KEY")
-                   or self._config.get("api_key", "")
-                   or self._config.get("gemini_api_key", ""))
+        api_key = resolve_embedding_api_key(self._config)
         if not api_key:
             logger.warning("[EmbeddingProvider] 未找到 Gemini API key，尝试本地模型")
             self._try_init_local()
@@ -242,8 +321,8 @@ class EmbeddingProvider:
                 break
 
     def _try_init_openai_compat(self):
-        base_url = (self._config.get("base_url") or "").strip()
-        api_key = (self._config.get("api_key") or "").strip() or os.environ.get("EMBEDDING_API_KEY", "")
+        _, base_url = embedding_endpoint(self._config)
+        api_key = resolve_embedding_api_key(self._config)
         model = (self._config.get("model") or self._config.get("gemini_model") or "text-embedding-3-small").strip()
         if not base_url:
             logger.warning("[EmbeddingProvider] openai_compat: base_url 未配置，embedding 禁用")
@@ -282,10 +361,7 @@ class EmbeddingProvider:
         """
         try:
             from openai import OpenAI
-            base_url = self._config.get(
-                "gemini_base_url",
-                "https://generativelanguage.googleapis.com/v1beta/openai/",
-            )
+            _, base_url = embedding_endpoint(self._config)
             client = OpenAI(
                 api_key=self._api_key,
                 base_url=base_url,

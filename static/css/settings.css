@@ -589,6 +589,7 @@
   font-size: var(--fs-xs);
 }
 .memory-panel-content .mem-subtab-bar {
+  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 .memory-panel-content .mem-subtab-btn {

@@ -218,7 +218,12 @@ class AgentRuntime:
                 self._health_at = time.monotonic()
                 self._health_model = model_key
             health = self._health
-        return {**settings, **health, "model": preset.get("model", ""), 'effective_enabled': effective,
+        access = {}
+        if effective:
+            access = self.access_for(current.profile_id) if current is not None else capabilities(settings, None)
+        return {**settings, **health, "model": preset.get("model", ""), "effective_enabled": effective,
+                "profile_id": current.profile_id if current is not None else "",
+                "effective_capabilities": access,
                 "state": "disabled" if not effective else ("ready" if health["available"] else "unavailable")}
 
     def _probe(self, preset):

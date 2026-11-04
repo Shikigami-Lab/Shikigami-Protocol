@@ -12,32 +12,143 @@ Profile CRUD operates directly on profiles/*.json files and syncs SessionManager
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
 import sys
 import re
 import shutil
+import tempfile
 import time
+from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.config.emotion_keys import emotion_keys_csv_for_wizard
 from src.llm.registry import get_provider
 from src.lorebooks.entry_utils import normalize_lorebook_entry_for_storage
+from src.memory.embedding import (
+    EMBEDDING_ENDPOINT_ENV,
+    EMBEDDING_KEY_ENV,
+    EMBEDDING_KEY_MANAGED,
+    bind_legacy_embedding_config,
+    embedding_credential_values,
+    embedding_endpoint,
+    embedding_key_binding,
+    resolve_dedicated_embedding_key,
+    resolve_embedding_api_key,
+)
 from src.utils.paths import get_project_root
 
 _STATIC_AVATARS_DIR = "static/avatars"
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
 _YAML_PATH = os.path.join(get_project_root(), "config", "app.yaml")
 _ENV_FILE_PATH = os.path.join(get_project_root(), ".env")
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
+
+
+def _has_control(value: str) -> bool:
+    return bool(re.search(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", value))
+
+
+def _validate_path_component(name: str) -> None:
+    if (not name or name.endswith((".", " ")) or _has_control(name)
+            or any(char in name for char in '/\\:<>|"*?')
+            or PureWindowsPath(name).is_reserved()):
+        raise HTTPException(400, detail="Invalid profile path")
+
+
+def _contained_path(root: str, *parts: str) -> str:
+    base = Path(root).resolve()
+    path = base.joinpath(*parts)
+    try:
+        # A redirected path can also alias another profile within this root.
+        if not path.is_relative_to(base) or path.resolve() != path:
+            raise ValueError("redirected profile path")
+    except (ValueError, OSError, RuntimeError):
+        raise HTTPException(400, detail="Invalid profile path") from None
+    return str(path)
+
+
+def _validate_profile_id(profile_id: str) -> None:
+    _validate_path_component(profile_id)
+    _contained_path(_PROFILES_DIR, f"{profile_id}.json")
+    _contained_path(_PROFILES_DIR, f"{profile_id}.json.tmp")
+    _contained_path(_PROFILES_DIR, profile_id)
+    for filename in ("segments_config.json", "user_portrait_changelog.json",
+                     "persona_changelog.json", "affinity_state.json"):
+        _contained_path(_PROFILES_DIR, profile_id, filename)
+
+
+async def _validate_profile_request(request: Request) -> None:
+    profile_id = request.path_params.get("profile_id")
+    if profile_id is not None:
+        _validate_profile_id(profile_id)
+
+
+router = APIRouter(dependencies=[Depends(_validate_profile_request)])
+
+
+def _http_origin(url: str) -> tuple[str, str, int]:
+    parts = urlsplit(url)
+    if (parts.scheme not in ("http", "https") or not parts.hostname
+            or parts.username is not None or parts.path or parts.query or parts.fragment):
+        raise ValueError("Invalid HTTP origin")
+    return parts.scheme, parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
+
+
+def _local_settings_host(host: str, configured_host: str) -> bool:
+    trusted = os.environ.get("SHIKIGAMI_SETTINGS_TRUSTED_HOSTS", "").lower().split(",")
+    if host in ("localhost", configured_host.lower()) or host in map(str.strip, trusted):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+        return address.is_loopback or address.is_private or address.is_link_local
+    except ValueError:
+        return False
+
+
+async def guard_settings_access(request: Request, call_next):
+    """Protect the settings/profile surface independently of CORS."""
+    path = request.scope["path"]
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    if root_path and path.startswith(root_path + "/"):
+        path = path[len(root_path):]
+    guarded = ("/settings", "/profiles", "/memory", "/sessions", "/lorebooks",
+               "/api/settings", "/api/agent/settings", "/api/tools", "/api/profiles",
+               "/api/preferences", "/api/setup")
+    if any(path == prefix or path.startswith(prefix + "/") for prefix in guarded):
+        origins = request.headers.getlist("origin")
+        hosts = request.headers.getlist("host")
+        config = getattr(request.app.state, "config", None)
+        try:
+            if len(hosts) != 1 or len(origins) > 1:
+                raise ValueError("Invalid settings request headers")
+            target = _http_origin(f"{request.scope['scheme']}://{hosts[0]}")
+            if (not _local_settings_host(target[1], getattr(config, "host", ""))
+                    or request.headers.get("sec-fetch-site") in ("cross-site", "same-site")
+                    or (origins and _http_origin(origins[0]) != target)):
+                raise ValueError("Untrusted settings origin")
+        except ValueError:
+            return JSONResponse(status_code=403, content={"detail": "Open settings from this application"})
+        if path.startswith("/api/profiles/") or path == "/api/tools":
+            profile_id = (
+                path.removeprefix("/api/profiles/").split("/", 1)[0]
+                if path.startswith("/api/profiles/") else request.query_params.get("profile_id")
+            )
+            if profile_id:
+                try:
+                    _validate_profile_id(profile_id)
+                except HTTPException as exc:
+                    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
 
 
 @router.get("/settings/emotion_keys")
@@ -64,8 +175,17 @@ def _load_yaml():
 
 def _save_yaml(y, data):
     os.makedirs(os.path.dirname(_YAML_PATH), exist_ok=True)
-    with open(_YAML_PATH, "w", encoding="utf-8") as f:
-        y.dump(data, f)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=os.path.dirname(_YAML_PATH), delete=False,
+    ) as f:
+        staged = Path(f.name)
+        try:
+            y.dump(data, f)
+            f.close()
+            os.replace(staged, _YAML_PATH)
+        finally:
+            f.close()
+            staged.unlink(missing_ok=True)
 
 
 _ENV_FILE = _ENV_FILE_PATH
@@ -90,21 +210,144 @@ def _ensure_bg_loops(app, session) -> None:
             ase_engine._start_session_loop(session)
 
 
-def _write_key_to_env(preset_name: str, api_key: str) -> None:
-    """Write api_key to .env and os.environ. If empty, remove from both."""
-    from dotenv import set_key, unset_key
-    env_key = _env_key_name(preset_name)
-    if api_key:
-        set_key(_ENV_FILE, env_key, api_key)
-        os.environ[env_key] = api_key
-    else:
-        unset_key(_ENV_FILE, env_key)
-        os.environ.pop(env_key, None)
+def _validate_env_value(value: str) -> None:
+    if _has_control(value) or "${" in value:
+        raise HTTPException(400, detail="Invalid environment value")
+
+
+def _validate_env_updates(updates: dict[str, str]) -> None:
+    for name, value in updates.items():
+        if not re.fullmatch(r"[\w.-]+", name):
+            raise HTTPException(400, detail="Invalid environment variable name")
+        _validate_env_value(value)
+
+
+def _write_env_file(updates: dict[str, str]) -> None:
+    from dotenv import dotenv_values, set_key, unset_key
+
+    if not updates:
+        return
+    destination = Path(_ENV_FILE)
+    if not destination.exists() and not any(updates.values()):
+        return
+    with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as f:
+        staged = Path(f.name)
+    try:
+        if destination.exists():
+            shutil.copyfile(destination, staged)
+        existing = dotenv_values(staged, interpolate=False)
+        for name, value in updates.items():
+            if value:
+                set_key(staged, name, value.replace("\\", "\\\\"))
+            elif name in existing:
+                unset_key(staged, name)
+        os.replace(staged, destination)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def _publish_env_updates(updates: dict[str, str]) -> None:
+    # Remove replaced values before publishing their new metadata. A runtime
+    # reader may briefly see no embedding key, but never an old key newly bound.
+    if EMBEDDING_KEY_ENV in updates:
+        os.environ.pop(EMBEDDING_KEY_ENV, None)
+    for name, value in updates.items():
+        if name == EMBEDDING_KEY_ENV:
+            continue
+        if value:
+            os.environ[name] = value
+        else:
+            os.environ.pop(name, None)
+    if updates.get(EMBEDDING_KEY_ENV):
+        os.environ[EMBEDDING_KEY_ENV] = updates[EMBEDDING_KEY_ENV]
+
+
+def _update_env(updates: dict[str, str]) -> None:
+    """Validate and replace a group of dotenv values in one file operation."""
+    _validate_env_updates(updates)
+    _write_env_file(updates)
+    _publish_env_updates(updates)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM Presets
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _check_preset_env_name(name: str, other_names) -> str:
+    env_name = _env_key_name(name)
+    if not name.strip() or not re.fullmatch(r"[\w.-]+", env_name):
+        raise HTTPException(400, detail="Invalid preset name")
+    if env_name == EMBEDDING_KEY_ENV or any(_env_key_name(other) == env_name for other in other_names):
+        raise HTTPException(409, detail={"code": "preset_env_key_conflict"})
+    return env_name
+
+
+def load_managed_preset_keys(config: Any) -> None:
+    """Settings-managed presets use the dotenv file, even if a launcher inherited a stale key."""
+    from dotenv import dotenv_values
+
+    managed = [(name, preset) for name, preset in config.llm_presets.items()
+               if preset.get("api_key_env_managed") is True]
+    if managed:
+        values = dotenv_values(_ENV_FILE)
+        for name, preset in managed:
+            preset["api_key"] = (values.get(_env_key_name(name)) or "").strip()
+
+
+def _restore_config_file(path: Path, content: Optional[bytes]) -> None:
+    if content is None:
+        path.unlink(missing_ok=True)
+        return
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
+        staged = Path(f.name)
+        try:
+            f.write(content)
+            f.close()
+            os.replace(staged, path)
+        finally:
+            f.close()
+            staged.unlink(missing_ok=True)
+
+
+def _save_yaml_with_credentials(y, data: dict, updates: dict[str, str]) -> None:
+    """Commit in an order that cannot pair a file credential with the wrong endpoint."""
+    from dotenv import dotenv_values
+
+    _validate_env_updates(updates)
+    if not updates:
+        _save_yaml(y, data)
+        return
+
+    yaml_path, env_path = Path(_YAML_PATH), Path(_ENV_FILE)
+    prior_yaml = yaml_path.read_bytes() if yaml_path.exists() else None
+    prior_env = env_path.read_bytes() if env_path.exists() else None
+    existing = dotenv_values(env_path, interpolate=False)
+    neutral = {name: "" for name in updates if name in existing}
+    _write_env_file(neutral)
+    yaml_saved = False
+    try:
+        _save_yaml(y, data)
+        yaml_saved = True
+        _write_env_file({name: value for name, value in updates.items() if value})
+    except Exception:
+        # If YAML restoration fails, leave dotenv neutralized. The committed
+        # config then remains keyless instead of borrowing the prior key.
+        if yaml_saved:
+            _restore_config_file(yaml_path, prior_yaml)
+        if neutral:
+            _restore_config_file(env_path, prior_env)
+        raise
+    _publish_env_updates(updates)
+
+
+def _refresh_analysis_provider(config: Any) -> None:
+    from src.llm.registry import ensure_analysis_provider, unregister_role_provider
+
+    # Startup has no previously registered provider. A live edit can remove
+    # the selection, so clear the old provider before using the startup resolver.
+    unregister_role_provider("analysis")
+    ensure_analysis_provider(config)
+
 
 @router.get("/settings/llm/presets")
 async def get_llm_presets(request: Request):
@@ -122,6 +365,8 @@ async def get_llm_presets(request: Request):
             "presence_penalty":       p.get("presence_penalty", 0.0),
             "frequency_penalty":      p.get("frequency_penalty", 0.0),
             "unsupported_params":     p.get("unsupported_params", []),
+            "max_tokens":             p.get("max_tokens"),
+            "extra_body":             p.get("extra_body"),
         }
     return {
         "presets": result,
@@ -174,6 +419,15 @@ class LLMPresetBody(BaseModel):
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
     unsupported_params: List[str] = []
+    max_tokens: Optional[int] = Field(default=None, gt=0)
+    extra_body: Optional[Dict[str, Any]] = None
+
+
+def _merge_preset_advanced_fields(body: LLMPresetBody, preset: dict, previous: dict) -> None:
+    for name in ("max_tokens", "extra_body"):
+        value = getattr(body, name) if name in body.model_fields_set else previous.get(name)
+        if value is not None:
+            preset[name] = value
 
 
 @router.post("/settings/llm/presets")
@@ -186,14 +440,15 @@ async def create_llm_preset(request: Request, body: LLMPresetBody):
     y, data = _load_yaml()
     if "llm_presets" not in data:
         data["llm_presets"] = {}
+    env_name = _check_preset_env_name(body.name, config.llm_presets.keys() | data["llm_presets"].keys())
 
     # Write api_key to .env (source of truth); YAML only stores empty string
     final_api_key = body.api_key or ""
-    _write_key_to_env(body.name, final_api_key)
 
     preset_data: Dict[str, Any] = {
         "type":                  body.type,
         "api_key":               "",   # key lives in .env, not YAML
+        "api_key_env_managed":   True,
         "base_url":              body.base_url,
         "model":                 body.model,
         "temperature":           body.temperature,
@@ -205,17 +460,17 @@ async def create_llm_preset(request: Request, body: LLMPresetBody):
         preset_data["frequency_penalty"] = body.frequency_penalty
     if body.unsupported_params:
         preset_data["unsupported_params"] = body.unsupported_params
+    _merge_preset_advanced_fields(body, preset_data, {})
 
     data["llm_presets"][body.name] = preset_data
-    _save_yaml(y, data)
+    _save_yaml_with_credentials(y, data, {env_name: final_api_key})
 
     # Hot-reload: keep actual key in memory (not the empty YAML value)
     config.llm_presets[body.name] = dict(preset_data)
     config.llm_presets[body.name]["api_key"] = final_api_key
 
     # Re-register analysis provider in case this preset is used for analysis
-    from src.llm.registry import ensure_analysis_provider
-    ensure_analysis_provider(config)
+    _refresh_analysis_provider(config)
 
     return {"ok": True, "name": body.name}
 
@@ -227,48 +482,40 @@ async def update_llm_preset(name: str, request: Request, body: LLMPresetBody):
 
     y, data = _load_yaml()
     presets = data.get("llm_presets", {})
+    existing = config.llm_presets.get(name)
+    if existing is None:
+        raise HTTPException(404, detail={"code": "preset_not_found"})
+    other_names = (config.llm_presets.keys() | presets.keys()) - {name}
+    env_name = _check_preset_env_name(body.name, other_names)
+    old_env_name = _env_key_name(name)
 
     # Determine final api_key: None means keep existing; empty string means clear
-    existing_key = ""
-    if name in config.llm_presets:
-        existing_key = config.llm_presets[name].get("api_key", "")
+    existing_key = existing.get("api_key", "")
     final_key = existing_key if body.api_key is None else body.api_key
 
     # Keeping the stored key while base_url changes would send that key to the new endpoint on the
     # next call, so anyone able to reach this API could point a preset at a server they control.
     # Changing base_url requires entering the key again (or clearing it explicitly).
-    existing_base_url = (config.llm_presets.get(name) or {}).get("base_url", "")
-    if body.api_key is None and existing_key and (body.base_url or "") != (existing_base_url or ""):
+    existing_endpoint = (existing.get("type", "openai_compat"), existing.get("base_url") or "")
+    if body.api_key is None and existing_key and (body.type, body.base_url) != existing_endpoint:
         raise HTTPException(
             status_code=400,
-            detail="Enter the API key again to change base_url — the stored key is not reused for a new endpoint.",
+            detail="Enter or clear the API key to change the provider or base URL.",
         )
 
-    old_name = name  # remember original name for env var migration
-
-    # Handle rename: old name → new name
-    if body.name != name:
-        if body.name in config.llm_presets:
-            raise HTTPException(status_code=409, detail=f"Preset '{body.name}' already exists")
-        # Move in YAML
-        old_entry = presets.pop(name, {})
-        presets[body.name] = old_entry
-        # Move in memory
-        config.llm_presets.pop(name, None)
-        # If this was the active preset, update default_llm
-        if config.default_llm == name:
-            config.default_llm = body.name
-            data["default_llm"] = body.name
-        name = body.name
-
-    # Migrate api_key to .env (remove old env var on rename, set new one)
-    if old_name != name:
-        _write_key_to_env(old_name, "")   # clear old env var
-    _write_key_to_env(name, final_key)    # set (or clear if "") new env var
-
+    rename = body.name != name
+    old_key_shared = old_env_name == EMBEDDING_KEY_ENV or any(
+        _env_key_name(other) == old_env_name for other in other_names
+    )
+    if rename and old_key_shared and body.api_key is None:
+        raise HTTPException(409, detail={"code": "preset_env_key_conflict"})
+    updates = {env_name: final_key}
+    if old_env_name != env_name and not old_key_shared and re.fullmatch(r"[\w.-]+", old_env_name):
+        updates[old_env_name] = ""
     preset_data: Dict[str, Any] = {
         "type":                  body.type,
         "api_key":               "",   # key lives in .env, not YAML
+        "api_key_env_managed":   True,
         "base_url":              body.base_url,
         "model":                 body.model,
         "temperature":           body.temperature,
@@ -281,21 +528,27 @@ async def update_llm_preset(name: str, request: Request, body: LLMPresetBody):
         preset_data["frequency_penalty"] = body.frequency_penalty
     if body.unsupported_params:
         preset_data["unsupported_params"] = body.unsupported_params
+    _merge_preset_advanced_fields(body, preset_data, existing)
 
-    if "llm_presets" not in data:
-        data["llm_presets"] = {}
-    data["llm_presets"][name] = preset_data
-    _save_yaml(y, data)
+    data["llm_presets"] = presets
+    if rename:
+        presets.pop(name, None)
+        if config.default_llm == name:
+            data["default_llm"] = body.name
+    presets[body.name] = preset_data
+    _save_yaml_with_credentials(y, data, updates)
 
     # Hot-reload: keep actual key in memory (not the empty YAML value)
-    config.llm_presets[name] = dict(preset_data)
-    config.llm_presets[name]["api_key"] = final_key
+    if rename:
+        config.llm_presets.pop(name, None)
+        if config.default_llm == name:
+            config.default_llm = body.name
+    config.llm_presets[body.name] = {**preset_data, "api_key": final_key}
 
     # Re-register analysis provider in case this preset is used for analysis
-    from src.llm.registry import ensure_analysis_provider
-    ensure_analysis_provider(config)
+    _refresh_analysis_provider(config)
 
-    return {"ok": True, "name": name}
+    return {"ok": True, "name": body.name}
 
 
 @router.delete("/settings/llm/presets/{name}")
@@ -311,9 +564,15 @@ async def delete_llm_preset(name: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Preset '{name}' not found")
 
     del presets[name]
-    _save_yaml(y, data)
+    env_name = _env_key_name(name)
+    remaining_names = (config.llm_presets.keys() | presets.keys()) - {name}
+    updates = {}
+    if (env_name != EMBEDDING_KEY_ENV and re.fullmatch(r"[\w.-]+", env_name)
+            and all(_env_key_name(other) != env_name for other in remaining_names)):
+        updates[env_name] = ""
+    _save_yaml_with_credentials(y, data, updates)
     config.llm_presets.pop(name, None)
-    _write_key_to_env(name, "")   # remove from .env and os.environ
+    _refresh_analysis_provider(config)
     return {"ok": True}
 
 
@@ -336,8 +595,7 @@ async def set_active_llm(request: Request, body: SetActiveBody):
     _save_yaml(y, data)
 
     # Re-register analysis provider in case it uses the active model (preset = "")
-    from src.llm.registry import ensure_analysis_provider
-    ensure_analysis_provider(config)
+    _refresh_analysis_provider(config)
 
     return {"ok": True, "active": body.name}
 
@@ -799,6 +1057,8 @@ async def test_tts_config(request: Request):
 @router.get("/profiles")
 async def list_profiles(request: Request):
     from src.config.profile_loader import ProfileLoader
+    for card_path in Path(_PROFILES_DIR).glob("*.json"):
+        _validate_profile_id(card_path.stem)
     loader = ProfileLoader()
     profiles = loader.list_profiles()
     sm = request.app.state.session_manager
@@ -825,6 +1085,8 @@ async def set_profile_order(request: Request):
         body = {}
     raw = body.get("profile_ids") if isinstance(body, dict) else None
     ids = _normalize_profile_ids(raw)
+    for profile_id in ids:
+        _validate_profile_id(profile_id)
     sm = request.app.state.session_manager
     sm.set_profile_order(ids)
     return {"ok": True}
@@ -870,10 +1132,12 @@ async def create_profile(request: Request, body: ProfileUpdateBody):
     import uuid
     slug = re.sub(r"[^a-z0-9_]", "_", body.display_name.lower())[:32].strip("_")
     # 若 slug 不含任何字母或数字（如纯中文名），退回到 UUID
-    profile_id = slug if re.search(r"[a-z0-9]", slug) else f"profile_{uuid.uuid4().hex[:8]}"
+    profile_id = slug if slug and not PureWindowsPath(slug).is_reserved() else f"profile_{uuid.uuid4().hex[:8]}"
+    _validate_profile_id(profile_id)
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if os.path.exists(path):
         profile_id = f"{profile_id}_{uuid.uuid4().hex[:6]}"
+        _validate_profile_id(profile_id)
         path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
 
     card = {
@@ -1161,6 +1425,8 @@ async def generate_profile_voice(profile_id: str, body: GenerateVoiceBody, reque
     from fastapi.responses import Response as _Resp
     cfg = request.app.state.config
     qcfg = cfg.tts_config.get("qwen3_tts") or {}
+    voices_dir = os.path.join(_PROJECT_ROOT, "Voices")
+    preview_path = _contained_path(voices_dir, f"{profile_id}_preview.wav")
 
     local_vd = os.path.join(_PROJECT_ROOT, "models", "Qwen-Qwen3-TTS-12Hz-1.7B-VoiceDesign")
     model_id = local_vd if os.path.isdir(local_vd) else "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
@@ -1181,9 +1447,7 @@ async def generate_profile_voice(profile_id: str, body: GenerateVoiceBody, reque
     if not wav_bytes:
         raise HTTPException(status_code=500, detail="合成失败，请确认 Qwen3-TTS VoiceDesign 模型已安装")
 
-    voices_dir = os.path.join(_PROJECT_ROOT, "Voices")
     os.makedirs(voices_dir, exist_ok=True)
-    preview_path = os.path.join(voices_dir, f"{profile_id}_preview.wav")
     with open(preview_path, "wb") as f:
         f.write(wav_bytes)
 
@@ -1193,22 +1457,23 @@ async def generate_profile_voice(profile_id: str, body: GenerateVoiceBody, reque
 @router.post("/profiles/{profile_id}/save-generated-voice")
 async def save_generated_voice(profile_id: str, body: SaveGeneratedVoiceBody):
     """将预览 WAV 保存为永久参考音频，并更新 profile 的 ref_audio_path/ref_text 字段。"""
-    preview_path = os.path.join(_PROJECT_ROOT, "Voices", f"{profile_id}_preview.wav")
-    if not os.path.isfile(preview_path):
-        raise HTTPException(status_code=404, detail="未找到预览文件，请先生成音色")
-
     final_name = (body.filename.strip() or f"{profile_id}_voice.wav")
+    _validate_path_component(final_name)
     if not final_name.endswith(".wav"):
         final_name += ".wav"
-    final_path = os.path.join(_PROJECT_ROOT, "Voices", final_name)
-    shutil.copy2(preview_path, final_path)
-    rel_path = os.path.join("Voices", final_name)
+    voices_dir = os.path.join(_PROJECT_ROOT, "Voices")
+    preview_path = _contained_path(voices_dir, f"{profile_id}_preview.wav")
+    final_path = _contained_path(voices_dir, final_name)
+    if not os.path.isfile(preview_path):
+        raise HTTPException(status_code=404, detail="未找到预览文件，请先生成音色")
 
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
     with open(path, "r", encoding="utf-8") as f:
         card = json.load(f)
+    shutil.copy2(preview_path, final_path)
+    rel_path = os.path.join("Voices", final_name)
     # Persist audio path for selected targets
     if "gpt_sovits" in body.targets:
         card["gpt_sovits_ref_audio_path"] = rel_path
@@ -1243,7 +1508,7 @@ async def upload_avatar(profile_id: str, file: UploadFile = File(...)):
 
     os.makedirs(_STATIC_AVATARS_DIR, exist_ok=True)
     dest_filename = f"{profile_id}{ext}"
-    dest_path = os.path.join(_STATIC_AVATARS_DIR, dest_filename)
+    dest_path = _contained_path(_STATIC_AVATARS_DIR, dest_filename)
 
     contents = await file.read()
     with open(dest_path, "wb") as f:
@@ -1320,10 +1585,13 @@ async def delete_profile(profile_id: str, request: Request):
     # Remove profile data directory (chat history etc.) with retries.
     data_dir = os.path.join(_PROFILES_DIR, profile_id)
     if os.path.isdir(data_dir):
-        import time
         last_err = None
         remaining: list[str] = []
-        for _ in range(10):
+        for attempt in range(10):
+            # Another request can recreate the profile while this retry waits.
+            if os.path.lexists(path):
+                return {"ok": True}
+            _contained_path(_PROFILES_DIR, profile_id)
             try:
                 # Give OS/GC a moment to release file locks.
                 try:
@@ -1341,25 +1609,31 @@ async def delete_profile(profile_id: str, request: Request):
                     remaining = sorted(os.listdir(data_dir))
                 except Exception:
                     remaining = []
-                time.sleep(0.5)
+                if attempt < 9:
+                    await asyncio.sleep(0.5)
         if last_err is not None:
             logger.error(
                 "[delete_profile] cleanup_failed profile=%s dir=%s err=%s remaining=%s",
                 profile_id, data_dir, last_err, remaining[:20],
             )
             # 后台继续重试，给 ChromaDB GC 更多时间释放句柄
-            import asyncio as _asyncio
-            async def _deferred_rmtree(path: str) -> None:
+            async def _deferred_rmtree() -> None:
                 for delay in (3, 8, 20):
-                    await _asyncio.sleep(delay)
+                    await asyncio.sleep(delay)
+                    if os.path.lexists(path):
+                        return
                     try:
-                        shutil.rmtree(path)
-                        logger.info("[delete_profile] deferred cleanup ok: %s", path)
+                        _contained_path(_PROFILES_DIR, profile_id)
+                    except HTTPException:
+                        return
+                    try:
+                        shutil.rmtree(data_dir)
+                        logger.info("[delete_profile] deferred cleanup ok: %s", data_dir)
                         return
                     except Exception:
                         pass
-                logger.warning("[delete_profile] deferred cleanup gave up: %s", path)
-            _asyncio.create_task(_deferred_rmtree(data_dir))
+                logger.warning("[delete_profile] deferred cleanup gave up: %s", data_dir)
+            asyncio.create_task(_deferred_rmtree())
             return {"ok": True, "cleanup_failed": True, "remaining": remaining}
 
     return {"ok": True}
@@ -2207,19 +2481,7 @@ async def save_secondary_models(request: Request, body: SecondaryModelBody):
         config.secondary_models = {}
     config.secondary_models["analysis"] = dict(sec)
 
-    # Re-register or unregister analysis provider immediately
-    from src.llm.registry import register_role_provider, unregister_role_provider, get_provider
-    if body.analysis_enabled and body.analysis_preset:
-        preset_dict = config.llm_presets.get(body.analysis_preset)
-        if preset_dict:
-            overrides = {k: sec.get(k) for k in ("temperature", "top_p", "presence_penalty", "frequency_penalty", "max_tokens")}
-            register_role_provider("analysis", get_provider(preset_dict, overrides))
-            logger.info("[settings] analysis provider re-registered → %s", body.analysis_preset)
-        else:
-            logger.warning("[settings] analysis preset '%s' not found in llm_presets", body.analysis_preset)
-    else:
-        unregister_role_provider("analysis")
-        logger.info("[settings] analysis provider unregistered (disabled)")
+    _refresh_analysis_provider(config)
 
     return {"ok": True}
 
@@ -2257,22 +2519,44 @@ async def save_system_config(request: Request, body: SystemSaveBody):
     return {"ok": True}
 
 
-def _read_env_proxy():
-    """从 .env 读取 HTTP_PROXY / HTTPS_PROXY，供前端展示。"""
+def _saved_proxies() -> dict[str, str]:
     from dotenv import dotenv_values
-    env = dotenv_values(_ENV_FILE) or {}
-    http_proxy = (env.get("HTTP_PROXY") or "").strip()
-    https_proxy = (env.get("HTTPS_PROXY") or "").strip()
-    proxy = http_proxy or https_proxy
-    if proxy and proxy.startswith("http://"):
-        proxy_url = proxy.replace("http://", "", 1)
-    elif proxy and proxy.startswith("https://"):
-        proxy_url = proxy.replace("https://", "", 1)
-    else:
-        proxy_url = proxy
+    env = dotenv_values(_ENV_FILE, interpolate=False)
+    return {name: (env.get(name) or "").strip() for name in ("HTTP_PROXY", "HTTPS_PROXY")}
+
+
+def _proxy_parts(value: str):
+    return urlsplit(value if "://" in value else "http://" + value)
+
+
+def _display_proxy(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parts = _proxy_parts(value)
+        address = parts.netloc.rsplit("@", 1)[-1]
+        if (not parts.hostname or parts.port == 0 or _has_control(value)
+                or any(c.isspace() or c in "\\%\"'" for c in address)):
+            return "***"
+        # Only the scheme and address are useful to the UI. Query and path
+        # components in legacy values may also contain credentials.
+        userinfo = "***@" if "@" in parts.netloc else ""
+        return f"{parts.scheme}://{userinfo}{address}"
+    except ValueError:
+        return "***"
+
+
+def _proxy_response(proxies: dict[str, str]) -> dict:
+    http_proxy = _display_proxy(proxies["HTTP_PROXY"])
+    https_proxy = _display_proxy(proxies["HTTPS_PROXY"])
+    legacy = http_proxy or https_proxy
+    if legacy.startswith(("http://", "https://")):
+        legacy = legacy.split("://", 1)[1]
     return {
-        "proxy_enabled": bool(proxy_url),
-        "proxy_url": proxy_url,
+        "proxy_enabled": bool(legacy),
+        "proxy_url": legacy,
+        "http_proxy": http_proxy,
+        "https_proxy": https_proxy,
     }
 
 
@@ -2280,34 +2564,56 @@ def _read_env_proxy():
 async def get_system_env():
     """返回 .env 中的代理配置，供设置页「系统」展示。"""
     try:
-        return _read_env_proxy()
-    except Exception:
-        return {"proxy_enabled": False, "proxy_url": ""}
+        return _proxy_response(_saved_proxies())
+    except (OSError, UnicodeError):
+        return _proxy_response({"HTTP_PROXY": "", "HTTPS_PROXY": ""})
 
 
 class SystemEnvSaveBody(BaseModel):
-    proxy_enabled: bool = False
-    proxy_url: str = ""
+    proxy_enabled: Optional[bool] = None
+    proxy_url: Optional[str] = None
+    http_proxy: Optional[str] = None
+    https_proxy: Optional[str] = None
+
+
+def _parse_proxy_input(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        parts = _proxy_parts(value)
+        if (parts.scheme not in ("http", "https", "socks4", "socks4a", "socks5", "socks5h")
+                or not parts.hostname or parts.port == 0 or parts.path not in ("", "/")
+                or "%" in parts.hostname or parts.query or parts.fragment
+                or any(c.isspace() or c in "\\'\"" for c in value)
+                or (parts.username == "***" and parts.password is None)):
+            raise ValueError("Invalid proxy URL")
+    except ValueError:
+        raise HTTPException(400, detail="Invalid proxy URL") from None
+    return value if "://" in value else "http://" + value
 
 
 @router.post("/settings/system/env")
 async def save_system_env(body: SystemEnvSaveBody):
     """将代理配置写入 .env；重启后生效。"""
-    from dotenv import set_key, unset_key
-    proxy_url = (body.proxy_url or "").strip()
-    if body.proxy_enabled and proxy_url:
-        if "://" not in proxy_url:
-            proxy_url = "http://" + proxy_url
-        set_key(_ENV_FILE, "HTTP_PROXY", proxy_url, quote_mode="never")
-        set_key(_ENV_FILE, "HTTPS_PROXY", proxy_url, quote_mode="never")
-        os.environ["HTTP_PROXY"] = proxy_url
-        os.environ["HTTPS_PROXY"] = proxy_url
-    else:
-        unset_key(_ENV_FILE, "HTTP_PROXY")
-        unset_key(_ENV_FILE, "HTTPS_PROXY")
-        os.environ.pop("HTTP_PROXY", None)
-        os.environ.pop("HTTPS_PROXY", None)
-    return {"ok": True}
+    for value in (body.proxy_url, body.http_proxy, body.https_proxy):
+        if value is not None:
+            _validate_env_value(value)
+
+    saved = _saved_proxies()
+    updates = {}
+    if body.proxy_enabled is False:
+        updates = dict.fromkeys(saved, "")
+    elif body.http_proxy is not None or body.https_proxy is not None:
+        for name, value in (("HTTP_PROXY", body.http_proxy), ("HTTPS_PROXY", body.https_proxy)):
+            if value is not None and value.strip() != _display_proxy(saved[name]):
+                updates[name] = _parse_proxy_input(value)
+    elif body.proxy_url is not None:
+        display = _proxy_response(saved)
+        if body.proxy_url.strip() not in (display["proxy_url"], display["http_proxy"] or display["https_proxy"]):
+            updates = dict.fromkeys(saved, _parse_proxy_input(body.proxy_url))
+    _update_env(updates)
+    return {"ok": True, **_proxy_response({**saved, **updates})}
 
 
 @router.get("/profiles/{profile_id}/engine_config")
@@ -2621,7 +2927,8 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
 async def get_memory_config(request: Request):
     """返回全局记忆配置。"""
     config = request.app.state.config
-    return config.get_memory_config()
+    memory = config.get_memory_config()
+    return {**memory, "embedding": _public_embedding_fields(memory.get("embedding", {}))}
 
 
 class MemoryConfigBody(BaseModel):
@@ -2706,13 +3013,9 @@ async def save_memory_config(request: Request, body: MemoryConfigBody):
 # Embedding Model Settings (standalone tab)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _embedding_api_key_env_present() -> bool:
-    """与 src/memory/embedding.py 中 Gemini 密钥解析顺序一致（任一存在即视为已配置）。"""
-    return bool(
-        os.environ.get("EMBEDDING_API_KEY", "").strip()
-        or os.environ.get("GOOGLE_API_KEY", "").strip()
-        or os.environ.get("GEMINI_API_KEY", "").strip()
-    )
+def _public_embedding_fields(embedding: dict) -> dict:
+    hidden = {"api_key", "gemini_api_key", EMBEDDING_KEY_MANAGED, "_legacy_key_endpoint", "_key_resolved"}
+    return {key: value for key, value in embedding.items() if key not in hidden}
 
 
 @router.get("/settings/embedding")
@@ -2721,12 +3024,13 @@ async def get_embedding_config(request: Request):
     config = request.app.state.config
     mem = config.get_memory_config()
     emb = mem.get("embedding", {})
-    has_key = bool((emb.get("api_key") or "").strip()) or _embedding_api_key_env_present()
     return {
         "provider":    emb.get("provider", "gemini"),
         "model":       emb.get("model") or emb.get("gemini_model", "gemini-embedding-001"),
-        "base_url":    emb.get("base_url", ""),
-        "has_key":     has_key,
+        "base_url":    emb.get("base_url") or (
+            emb.get("gemini_base_url", "") if emb.get("provider", "gemini") == "gemini" else ""
+        ),
+        "has_key":     bool(resolve_embedding_api_key(emb)),
         "local_model": emb.get("local_model", "all-MiniLM-L6-v2"),
         "device":      emb.get("device", "auto"),
         "offline":     emb.get("offline", False),
@@ -2743,41 +3047,85 @@ class EmbeddingConfigBody(BaseModel):
     offline:     bool = False
 
 
+def _embedding_form_credentials(saved: dict, provider: str, base_url: str, raw_key: str) -> tuple[dict, str]:
+    if provider not in ("gemini", "openai_compat", "local"):
+        raise HTTPException(400, detail={"code": "invalid_embedding_provider"})
+    _validate_env_value(raw_key)
+    if _has_control(base_url):
+        raise HTTPException(400, detail={"code": "invalid_embedding_endpoint"})
+    base_url = base_url.strip()
+    target = {"provider": provider, "base_url": base_url if provider != "local" else ""}
+    if provider == "local":
+        return target, ""
+
+    endpoint = embedding_endpoint(target)
+    try:
+        url = urlsplit(endpoint[1])
+        if (url.scheme not in ("http", "https") or not url.hostname
+                or url.username is not None or url.query or url.fragment or url.port == 0
+                or any(c.isspace() or c == "\\" for c in endpoint[1])):
+            raise ValueError("Invalid embedding URL")
+    except ValueError:
+        raise HTTPException(400, detail={"code": "invalid_embedding_endpoint"}) from None
+
+    key = raw_key.strip()
+    if key:
+        return target, key
+    same_endpoint = endpoint == embedding_endpoint(saved)
+    if not same_endpoint and (
+        provider == "gemini" or (
+            not raw_key and (
+                resolve_embedding_api_key(saved) or embedding_credential_values(saved).get(EMBEDDING_KEY_ENV)
+            )
+        )
+    ):
+        raise HTTPException(400, detail={"code": "embedding_key_required",
+                                        "message": "Enter an API key for the new embedding endpoint."})
+    if same_endpoint and not raw_key:
+        return target, resolve_embedding_api_key(saved)
+    return target, resolve_embedding_api_key(target, use_saved=False)
+
+
 @router.post("/settings/embedding")
 async def save_embedding_config(request: Request, body: EmbeddingConfigBody):
     """持久化 embedding 配置到 app.yaml，API key 写 .env。"""
+    config = request.app.state.config
+    previous = config.get_memory_config()["embedding"]
+    target, _ = _embedding_form_credentials(previous, body.provider, body.base_url, body.api_key)
     y, data = _load_yaml()
     if "memory" not in data:
         data["memory"] = {}
     if "embedding" not in data["memory"]:
         data["memory"]["embedding"] = {}
     emb = data["memory"]["embedding"]
+    emb.pop("gemini_base_url", None)
+    emb.pop("gemini_api_key", None)
     emb["provider"]    = body.provider
     emb["model"]       = body.model
     emb["gemini_model"] = body.model   # backward compat
-    emb["base_url"]    = body.base_url
+    emb["base_url"]    = target["base_url"]
     emb["api_key"]     = ""            # never store in yaml
+    emb[EMBEDDING_KEY_MANAGED] = True
     emb["local_model"] = body.local_model
     emb["device"]      = body.device
     emb["offline"]     = body.offline
-    _save_yaml(y, data)
-
-    # API key → .env（EMBEDDING_API_KEY；嵌入层亦读取 GOOGLE_API_KEY / GEMINI_API_KEY，见 embedding.py）
-    from dotenv import set_key, unset_key
-    raw_key = body.api_key if isinstance(body.api_key, str) else ""
-    sk = raw_key.strip()
-    if sk:
-        set_key(_ENV_FILE, "EMBEDDING_API_KEY", sk)
-        os.environ["EMBEDDING_API_KEY"] = sk
-    elif raw_key and not sk:
-        # 仅空白（如提示「填一个空格」）→ 清除本应用写入的 EMBEDDING_API_KEY
-        unset_key(_ENV_FILE, "EMBEDDING_API_KEY")
-        os.environ.pop("EMBEDDING_API_KEY", None)
-    # raw_key == ""：留空不修改 .env 中已有密钥
+    updates = {}
+    supplied_key = body.api_key.strip()
+    if supplied_key and body.provider != "local":
+        updates = {EMBEDDING_KEY_ENV: supplied_key, EMBEDDING_ENDPOINT_ENV: embedding_key_binding(target, supplied_key)}
+    elif body.api_key and not supplied_key:
+        # Preserve the legacy "one space clears the dedicated key" behavior.
+        updates = {EMBEDDING_KEY_ENV: "", EMBEDDING_ENDPOINT_ENV: ""}
+    elif previous.get(EMBEDDING_KEY_MANAGED) is not True:
+        # Migrate inline keys and bind old unscoped .env keys to the endpoint
+        # they already served, including when switching to local.
+        if key := resolve_dedicated_embedding_key(previous):
+            updates = {EMBEDDING_KEY_ENV: key, EMBEDDING_ENDPOINT_ENV: embedding_key_binding(previous, key)}
+    _save_yaml_with_credentials(y, data, updates)
 
     # Hot-reload
-    config = request.app.state.config
     config.memory["embedding"] = dict(emb)
+    bind_legacy_embedding_config(config.memory["embedding"])
     # Invalidate MemoryManagers
     managers = getattr(request.app.state, "memory_managers", None)
     if managers:
@@ -2875,18 +3223,13 @@ async def test_embedding(request: Request, body: TestEmbeddingBody):
     """用当前表单的 embedding 配置测试是否可用并返回耗时（不写入配置）。"""
     mem = request.app.state.config.get_memory_config()
     emb_default = mem.get("embedding", {})
-    # Resolve API key: form field → env（与 embedding.py 一致）
-    api_key = (body.api_key or "").strip() or (
-        os.environ.get("EMBEDDING_API_KEY", "").strip()
-        or os.environ.get("GOOGLE_API_KEY", "").strip()
-        or os.environ.get("GEMINI_API_KEY", "").strip()
-    )
+    target, api_key = _embedding_form_credentials(emb_default, body.provider, body.base_url, body.api_key)
+    model = body.model if "model" in body.model_fields_set else body.gemini_model
     config = {
-        "provider":    body.provider,
-        "model":       body.model or body.gemini_model,
-        "gemini_model": body.model or body.gemini_model,
-        "base_url":    body.base_url,
+        **target,
+        "model":       model or body.gemini_model,
         "api_key":     api_key,
+        "_key_resolved": True,
         "local_model": body.local_model,
         "offline":     body.offline,
         "device":      body.device or emb_default.get("device", "auto"),
@@ -3187,7 +3530,10 @@ async def get_profile_memory_config(profile_id: str):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
     with open(path, "r", encoding="utf-8") as f:
         card = json.load(f)
-    return {"memory_config": card.get("memory_config", {})}
+    memory = card.get("memory_config") or {}
+    if isinstance(memory.get("embedding"), dict):
+        memory["embedding"] = _public_embedding_fields(memory["embedding"])
+    return {"memory_config": memory}
 
 
 @router.put("/profiles/{profile_id}/memory_config")
@@ -3201,18 +3547,24 @@ async def save_profile_memory_config(profile_id: str, body: ProfileMemoryConfigB
     with open(path, "r", encoding="utf-8") as f:
         card = json.load(f)
 
-    if "memory_config" not in card:
-        card["memory_config"] = {}
-    mc = card["memory_config"]
-
-    # 仅更新非 None 字段
-    updates = body.model_dump(exclude_none=True)
-    # embedding_provider 映射到 nested dict
+    mc = card["memory_config"] = card.get("memory_config") or {}
+    updates = body.model_dump(exclude_unset=True)
     if "embedding_provider" in updates:
-        if "embedding" not in mc:
-            mc["embedding"] = {}
-        mc["embedding"]["provider"] = updates.pop("embedding_provider")
-    mc.update(updates)
+        provider = updates.pop("embedding_provider")
+        embedding = mc.get("embedding") or {}
+        if provider is None:
+            embedding.pop("provider", None)
+        else:
+            embedding["provider"] = provider
+        if embedding:
+            mc["embedding"] = embedding
+        else:
+            mc.pop("embedding", None)
+    for key, value in updates.items():
+        if value is None:
+            mc.pop(key, None)
+        else:
+            mc[key] = value
     if mc.get("max_history_turns") is not None:
         mc["max_history_turns"] = max(1, min(200, int(mc["max_history_turns"])))
     if mc.get("extraction_weight_threshold") is not None:

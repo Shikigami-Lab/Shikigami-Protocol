@@ -24,7 +24,9 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi import Request
@@ -327,10 +329,15 @@ def _save_profile(profile_id: str, profile: dict):
     os.makedirs(profile_dir, exist_ok=True)
 
     json_path = os.path.join(PROFILES_DIR, profile_id + ".json")
-    tmp_path = json_path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(profile, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, json_path)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=PROFILES_DIR, delete=False) as f:
+        tmp_path = Path(f.name)
+        try:
+            json.dump(profile, f, ensure_ascii=False, indent=2)
+            f.close()
+            os.replace(tmp_path, json_path)
+        finally:
+            f.close()
+            tmp_path.unlink(missing_ok=True)
     logger.info("[import/tavern] 写入 %s", json_path)
 
 

@@ -65,8 +65,8 @@ jobs:
         PYTHONDONTWRITEBYTECODE: "1"
       run: python -m unittest discover -s tests -v
 
-    - name: Test Harness Control Contract
-      run: node --test integrations/deepseek-harness/tests/controls.test.mjs integrations/deepseek-harness/tests/history.test.mjs tests/agent-ui.test.js tests/agent-workspace-ui.test.js
+    - name: Run Harness and UI Tests
+      run: node --test integrations/deepseek-harness/tests/controls.test.mjs integrations/deepseek-harness/tests/history.test.mjs tests/*.test.js
 
     - name: Run Python Linter (Ruff)
       shell: bash

@@ -818,18 +818,12 @@ class ReflectionEngine:
     def _get_preset(self):
         """Return (preset_dict, used_fallback, model_name). Returns (None, False, '') if unavailable."""
         cfg = self._app.state.config
-        sec = cfg.secondary_models.get("reflection", {})
-        if not sec.get("enabled", True):
-            return None, False, ""
-
         primary_name, fallback_name = cfg.get_reflection_model_names()
 
-        if primary_name and primary_name in cfg.llm_presets:
-            preset = cfg.llm_presets[primary_name]
+        if primary_name and (preset := cfg.llm_presets.get(primary_name)):
             return preset, False, preset.get("model", primary_name)
 
-        if fallback_name and fallback_name in cfg.llm_presets:
-            preset = cfg.llm_presets[fallback_name]
+        if fallback_name and (preset := cfg.llm_presets.get(fallback_name)):
             return preset, True, preset.get("model", fallback_name)
 
         return None, False, ""
@@ -838,9 +832,7 @@ class ReflectionEngine:
         """Return the fallback preset dict, or None."""
         cfg = self._app.state.config
         _, fallback_name = cfg.get_reflection_model_names()
-        if fallback_name and fallback_name in cfg.llm_presets:
-            return cfg.llm_presets[fallback_name]
-        return None
+        return (cfg.llm_presets.get(fallback_name) or None) if fallback_name else None
 
     def _load_emotion(self, profile_id: str) -> Optional[Dict]:
         """Load emotion state from disk (best-effort)."""

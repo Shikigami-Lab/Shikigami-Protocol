@@ -994,7 +994,11 @@ class AseEngine:
         from src.core.broadcast import broadcast
 
         app = self._app
-        vlm_cfg = app.state.config.get_vlm_config()
+        config = app.state.config
+        vlm_cfg = config.get_vlm_config()
+        preset = config.get_vlm_model_preset()
+        if not vlm_cfg.get("enabled") or not vlm_cfg.get("for_ase") or not preset or not preset.get("api_key"):
+            return ""
         wait_secs = int(vlm_cfg.get("ase_wait_seconds", 3))
 
         # Clear old screenshot first
@@ -1014,9 +1018,9 @@ class AseEngine:
 
         # Describe the screenshot
         try:
-            preset_name = vlm_cfg.get("model_preset", "Gemini-3.0")
-            preset = app.state.config.get_llm_preset(preset_name)
-            if not preset or not preset.get("api_key"):
+            current_vlm = app.state.config.get_vlm_config()
+            if (not current_vlm.get("enabled") or not current_vlm.get("for_ase")
+                    or app.state.config.get_vlm_model_preset() is not preset):
                 return ""
 
             from src.api.vlm import _call_vlm

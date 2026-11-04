@@ -68,10 +68,7 @@ async def describe_image(body: VlmRequest, request: Request):
     if preset_name == "__none__":
         logger.debug("[VLM] model_preset='__none__', returning empty description")
         return {"description": ""}
-    if preset_name == "__active__":
-        preset = config.get_active_llm_preset()
-    else:
-        preset = config.get_llm_preset(preset_name)
+    preset = config.get_vlm_model_preset()
     if not preset or not preset.get("api_key"):
         return JSONResponse(
             status_code=503,

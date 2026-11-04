@@ -54,6 +54,12 @@ const PRESET_TEMPLATES = {
   },
 };
 
+const AGENT_SETTINGS_DEFAULTS = {
+  workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
+  enabled: false, max_model_requests: null, timeout_seconds: null, autonomy_enabled: false,
+  autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '',
+};
+
 const SettingsMixin = {
   data() {
     return {
@@ -66,6 +72,8 @@ const SettingsMixin = {
       // ── Canvas state ──
       settingsOpen: false,
       activeTab: 'profiles',
+      settingsSectionTarget: '',
+      memorySettingsScope: 'global',
       settingsTabs: [
         { id: 'onboarding', labelZh: '新手引导', labelEn: 'First steps', shortEn: 'Guide', icon: '◇' },
         { id: 'profiles',   labelZh: '人格',  labelEn: 'Profiles',   shortEn: 'Profile', icon: '◆' },
@@ -86,6 +94,7 @@ const SettingsMixin = {
       // Persona canvas state
       personaEmotionState: null,   // { primary_emotion, energy_level, user_sentiment }
       personaAffinityState: null,  // { affinity, status, total_interactions }
+      personaStateLoadSequence: 0,
 
       // ── LLM Tab ──
       llmPresets: {},       // { presetName: {base_url, model, has_key, ...} }
@@ -198,7 +207,6 @@ const SettingsMixin = {
       profileSaving: false,
       profileAllSaving: false,
       _profileFormLoaded: false,
-      _profileSaveTimer: null,
       importingTavern: false,
       selectedProfileGroupId: '',  // 分组占位，后续可扩展
       profileSubTab: 'basic',
@@ -213,9 +221,12 @@ const SettingsMixin = {
       toolsSaving: {},          // { tool_id: bool }
       toolsLoadSequence: 0,
       profilesLoadSequence: 0,
-      agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null,
-        autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '' },
+      agentSettingsForm: { ...AGENT_SETTINGS_DEFAULTS },
+      agentSavedSettings: null,
       agentRuntime: null,
+      agentStatusBusy: false,
+      agentStatusError: '',
+      agentStatusSequence: 0,
       agentSettingsLoaded: false,
       agentSettingsBusy: false,
       agentSettingsError: '',
@@ -282,22 +293,27 @@ const SettingsMixin = {
       reflectionSegmentList: [],    // reflection-targeted segments (inject_into="reflection")
       customSegmentList: [],        // [{segment_id, label, content, priority, enabled, trigger_mode, trigger_param}]
       segmentSaving: false,
+      segmentFormProfileId: '',
+      segmentLoadSequence: 0,
       newCustomSeg: null,       // null = hidden; object = editing new custom seg
 
       // ── System Tab ──
       currentTheme: '',
       systemForm: { log_level: 'info', font_size: 14, bubble_width: 78 },
-      systemEnvForm: { proxy_enabled: false, proxy_url: '' },
+      systemEnvForm: { proxy_enabled: false, http_proxy: '', https_proxy: '' },
+      systemEnvLoaded: false,
       serverAddress: '',
       systemSaving: false,
       systemEnvSaving: false,
       uiPrefsShowLauncher: true,
       uiPrefsSaving: false,
       autoSaveState: null,   // null | 'saving' | 'saved'
+      settingsWrites: new Map(),
+      settingsWriteTimers: new Map(),
+      settingsReadRevisions: {},
+      profileWriteSnapshots: new Map(),
       _autoSaveStateTimer: null,
       _systemFormLoaded: false,
-      _systemSaveTimer: null,
-      _systemEnvSaveTimer: null,
 
       // ── Auto-updater ──────────────────────────────────────────────────────
       updateStatus: 'idle',   // idle | checking | available | not-available | downloading | ready | error
@@ -322,7 +338,8 @@ const SettingsMixin = {
       profileEngineGlobalDefaults: null,
       profileEnginesSaving: false,
       _profileEnginesFormLoaded: false,
-      _profileEnginesSaveTimer: null,
+      profileEnginesFormProfileId: '',
+      profileEnginesLoadSequence: 0,
 
       // ── Analysis Model (P4) ──
       topicDiscoveryAdvancedOpen: false,
@@ -335,12 +352,17 @@ const SettingsMixin = {
 
       // ── Memory Tab (P6) ──
       memoryActiveSubTab: 'facts',
+      memoryProfileId: '',
+      memoryRequestSequences: {},
+      memoryViewGeneration: 0,
       // ── Chat History Sub-tab ──
       chatHistory: [],
       chatHistoryTotal: 0,
       chatHistoryOffset: 0,
       chatHistoryLimit: 50,
       chatHistorySearch: '',
+      chatHistoryAppliedSearch: '',
+      chatHistoryPendingSearch: '',
       chatHistoryLoading: false,
       chatHistoryContextSince: 0,
       chatHistoryContextStart: 0,
@@ -394,38 +416,22 @@ const SettingsMixin = {
       embedTestResult: null,
       embedTestLoading: false,
       memoryProfileForm: {
-        enabled: null,
-        vector_enabled: null,
-        day_summary_enabled: null,
-        extraction_frequency: '',
-        extraction_weight_threshold: '',
-        max_facts_in_prompt: '',
-        extraction_llm_preset: '',
         extraction_prompt: '',
         day_summary_prompt: '',
-        recent_fact_quota: '',
-        semantic_fact_quota: '',
-        recent_days: '',
-        semantic_distance: '',
-        vector_dedup_distance_threshold: '',
-        group_chat_self_recap_max_groups: '',
-        group_chat_merge_into_history: true,
-        daily_forgetting_enabled: null,
-        daily_decay_factor: '',
-        daily_decay_min_weight: '',
-        daily_reinforcement_enabled: null,
-        daily_consolidation_enabled: null,
-        daily_consolidation_after_days: '',
-        daily_consolidation_weight_below: '',
-        daily_consolidation_batch_max: '',
       },
       memoryProfileSaving: false,
+      memoryTabProfileForm: {},
+      memoryTabFormProfileId: '',
+      memoryTabProfileSaving: false,
+      memoryTabProfileLoaded: false,
+      memoryTabProfileLoadSequence: 0,
+      personaMemoryLoadSequence: 0,
       memGlobalSaveState: null,
       memProfileSaveState: null,
       _memGlobalFormLoaded: false,
-      _memGlobalSaveTimer: null,
+      _memGlobalSaveStateTimer: null,
       _memProfileFormLoaded: false,
-      _memProfileSaveTimer: null,
+      _memProfileSaveStateTimer: null,
       memGlobalAdvOpen: { ltm: false, vector: false, daySummary: false, decay: false, consolidation: false },
       memProfileAdvOpen: { extract: false, vector: false, forgetting: false },
       memoryFormProfileId: '',      // 记忆设置表单所属人格，load 完成后设置，save 时用此 id 避免盖错人
@@ -436,6 +442,7 @@ const SettingsMixin = {
       memoryVectors: [],
       memoryVectorText: '',
       memorySummaries: [],
+      memorySummaryDays: 30,
       diaryStartDate: (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(),
       diaryDays: 1,
       diaryForce: false,
@@ -522,7 +529,6 @@ const SettingsMixin = {
       reflectionSaving: false,
       vlmSaving: false,
       _reflectionFormLoaded: false,
-      _reflectionSaveTimer: null,
       reflectionProfileForm: {
         custom_prompt: '',
         source: '',
@@ -532,7 +538,7 @@ const SettingsMixin = {
       },
       reflectionProfileSaving: false,
       _reflectionProfileFormLoaded: false,
-      _reflectionProfileSaveTimer: null,
+      reflectionProfileLoadSequence: 0,
       reflectionFormProfileId: '',
       // 人格演化
       personaEvolutionForm: {
@@ -566,6 +572,10 @@ const SettingsMixin = {
         || this.presetForm.base_url !== (saved.base_url || '')
         || !!this.presetForm.api_key.trim();
     },
+    llmPresetTestDirty() {
+      return this.llmModelConnectionDirty
+        || this.presetForm.model !== (this.llmPresets[this.selectedPresetName]?.model || '');
+    },
     filteredLLMModels() {
       const query = this.llmModelSearch.trim().toLowerCase();
       return query
@@ -589,10 +599,10 @@ const SettingsMixin = {
     },
     memoryBudgetBreakdown() {
       void this.locale; // 切换语言时重算（t() 依赖 locale）
-      const _n = (p, g, def) => { const v = parseInt(p); return !isNaN(v) ? v : (parseInt(g) || def); };
-      const max     = _n(this.memoryProfileForm.max_facts_in_prompt, this.memoryGlobalForm.max_facts_in_prompt, 8);
-      const recent  = _n(this.memoryProfileForm.recent_fact_quota,   this.memoryGlobalForm.recent_fact_quota,   3);
-      const semantic= _n(this.memoryProfileForm.semantic_fact_quota, this.memoryGlobalForm.semantic_fact_quota, 2);
+      const number = (p, g, fallback) => [p, g].map(v => parseInt(v, 10)).find(Number.isFinite) ?? fallback;
+      const max = number(this.memoryTabProfileForm.max_facts_in_prompt, this.memoryGlobalForm.max_facts_in_prompt, 8);
+      const recent = number(this.memoryTabProfileForm.recent_fact_quota, this.memoryGlobalForm.recent_fact_quota, 3);
+      const semantic = number(this.memoryTabProfileForm.semantic_fact_quota, this.memoryGlobalForm.semantic_fact_quota, 2);
       const slot3Cap= Math.min(Math.max(0, max - recent), semantic);
       return this.t('memoryBudgetBreakdownFmt')
         .replace('{recent}', String(recent))
@@ -656,24 +666,16 @@ const SettingsMixin = {
 
     // 人格记忆「当前生效」开关（用于总开关关闭时禁用子项）
     memoryProfileEffectiveEnabled() {
-      if (!this.selectedProfileId) return this.memoryGlobalForm.enabled;
-      const v = this.memoryProfileForm.enabled;
-      return v === null || v === undefined ? this.memoryGlobalForm.enabled : !!v;
+      return this.memoryTabProfileForm.enabled ?? this.memoryGlobalForm.enabled;
     },
     memoryProfileEffectiveVectorEnabled() {
-      if (!this.selectedProfileId) return this.memoryGlobalForm.vector_enabled;
-      const v = this.memoryProfileForm.vector_enabled;
-      return v === null || v === undefined ? this.memoryGlobalForm.vector_enabled : !!v;
+      return this.memoryTabProfileForm.vector_enabled ?? this.memoryGlobalForm.vector_enabled;
     },
     memoryProfileEffectiveDaySummaryEnabled() {
-      if (!this.selectedProfileId) return this.memoryGlobalForm.day_summary_enabled;
-      const v = this.memoryProfileForm.day_summary_enabled;
-      return v === null || v === undefined ? this.memoryGlobalForm.day_summary_enabled : !!v;
+      return this.memoryTabProfileForm.day_summary_enabled ?? this.memoryGlobalForm.day_summary_enabled;
     },
     memoryProfileEffectiveForgettingEnabled() {
-      if (!this.selectedProfileId) return this.memoryGlobalForm.daily_forgetting_enabled;
-      const v = this.memoryProfileForm.daily_forgetting_enabled;
-      return v === null || v === undefined ? this.memoryGlobalForm.daily_forgetting_enabled : !!v;
+      return this.memoryTabProfileForm.daily_forgetting_enabled ?? this.memoryGlobalForm.daily_forgetting_enabled;
     },
 
     /** 入门页教程：与 /api/setup/status 的 bundles 一致 */
@@ -772,34 +774,33 @@ const SettingsMixin = {
     },
     memoryGlobalForm: {
       deep: true,
+      flush: 'sync',
       handler() {
         if (!this._memGlobalFormLoaded) return;
-        clearTimeout(this._memGlobalSaveTimer);
-        this._memGlobalSaveTimer = setTimeout(() => this.saveMemoryGlobalConfig(true), 800);
+        this.saveMemoryGlobalConfig(true, true);
       },
     },
     memoryProfileForm: {
       deep: true,
+      flush: 'sync',
       handler() {
         if (!this._memProfileFormLoaded) return;
-        clearTimeout(this._memProfileSaveTimer);
-        this._memProfileSaveTimer = setTimeout(() => this.saveMemoryProfileConfig(true), 800);
+        this.saveMemoryProfileConfig(true, true);
       },
     },
-    systemForm: {
+    memoryTabProfileForm: {
       deep: true,
+      flush: 'sync',
       handler() {
-        if (!this._systemFormLoaded) return;
-        clearTimeout(this._systemSaveTimer);
-        this._systemSaveTimer = setTimeout(() => this.saveSystemConfig(true), 800);
+        if (!this.memoryTabProfileLoaded) return;
+        this.saveMemoryTabProfileConfig(true, true);
       },
     },
-    systemEnvForm: {
-      deep: true,
+    'systemForm.log_level': {
+      flush: 'sync',
       handler() {
         if (!this._systemFormLoaded) return;
-        clearTimeout(this._systemEnvSaveTimer);
-        this._systemEnvSaveTimer = setTimeout(() => this.saveSystemEnv(true), 800);
+        this.saveSystemConfig(true, true);
       },
     },
     enginesForm: {
@@ -830,10 +831,10 @@ const SettingsMixin = {
     },
     reflectionForm: {
       deep: true,
+      flush: 'sync',
       handler() {
         if (!this._reflectionFormLoaded) return;
-        clearTimeout(this._reflectionSaveTimer);
-        this._reflectionSaveTimer = setTimeout(() => this.saveReflectionConfig(true), 800);
+        this.saveReflectionConfig(true, true);
       },
     },
     userPortraitForm: {
@@ -857,18 +858,18 @@ const SettingsMixin = {
     },
     profileForm: {
       deep: true,
+      flush: 'sync',
       handler() {
         if (!this._profileFormLoaded || !this.profileForm.profile_id) return;
-        clearTimeout(this._profileSaveTimer);
-        this._profileSaveTimer = setTimeout(() => this.saveProfile({ skipToast: true }), 800);
+        this.saveProfile({ skipToast: true, debounce: true });
       },
     },
     profileEnginesForm: {
       deep: true,
+      flush: 'sync',
       handler() {
-        if (!this._profileEnginesFormLoaded || !this.profileForm.profile_id) return;
-        clearTimeout(this._profileEnginesSaveTimer);
-        this._profileEnginesSaveTimer = setTimeout(() => this.saveProfileEngineConfig({ skipToast: true }), 800);
+        if (!this._profileEnginesFormLoaded) return;
+        this.saveProfileEngineConfig({ skipToast: true, debounce: true });
       },
     },
     specialDates: {
@@ -881,18 +882,18 @@ const SettingsMixin = {
     },
     profilePromptForm: {
       deep: true,
+      flush: 'sync',
       handler() {
         if (!this._profileFormLoaded || !this.profileForm.profile_id) return;
-        clearTimeout(this._profileSaveTimer);
-        this._profileSaveTimer = setTimeout(() => this.saveProfile({ skipToast: true }), 800);
+        this.saveProfile({ skipToast: true, debounce: true });
       },
     },
     reflectionProfileForm: {
       deep: true,
+      flush: 'sync',
       handler() {
         if (!this._reflectionProfileFormLoaded || !this.reflectionFormProfileId) return;
-        clearTimeout(this._reflectionProfileSaveTimer);
-        this._reflectionProfileSaveTimer = setTimeout(() => this.saveReflectionProfileConfig({ skipToast: true }), 800);
+        this.saveReflectionProfileConfig({ skipToast: true, debounce: true });
       },
     },
     personaEvolutionForm: {
@@ -905,18 +906,16 @@ const SettingsMixin = {
     },
     segmentList: {
       deep: true,
+      flush: 'sync',
       handler() {
-        if (!this._profileFormLoaded || !this.profileForm.profile_id) return;
-        clearTimeout(this._segmentSaveTimer);
-        this._segmentSaveTimer = setTimeout(() => this.saveSegmentConfig({ skipToast: true }), 800);
+        this.saveSegmentConfig({ skipToast: true, debounce: true });
       },
     },
     customSegmentList: {
       deep: true,
+      flush: 'sync',
       handler() {
-        if (!this._profileFormLoaded || !this.profileForm.profile_id) return;
-        clearTimeout(this._segmentSaveTimer);
-        this._segmentSaveTimer = setTimeout(() => this.saveSegmentConfig({ skipToast: true }), 800);
+        this.saveSegmentConfig({ skipToast: true, debounce: true });
       },
     },
     embeddingForm: {
@@ -928,6 +927,7 @@ const SettingsMixin = {
       },
     },
     activeTab(newTab, oldTab) {
+      this.confirmingAction = null;
       if (oldTab === 'onboarding' && this.setupDownloadPollId) {
         clearInterval(this.setupDownloadPollId);
         this.setupDownloadPollId = null;
@@ -950,17 +950,10 @@ const SettingsMixin = {
         this.loadAgentSettings();
       }
       if (newTab === 'memory' && this.settingsOpen) {
-        this.memoryPanelLoading = true;
-        (async () => {
-          try {
-            if (!this.profiles.length) await this.loadProfiles();
-            if (this.selectedProfileId) await this.loadMemoryData(this.selectedProfileId);
-          } finally {
-            this.memoryPanelLoading = false;
-          }
-        })();
+        this.openMemoryView();
       }
       if (newTab === 'profiles' && this.settingsOpen) {
+        if (this.profileSubTab === 'tools') this.loadAgentSettings(false, false);
         this._loadPersonaState();
       }
     },
@@ -968,8 +961,9 @@ const SettingsMixin = {
       const isMemoryOpen = this.memoryPanelOpen || (this.settingsOpen && this.activeTab === 'memory');
       if (tab === 'settings' && isMemoryOpen) {
         this.loadMemoryGlobalConfig();
-        if (!this.profiles.length) this.loadProfiles();
-        if (this.selectedProfileId) this.loadMemoryProfileConfig(this.selectedProfileId);
+        this.openMemoryView();
+      } else if (tab === 'content' && isMemoryOpen) {
+        this.openMemoryView();
       }
     },
     selectedProfileId(id) {
@@ -990,6 +984,7 @@ const SettingsMixin = {
       }
       if (newTab === 'tools' && this.activeTab === 'profiles' && this.settingsOpen && this.selectedProfileId) {
         this.loadToolsConfig(this.selectedProfileId);
+        this.loadAgentSettings(false, false);
       }
     },
   },
@@ -1071,9 +1066,27 @@ const SettingsMixin = {
 
     /* ─────────────── Drawer ─────────────── */
 
+    openSettingsSection(tab, target, subtab) {
+      if (tab === 'behavior' && subtab) this.behaviorSubTab = subtab;
+      if (tab === 'profiles' && subtab) this.profileSubTab = subtab;
+      if (tab === 'memory' && subtab) {
+        this.memoryPanelTab = subtab;
+        this.memorySettingsScope = 'persona';
+      }
+      this.settingsSectionTarget = target;
+      this.activeTab = tab;
+      this.$nextTick(() => {
+        const section = document.getElementById(target);
+        section?.scrollIntoView({ block: 'start' });
+        section?.focus({ preventScroll: true });
+      });
+    },
+
     openSettings() {
       this.settingsOpen = true;
-      if (this.activeTab === 'llm') this.loadAgentSettings(false, false);
+      if (this.activeTab === 'llm' || (this.activeTab === 'profiles' && this.profileSubTab === 'tools')) {
+        this.loadAgentSettings(false, false);
+      }
       if (this.activeTab === 'tools') {
         this.loadToolsConfig();
         this.loadAgentSettings();
@@ -1088,6 +1101,7 @@ const SettingsMixin = {
       this.loadTTSConfig();
       this.loadProfiles().then(() => {
         if (this.activeTab === 'profiles') this._loadPersonaState();
+        if (this.activeTab === 'memory') this.openMemoryView();
       });
       this.loadSystemConfig();
       this.loadEnginesConfig();  // 辅助分析模型等仍从全局 engines 接口取
@@ -1262,10 +1276,13 @@ const SettingsMixin = {
       if (!this._enginesFormLoaded) this.loadEnginesConfig();
       const id = this.selectedProfileId;
       if (!id) return;
+      const sequence = ++this.personaStateLoadSequence;
+      this.personaEmotionState = this.personaAffinityState = null;
       try {
         const res = await fetch(getBaseUrl() + `/sessions/${id}/status`);
         if (!res.ok) return;
         const data = await res.json();
+        if (id !== this.selectedProfileId || sequence !== this.personaStateLoadSequence) return;
         this.personaEmotionState = data.emotion_state || null;
         this.personaAffinityState = data.affinity_state || null;
       } catch (_) {}
@@ -1299,10 +1316,46 @@ const SettingsMixin = {
 
     /* ─────────────── LLM Presets ─────────────── */
 
+    async _readSettingsResult(response, requireOk = false) {
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || (requireOk && data.ok !== true)) {
+        const detail = [data?.error, data?.detail].find(value => typeof value === 'string' && value);
+        throw new Error(detail || (response.ok ? this.t('errSave') : `HTTP ${response.status}`));
+      }
+      return data;
+    },
+
+    isMissingModelPreset(value) {
+      return !!value && value !== '__none__' && value !== '__active__' && !Object.hasOwn(this.llmPresets, value);
+    },
+
+    modelPresetDependencies(name) {
+      if (!name || name === '__none__' || name === '__active__') return [];
+      const reflection = this.reflectionForm;
+      const roles = [];
+      if (this.agentSettingsForm.model_preset === name) roles.push(this.t('agentModel'));
+      if (this.analysisModelPreset === name) roles.push(this.t('llmAnalysisSectionTitle'));
+      if (reflection.reflection_primary_preset === name) {
+        roles.push(`${this.t('secReflectionModel')} · ${this.t('lblPrimaryModel')}`);
+      }
+      if (reflection.reflection_fallback_preset === name) {
+        roles.push(`${this.t('secReflectionModel')} · ${this.t('lblFallbackModel')}`);
+      }
+      if (reflection.vlm_model_preset === name) roles.push(this.t('lblVlmModel'));
+      for (const profile of this.profiles) {
+        const openMemoryForm = profile.profile_id === this.memoryTabFormProfileId
+          ? this.memoryTabProfileForm : null;
+        if (profile.memory_config?.extraction_llm_preset === name || openMemoryForm?.extraction_llm_preset === name) {
+          roles.push(`${this.t('lblExtractionModel')} · ${profile.display_name || profile.profile_id}`);
+        }
+      }
+      return roles;
+    },
+
     async loadLLMPresets() {
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsLlmPresets());
-        const data = await res.json();
+        const data = await this._readSettingsResult(res);
         this.llmPresets = data.presets || {};
         this.llmActivePreset = data.active || '';
         // Auto-select: active preset or first in list
@@ -1310,13 +1363,16 @@ const SettingsMixin = {
         if (autoSelect && (!this.selectedPresetName || !this.llmPresets[this.selectedPresetName])) {
           this.selectPreset(autoSelect);
         }
+        return true;
       } catch (e) {
         console.error('[settings] loadLLMPresets:', e);
+        return false;
       }
     },
 
     selectPreset(name) {
       this.selectedPresetName = name;
+      this.llmTestResult = null;
       this.clearLLMModels();
       const p = this.llmPresets[name];
       if (!p) return;
@@ -1454,10 +1510,12 @@ const SettingsMixin = {
 
     async saveLLMPreset() {
       if (this.presetSaving || !this.selectedPresetName) return;
+      const presetName = this.selectedPresetName;
+      const savedPresetName = this.presetForm.name || presetName;
       this.presetSaving = true;
       try {
         const body = {
-          name: this.presetForm.name || this.selectedPresetName,
+          name: savedPresetName,
           type: this.presetForm.type,
           base_url: this.presetForm.base_url,
           model: this.presetForm.model,
@@ -1468,38 +1526,34 @@ const SettingsMixin = {
           max_tokens: this.presetForm.max_tokens_enabled ? (parseInt(this.presetForm.max_tokens, 10) || null) : null,
           unsupported_params: this._collectUnsupported(this.presetForm),
         };
-        // extra_body: parse JSON if non-empty, skip if blank or invalid
-        const rawEB = (this.presetForm.extra_body_raw || '').trim();
-        if (rawEB) {
-          try {
-            body.extra_body = JSON.parse(rawEB);
-          } catch {
-            this.showToast(this.t('toastExtraBodyInvalid'), 'error');
-            this.presetSaving = false;
-            return;
-          }
+        // The editor owns this field. A blank input explicitly removes it.
+        const rawExtraBody = (this.presetForm.extra_body_raw || '').trim();
+        body.extra_body = rawExtraBody ? JSON.parse(rawExtraBody) : null;
+        if (body.extra_body !== null && (typeof body.extra_body !== 'object' || Array.isArray(body.extra_body))) {
+          throw new Error(this.t('toastExtraBodyInvalid'));
         }
         // Only send api_key if the user typed something
         if (this.presetForm.api_key.trim()) {
           body.api_key = this.presetForm.api_key.trim();
         }
         const res = await fetch(
-          getBaseUrl() + API_PATHS.settingsLlmPreset(this.selectedPresetName),
+          getBaseUrl() + API_PATHS.settingsLlmPreset(presetName),
           { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
         );
-        const data = await res.json();
-        if (data.ok) {
-          this.showToast(this.t('toastLLMSaved'), 'success');
-          const savedPresetName = body.name;
-          this.selectedPresetName = savedPresetName;
-          await this.loadLLMPresets();
-          this.selectPreset(savedPresetName);
-          this.loadSetupGuide();
-        } else {
-          this.showToast(`保存失败: ${data.error || data.detail || 'unknown'}`, 'error');
-        }
+        await this._readSettingsResult(res, true);
       } catch (e) {
-        this.showToast(`保存失败: ${e.message}`, 'error');
+        this.showToast(`${this.t('errSave')}: ${e.message}`, 'error');
+        this.presetSaving = false;
+        return;
+      }
+      this.showToast(this.t('toastLLMSaved'), 'success');
+      this.llmTestResult = null;
+      if (this.selectedPresetName === presetName) this.selectedPresetName = savedPresetName;
+      try {
+        if (await this.loadLLMPresets() && this.selectedPresetName === savedPresetName) {
+          this.selectPreset(savedPresetName);
+        }
+        await this.loadSetupGuide();
       } finally {
         this.presetSaving = false;
       }
@@ -1530,16 +1584,12 @@ const SettingsMixin = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
-        if (data.ok) {
-          await this.loadLLMPresets();
-          this.selectPreset(name);
-        } else {
-          this.showToast(`创建失败: ${data.error || 'unknown'}`, 'error');
-        }
+        await this._readSettingsResult(res, true);
       } catch (e) {
         this.showToast(`创建失败: ${e.message}`, 'error');
+        return;
       }
+      if (await this.loadLLMPresets()) this.selectPreset(name);
     },
 
     async deleteLLMPreset() {
@@ -1548,50 +1598,58 @@ const SettingsMixin = {
         this.showToast(this.t('toastCannotDeleteActive'), 'error');
         return;
       }
+      const roles = this.modelPresetDependencies(this.selectedPresetName);
+      const template = this.t('llmPresetDependencyWarning');
+      const warning = template.includes('{roles}') ? template.replace('{roles}', () => roles.join(', ')) : roles.join(', ');
       this.confirmingAction = {
         key: 'deleteLLMPreset',
-        label: `删除预设 "${this.selectedPresetName}"`,
+        label: `${this.t('btnDeletePreset')} "${this.selectedPresetName}"${roles.length ? ` · ${warning}` : ''}`,
         data: { presetName: this.selectedPresetName },
       };
     },
 
     async _doDeleteLLMPreset(presetName) {
       try {
-        await fetch(
+        const res = await fetch(
           getBaseUrl() + API_PATHS.settingsLlmPreset(presetName),
           { method: 'DELETE' }
         );
-        const names = Object.keys(this.llmPresets).filter(n => n !== presetName);
-        this.selectedPresetName = '';
-        await this.loadLLMPresets();
-        if (names.length) this.selectPreset(names[0]);
+        await this._readSettingsResult(res, true);
       } catch (e) {
         this.showToast(`删除失败: ${e.message}`, 'error');
+        return;
       }
+      delete this.llmPresets[presetName];
+      if (this.selectedPresetName === presetName) {
+        this.selectPreset(this.llmActivePreset || Object.keys(this.llmPresets)[0] || '');
+      }
+      await this.loadLLMPresets();
     },
 
     async setActiveLLMPreset() {
-      if (!this.selectedPresetName) return;
+      const name = this.selectedPresetName;
+      if (!name) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsLlmActive(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: this.selectedPresetName }),
+          body: JSON.stringify({ name }),
         });
-        const data = await res.json();
-        if (data.ok) {
-          this.llmActivePreset = this.selectedPresetName;
-          this.showToast(`✓ 已激活 ${this.selectedPresetName}`, 'success');
-          await this.loadLLMPresets();
-        }
+        await this._readSettingsResult(res, true);
       } catch (e) {
         this.showToast(`激活失败: ${e.message}`, 'error');
+        return;
       }
+      this.llmActivePreset = name;
+      this.showToast(`✓ 已激活 ${name}`, 'success');
+      await this.loadLLMPresets();
     },
 
     async testLLMPreset() {
       const name = this.selectedPresetName;
-      if (!name || this.llmTestLoading) return;
+      if (!name || this.llmTestLoading || this.presetSaving || this.llmPresetTestDirty) return;
+      const form = this.presetForm;
+      const isCurrent = () => this.presetForm === form && !this.llmPresetTestDirty;
       this.llmTestLoading = true;
       this.llmTestResult = null;
       try {
@@ -1599,10 +1657,10 @@ const SettingsMixin = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
-        const data = await res.json();
-        this.llmTestResult = { presetName: name, ...data };
+        const data = await this._readSettingsResult(res, true);
+        if (isCurrent()) this.llmTestResult = { ...data, presetName: name };
       } catch (e) {
-        this.llmTestResult = { presetName: name, ok: false, error: e.message };
+        if (isCurrent()) this.llmTestResult = { presetName: name, ok: false, error: e.message };
       } finally {
         this.llmTestLoading = false;
       }
@@ -1769,6 +1827,7 @@ const SettingsMixin = {
     },
 
     async saveTTSConfig(silent = false) {
+      clearTimeout(this._ttsSavedStateTimer);
       this.ttsSaveState = 'saving';
       try {
         const body = this.buildTtsSavePayload();
@@ -1777,27 +1836,30 @@ const SettingsMixin = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
-        if (data.ok) {
-          this.ttsSaveState = 'saved';
-          setTimeout(() => { this.ttsSaveState = null; }, 2000);
-          if (!silent) this.showToast(this.t('toastTtsSaved'), 'success');
-          // 重连 TTS WebSocket，让新参数（语速等）立即生效
-          if (this.ttsEnabled) {
-            this.disconnectTTS();
-            setTimeout(() => this.connectTTS(), 150);
-          }
-        } else {
-          this.ttsSaveState = null;
-          if (!silent) this.showToast(`TTS 保存失败: ${data.error || ''}`, 'error');
-        }
+        await this._readSettingsResult(res, true);
       } catch (e) {
-        this.ttsSaveState = null;
-        if (!silent) this.showToast(`TTS 保存失败: ${e.message}`, 'error');
+        this.ttsSaveState = 'error';
+        this.showToast(`TTS · ${this.t('errSave')}: ${e.message}`, 'error');
+        return;
+      }
+      this.ttsSaveState = 'saved';
+      this._ttsSavedStateTimer = setTimeout(() => {
+        if (this.ttsSaveState === 'saved') this.ttsSaveState = null;
+      }, 2000);
+      if (!silent) this.showToast(this.t('toastTtsSaved'), 'success');
+      if (this.ttsEnabled) {
+        try {
+          this.disconnectTTS();
+          setTimeout(() => this.connectTTS(), 150);
+        } catch (e) {
+          console.warn('[settings] TTS reconnect:', e);
+        }
       }
     },
 
     async testTTSVoice() {
+      if (this.ttsTestState === 'loading') return;
+      clearTimeout(this._ttsTestStateTimer);
       this.ttsTestState = 'loading';
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsTtsTest(), {
@@ -1805,8 +1867,8 @@ const SettingsMixin = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.buildTtsSavePayload()),
         });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || 'synthesis failed');
+        const data = await this._readSettingsResult(res, true);
+        if (!data.mime || !data.audio) throw new Error(this.t('ttsTestFail'));
         const audio = new Audio(`data:${data.mime};base64,${data.audio}`);
         await audio.play();
         this.ttsTestState = 'ok';
@@ -1816,7 +1878,7 @@ const SettingsMixin = {
         const msg = (e && e.message) ? String(e.message) : String(e);
         if (this.showToast) this.showToast(msg, 'error');
       }
-      setTimeout(() => { this.ttsTestState = null; }, 3000);
+      this._ttsTestStateTimer = setTimeout(() => { this.ttsTestState = null; }, 3000);
     },
 
     /* ─────────────── Profiles ─────────────── */
@@ -1970,8 +2032,11 @@ const SettingsMixin = {
       }
       this._profileFormLoaded = false;
       this.selectedProfileId = profileId;
-      const p = this.profiles.find(x => x.profile_id === profileId);
-      if (!p) return;
+      const stored = this.profiles.find(x => x.profile_id === profileId);
+      if (!stored) return;
+      const snapshot = this.profileWriteSnapshots.get(profileId);
+      const pending = snapshot ? JSON.parse(snapshot) : null;
+      const p = pending ? { ...stored, ...pending } : stored;
       this.profileForm = {
         profile_id: p.profile_id,
         display_name: p.display_name || '',
@@ -2018,7 +2083,7 @@ const SettingsMixin = {
       this.loadUserPortrait(profileId);
       this.loadMemoryProfileConfig(profileId);
       // Populate prompt override form
-      const ec = p.emotion_config || {};
+      const ec = pending || p.emotion_config || {};
       const standardEmotionKeys = (this.emotionStandardKeys && this.emotionStandardKeys.length)
         ? this.emotionStandardKeys
         : EMOTION_KEYS_FALLBACK;
@@ -2050,7 +2115,7 @@ const SettingsMixin = {
       for (const k of ['-100', '0', '200', '400', '600', '800', '1000', '1200']) {
         this.profilePromptForm.affinity_prompts[k] = aff[k] || '';
       }
-      this.$nextTick(() => { this._profileFormLoaded = true; });
+      this._profileFormLoaded = true;
     },
 
     async loadLorebooksList() {
@@ -2331,11 +2396,44 @@ const SettingsMixin = {
       input.click();
     },
 
-    async saveProfile(opts = {}) {
+    saveProfile(opts = {}) {
       const profileId = this.profileForm?.profile_id;
-      if (this.profileSaving || !profileId) return;
-      this.profileSaving = true;
+      if (!profileId || profileId !== this.selectedProfileId) return;
       const skipToast = opts.skipToast === true;
+      const body = JSON.stringify({
+        display_name: this.profileForm.display_name,
+        base_prompt: this.profileForm.base_prompt,
+        style_constraint: this.profileForm.style_constraint,
+        avatar: this.profileForm.avatar,
+        gpt_sovits_ref_audio_path: this.profileForm.gpt_sovits_ref_audio_path,
+        gpt_sovits_ref_text: this.profileForm.gpt_sovits_ref_text,
+        qwen3_tts_ref_audio_path: this.profileForm.qwen3_tts_ref_audio_path,
+        qwen3_tts_ref_text: this.profileForm.qwen3_tts_ref_text,
+        qwen3_tts_instruct: this.profileForm.qwen3_tts_instruct,
+        qwen3_tts_voice_description: this.profileForm.qwen3_tts_voice_description,
+        qwen3_tts_speaker: this.profileForm.qwen3_tts_speaker,
+        kokoro_voice: this.profileForm.kokoro_voice,
+        kokoro_lang: this.profileForm.kokoro_lang,
+        emotion_prompts: this._buildEmotionPromptsObj(),
+        emotion_zh_descriptions: this._buildEmotionZhDescriptions(),
+        energy_prompts: this._buildPromptDict(this.profilePromptForm.energy_prompts,
+          ['0', '10', '30', '60', '80']),
+        affinity_prompts: this._buildPromptDict(this.profilePromptForm.affinity_prompts,
+          ['-100', '0', '200', '400', '600', '800', '1000', '1200']),
+        lorebook_ref: this.profileForm.lorebook_ref != null ? this.profileForm.lorebook_ref : '',
+        user_persona: {
+          name:         (this.profileForm.user_persona.name         || '').trim(),
+          introduction: (this.profileForm.user_persona.introduction || '').trim(),
+        },
+        anti_assistant_mode: !!this.profileForm.anti_assistant_mode,
+      });
+      this.profileWriteSnapshots.set(profileId, body);
+      return this.queueSettingsWrite(`profile:${profileId}`,
+        () => this.writeProfileSnapshot(profileId, body, skipToast), opts.debounce);
+    },
+
+    async writeProfileSnapshot(profileId, body, skipToast) {
+      this.profileSaving = true;
       if (skipToast) this.setAutoSaveState('saving');
       try {
         const res = await fetch(
@@ -2343,53 +2441,17 @@ const SettingsMixin = {
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              display_name: this.profileForm.display_name,
-              base_prompt: this.profileForm.base_prompt,
-              style_constraint: this.profileForm.style_constraint,
-              avatar: this.profileForm.avatar,
-              gpt_sovits_ref_audio_path: this.profileForm.gpt_sovits_ref_audio_path,
-              gpt_sovits_ref_text: this.profileForm.gpt_sovits_ref_text,
-              qwen3_tts_ref_audio_path: this.profileForm.qwen3_tts_ref_audio_path,
-              qwen3_tts_ref_text: this.profileForm.qwen3_tts_ref_text,
-              qwen3_tts_instruct: this.profileForm.qwen3_tts_instruct,
-              qwen3_tts_voice_description: this.profileForm.qwen3_tts_voice_description,
-              qwen3_tts_speaker: this.profileForm.qwen3_tts_speaker,
-              kokoro_voice: this.profileForm.kokoro_voice,
-              kokoro_lang: this.profileForm.kokoro_lang,
-              emotion_prompts: this._buildEmotionPromptsObj(),
-              emotion_zh_descriptions: this._buildEmotionZhDescriptions(),
-              energy_prompts: this._buildPromptDict(this.profilePromptForm.energy_prompts,
-                ['0', '10', '30', '60', '80']),
-              affinity_prompts: this._buildPromptDict(this.profilePromptForm.affinity_prompts,
-                ['-100', '0', '200', '400', '600', '800', '1000', '1200']),
-              lorebook_ref: this.profileForm.lorebook_ref != null ? this.profileForm.lorebook_ref : '',
-              user_persona: {
-                name:         (this.profileForm.user_persona.name         || '').trim(),
-                introduction: (this.profileForm.user_persona.introduction || '').trim(),
-              },
-              anti_assistant_mode: !!this.profileForm.anti_assistant_mode,
-            }),
+            body,
           }
         );
         const data = await res.json();
-        if (data.ok) {
+        if (res.ok && data.ok) {
           if (skipToast) this.setAutoSaveState('saved'); else this.showToast(this.t('toastProfileSaved'), 'success');
           await this.loadProfiles();
-          await this.loadSessions(); // refresh sidebar display names
-          if (this.memoryFormProfileId === profileId) {
-            const memCfg = {};
-            if (this.memoryProfileForm.extraction_prompt !== undefined)
-              memCfg.extraction_prompt = this.memoryProfileForm.extraction_prompt;
-            if (this.memoryProfileForm.day_summary_prompt !== undefined)
-              memCfg.day_summary_prompt = this.memoryProfileForm.day_summary_prompt;
-            if (Object.keys(memCfg).length) {
-              fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId), {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(memCfg),
-              }).catch(() => {});
-            }
+          if (this.profileWriteSnapshots.get(profileId) === body) {
+            this.profileWriteSnapshots.delete(profileId);
           }
+          await this.loadSessions(); // refresh sidebar display names
         } else {
           if (skipToast) this.setAutoSaveState(null);
           if (!skipToast) this.showToast(`保存失败: ${data.error || ''}`, 'error');
@@ -2404,14 +2466,19 @@ const SettingsMixin = {
 
     async loadProfileEngineConfig(profileId) {
       if (!profileId) return;
+      const sequence = ++this.profileEnginesLoadSequence;
+      const current = () => sequence === this.profileEnginesLoadSequence && profileId === this.selectedProfileId;
       this._profileEnginesFormLoaded = false;
+      this.profileEnginesFormProfileId = '';
+      this.profileEngineGlobalDefaults = null;
       try {
+        const pending = this.flushSettingsWrite(`profile-engine:${profileId}`);
+        if (pending) await pending;
+        if (!current()) return;
         const res = await fetch(getBaseUrl() + API_PATHS.profileEngineConfig(profileId));
-        if (!res.ok) {
-          this.profileEngineGlobalDefaults = null;
-          return;
-        }
+        if (!res.ok) return;
         const data = await res.json();
+        if (!current()) return;
         const _v = (v) => (v != null && v !== '') ? v : '';
         this.profileEnginesForm = {
           emotion_enabled:       data.emotion_enabled    ?? null,
@@ -2428,11 +2495,11 @@ const SettingsMixin = {
         this.profileEngineGlobalDefaults = data.global_defaults && typeof data.global_defaults === 'object'
           ? { ...data.global_defaults }
           : null;
+        this.profileEnginesFormProfileId = profileId;
+        this._profileEnginesFormLoaded = true;
       } catch (e) {
         console.error('[settings] loadProfileEngineConfig:', e);
-        this.profileEngineGlobalDefaults = null;
       }
-      this.$nextTick(() => { this._profileEnginesFormLoaded = true; });
     },
 
     /** 人格「引擎配置」子页：展示全局默认（继承时实际生效值） */
@@ -2548,38 +2615,23 @@ const SettingsMixin = {
       }
     },
 
-    async saveProfileEngineConfig(opts = {}) {
-      const profileId = this.profileForm?.profile_id;
-      if (this.profileEnginesSaving || !profileId) return;
-      this.profileEnginesSaving = true;
+    saveProfileEngineConfig(opts = {}) {
+      const profileId = this.profileEnginesFormProfileId;
+      if (!profileId || profileId !== this.selectedProfileId) return;
       const skipToast = opts.skipToast === true;
+      const body = { ...this.profileEnginesForm };
+      for (const key of ['emotion_freq', 'affinity_freq', 'affinity_delta_clamp', 'energy_interval']) {
+        const value = key === 'affinity_delta_clamp' ? parseFloat(body[key]) : parseInt(body[key], 10);
+        body[key] = Number.isFinite(value) ? value : undefined;
+      }
+      return this.queueSettingsWrite(`profile-engine:${profileId}`,
+        () => this.writeProfileEngineSnapshot(profileId, body, skipToast), opts.debounce);
+    },
+
+    async writeProfileEngineSnapshot(profileId, body, skipToast) {
+      this.profileEnginesSaving = true;
       if (skipToast) this.setAutoSaveState('saving');
       try {
-        const body = {};
-        // enabled toggles: true/false/null(inherit global)
-        body.emotion_enabled     = this.profileEnginesForm.emotion_enabled;
-        body.affinity_enabled    = this.profileEnginesForm.affinity_enabled;
-        body.energy_enabled      = this.profileEnginesForm.energy_enabled;
-        body.reflection_enabled  = this.profileEnginesForm.reflection_enabled;
-        body.ase_enabled         = this.profileEnginesForm.ase_enabled;
-        body.topic_discovery_enabled = this.profileEnginesForm.topic_discovery_enabled;
-        // frequency / interval overrides
-        if (this.profileEnginesForm.emotion_freq !== '') {
-          const v = parseInt(this.profileEnginesForm.emotion_freq, 10);
-          if (!isNaN(v)) body.emotion_freq = v;
-        }
-        if (this.profileEnginesForm.affinity_freq !== '') {
-          const v = parseInt(this.profileEnginesForm.affinity_freq, 10);
-          if (!isNaN(v)) body.affinity_freq = v;
-        }
-        if (this.profileEnginesForm.affinity_delta_clamp !== '') {
-          const v = parseFloat(this.profileEnginesForm.affinity_delta_clamp);
-          if (!isNaN(v)) body.affinity_delta_clamp = v;
-        }
-        if (this.profileEnginesForm.energy_interval !== '') {
-          const v = parseInt(this.profileEnginesForm.energy_interval, 10);
-          if (!isNaN(v)) body.energy_interval = v;
-        }
         const res = await fetch(
           getBaseUrl() + API_PATHS.profileEngineConfig(profileId),
           { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
@@ -2772,7 +2824,9 @@ const SettingsMixin = {
           method: 'DELETE',
         });
         const data = await res.json();
-        if (data.ok) {
+        if (res.ok && data.ok) {
+          this.profileWriteSnapshots.delete(profileId);
+          if (this.memoryProfileId === profileId) this.selectMemoryProfile('');
           await this.loadProfiles();
           if (this.selectedProfileId === profileId) {
             this.selectedProfileId = '';
@@ -2797,15 +2851,16 @@ const SettingsMixin = {
     /* ─────────────── Memory management (replaces clearProfileHistory) ─────────────── */
 
     initMemoryAction(key, profileId) {
+      if (!profileId || profileId !== this.memoryProfileId) return;
       const labels = {
-        clearHistory:  '清空全部历史记录',
-        clearShortMem: '重置短期上下文',
-        clearFacts:    '清空全部长期事实库',
-        clearVectors:  '清空全部向量库',
-        clearSummaries:'清空全部对话摘要',
-        backup:        '备份全部记忆',
+        clearHistory: 'btnClearHistory',
+        clearShortMem: 'btnResetShortMem',
+        clearFacts: 'btnClearFacts',
+        clearVectors: 'btnClearVectors',
+        clearSummaries: 'btnClearSummaries',
+        backup: 'btnBackup',
       };
-      this.confirmingAction = { key, label: labels[key] || key, data: { profileId } };
+      this.confirmingAction = { key, label: labels[key] ? this.t(labels[key]) : key, data: { profileId } };
     },
 
     cancelAction() {
@@ -2828,59 +2883,90 @@ const SettingsMixin = {
 
     async _doClearHistory(profileId) {
       try {
-        await fetch(getBaseUrl() + API_PATHS.sessionHistory(profileId), { method: 'DELETE' });
-        if (profileId === this.currentSessionId) this.messages = [];
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionHistory(profileId), { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.detail || data.error || this.t('toastSaveFailed'));
+        if (profileId === this.currentSessionId && !this.currentGroupId) this.messages = [];
         this.showToast(this.t('toastHistoryCleared'), 'success');
+        if (profileId === this.memoryProfileId) {
+          this.chatHistory = [];
+          this.chatHistoryTotal = this.chatHistoryOffset = 0;
+          this.chatHistoryContextSince = this.chatHistoryContextStart = 0;
+          await this.loadChatHistory(profileId, true, this.chatHistoryAppliedSearch);
+        }
       } catch (e) { this.showToast(`清空失败: ${e.message}`, 'error'); }
     },
 
     async _doClearShortMem(profileId) {
       try {
-        await fetch(getBaseUrl() + API_PATHS.sessionHistoryRecent(profileId), { method: 'DELETE' });
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionHistoryRecent(profileId), { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.detail || data.error || this.t('toastSaveFailed'));
         this.showToast(this.t('toastShortMemCleared'), 'success');
-        // Refresh context_since_ts display in the history sub-tab
-        if (this.memoryActiveSubTab === 'history') {
-          await this.loadChatHistory(profileId, false);
-        }
+        // Refresh the context marker without appending the current page again.
+        await this.refreshChatHistoryContext(profileId);
       } catch (e) { this.showToast(`重置失败: ${e.message}`, 'error'); }
     },
 
-    async loadChatHistory(profileId, reset = true) {
-      if (!profileId) return;
-      if (reset) {
-        this.chatHistory = [];
-        this.chatHistoryOffset = 0;
-        this.chatHistoryTotal = 0;
-      }
+    async loadChatHistory(profileId, reset = true, search = this.chatHistorySearch || '') {
+      if (!reset && this.chatHistoryLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'history');
+      if (!current) return;
+      const offset = reset ? 0 : this.chatHistory.length;
+      const query = reset ? search : this.chatHistoryAppliedSearch;
+      const contextSequence = this.memoryRequestSequences.historyContext;
+      this.chatHistoryPendingSearch = query;
       this.chatHistoryLoading = true;
       try {
-        const url = getBaseUrl() + API_PATHS.sessionChatHistory(profileId, this.chatHistoryLimit, this.chatHistoryOffset, this.chatHistorySearch || '');
+        const url = getBaseUrl() + API_PATHS.sessionChatHistory(profileId, this.chatHistoryLimit, offset, query);
         const res = await fetch(url);
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
+        if (!current()) return;
         if (reset) {
           this.chatHistory = data.messages;
         } else {
           this.chatHistory.push(...data.messages);
         }
         this.chatHistoryTotal = data.total;
-        this.chatHistoryContextSince = data.context_since_ts || 0;
-        this.chatHistoryContextStart = data.context_start_ts || 0;
-        this.memoryContentProfileId = profileId;
+        this.chatHistoryOffset = offset;
+        this.chatHistoryAppliedSearch = query;
+        if (contextSequence === this.memoryRequestSequences.historyContext) {
+          this.chatHistoryContextSince = data.context_since_ts || 0;
+          this.chatHistoryContextStart = data.context_start_ts || 0;
+        }
       } catch (e) {
-        this.showToast(`加载历史失败: ${e.message}`, 'error');
+        if (current()) this.showToast(`加载历史失败: ${e.message}`, 'error');
       } finally {
-        this.chatHistoryLoading = false;
+        if (current()) this.chatHistoryLoading = false;
+      }
+    },
+
+    async refreshChatHistoryContext(profileId) {
+      const current = this.beginMemoryRequest(profileId, 'historyContext');
+      if (!current) return;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.sessionChatHistory(profileId, 1, 0, this.chatHistoryAppliedSearch));
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (current()) {
+          this.chatHistoryContextSince = data.context_since_ts || 0;
+          this.chatHistoryContextStart = data.context_start_ts || 0;
+        }
+      } catch (e) {
+        if (current()) this.showToast(`加载历史失败: ${e.message}`, 'error');
       }
     },
 
     async chatHistoryLoadMore() {
-      this.chatHistoryOffset += this.chatHistoryLimit;
-      await this.loadChatHistory(this.memoryContentProfileId || this.selectedProfileId, false);
+      if (this.chatHistory.length >= this.chatHistoryTotal) return;
+      await this.loadChatHistory(this.memoryProfileId, false);
     },
 
     async deleteChatMessage(msgId) {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!profileId) return;
       try {
         const res = await fetch(
@@ -2889,6 +2975,9 @@ const SettingsMixin = {
         );
         if (!res.ok) throw new Error(await res.text());
         this._applyMessageDeleted(msgId, profileId);
+        if (profileId === this.memoryProfileId && this.chatHistoryLoading) {
+          await this.loadChatHistory(profileId, true, this.chatHistoryPendingSearch);
+        }
       } catch (e) {
         this.showToast(`删除失败: ${e.message}`, 'error');
       }
@@ -2899,7 +2988,7 @@ const SettingsMixin = {
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionBackup(profileId), { method: 'POST' });
         const data = await res.json();
-        if (data.ok) {
+        if (res.ok && data.ok) {
           const warn = data.warnings && data.warnings.length ? `（${data.warnings.length} 个文件跳过）` : '';
           this.showToast(`✓ 已备份 ${data.files.length} 个文件至 ${data.path}${warn}`, 'success');
         } else {
@@ -2915,12 +3004,15 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         const data = await res.json();
-        if (res.ok) {
+        if (res.ok && data.ok) {
+          if (profileId === this.memoryProfileId) {
+            this.memoryFacts = [];
+            this.memoryEditingFact = null;
+          }
           this.showToast(`✓ 已清空事实库（${data.deleted} 条）`, 'success');
-          await this.loadMemoryFacts(profileId);
-          await this.loadMemoryStatus(profileId);
+          await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId), this.loadMemoryChangelog(profileId)]);
         } else {
-          this.showToast(`清空失败: ${data.detail || ''}`, 'error');
+          this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
         }
       } catch (e) { this.showToast(`清空失败: ${e.message}`, 'error'); }
     },
@@ -2932,12 +3024,12 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         const data = await res.json();
-        if (res.ok) {
+        if (res.ok && data.ok) {
+          if (profileId === this.memoryProfileId) this.memoryVectors = [];
           this.showToast(`✓ 已清空向量库（${data.deleted} 条）`, 'success');
-          await this.loadMemoryVectors(profileId);
-          await this.loadMemoryStatus(profileId);
+          await Promise.all([this.loadMemoryVectors(profileId), this.loadMemoryStatus(profileId)]);
         } else {
-          this.showToast(`清空失败: ${data.detail || ''}`, 'error');
+          this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
         }
       } catch (e) { this.showToast(`清空失败: ${e.message}`, 'error'); }
     },
@@ -2949,8 +3041,9 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         const data = await res.json();
-        if (data.ok) {
-          this.memorySummaries = [];
+        if (res.ok && data.ok) {
+          if (profileId === this.memoryProfileId) this.memorySummaries = [];
+          await this.loadMemorySummaries(profileId);
           await this.loadMemoryStatus(profileId);
           this.showToast(`✓ 已清空摘要（${data.deleted ?? 0} 条）`, 'success');
         } else {
@@ -2962,11 +3055,21 @@ const SettingsMixin = {
     /* ─────────────── Segment Config ─────────────── */
 
     async loadSegmentConfig(profileId) {
-      if (!profileId) return;
+      if (!profileId || profileId !== this.selectedProfileId) return;
+      const sequence = ++this.segmentLoadSequence;
+      const current = () => profileId === this.selectedProfileId && sequence === this.segmentLoadSequence;
+      this.segmentFormProfileId = '';
+      this.segmentList = [];
+      this.reflectionSegmentList = [];
+      this.customSegmentList = [];
       try {
+        const pending = this.flushSettingsWrite(`profile-segments:${profileId}`);
+        if (pending) await pending;
+        if (!current()) return;
         const res = await fetch(getBaseUrl() + API_PATHS.profileSegments(profileId));
         if (!res.ok) return;
         const data = await res.json();
+        if (!current()) return;
         this.segmentList = (data.segments || []).filter(s =>
             s.inject_into === 'chat'
         ).map(s => ({ ...s }));
@@ -2976,51 +3079,56 @@ const SettingsMixin = {
         this.customSegmentList = (data.custom_segments || []).filter(c =>
             c.inject_into === 'chat'
         ).map(c => ({ ...c }));
+        this.segmentFormProfileId = profileId;
       } catch (e) {
-        console.error('[settings] loadSegmentConfig:', e);
+        if (current()) console.error('[settings] loadSegmentConfig:', e);
       }
     },
 
-    async saveSegmentConfig(opts = {}) {
-      const profileId = this.profileForm?.profile_id;
-      if (this.segmentSaving || !profileId) return;
-      this.segmentSaving = true;
+    saveSegmentConfig(opts = {}) {
+      const profileId = this.segmentFormProfileId;
+      if (!profileId || profileId !== this.selectedProfileId) return;
       const skipToast = opts.skipToast === true;
+      const body = JSON.stringify({
+        segments: this.segmentList.map(s => ({
+          segment_id: s.segment_id,
+          enabled: s.enabled,
+          priority: parseInt(s.priority, 10),
+          trigger_mode: s.trigger_mode,
+          trigger_param: parseFloat(s.trigger_param),
+          trigger_keywords: s.trigger_keywords || null,
+          content: s.content || '',
+        })),
+        custom_segments: this.customSegmentList.map(c => ({
+          segment_id: c.segment_id,
+          label: c.label,
+          content: c.content,
+          priority: parseInt(c.priority, 10),
+          enabled: c.enabled,
+          trigger_mode: c.trigger_mode,
+          trigger_param: parseFloat(c.trigger_param),
+          trigger_keywords: c.trigger_keywords || null,
+          inject_into: c.inject_into || 'chat',
+        })),
+      });
+      return this.queueSettingsWrite(`profile-segments:${profileId}`,
+        () => this.writeSegmentConfig(profileId, body, skipToast), opts.debounce);
+    },
+
+    async writeSegmentConfig(profileId, body, skipToast) {
+      this.segmentSaving = true;
       try {
-        const body = {
-          segments: [...this.segmentList].map(s => ({
-            segment_id:   s.segment_id,
-            enabled:      s.enabled,
-            priority:     parseInt(s.priority, 10),
-            trigger_mode: s.trigger_mode,
-            trigger_param: parseFloat(s.trigger_param),
-            trigger_keywords: s.trigger_keywords || null,
-            content:      s.content || '',
-          })),
-          custom_segments: this.customSegmentList.map(c => ({
-            segment_id:   c.segment_id,
-            label:        c.label,
-            content:      c.content,
-            priority:     parseInt(c.priority, 10),
-            enabled:      c.enabled,
-            trigger_mode: c.trigger_mode,
-            trigger_param: parseFloat(c.trigger_param),
-            trigger_keywords: c.trigger_keywords || null,
-            inject_into:  c.inject_into || 'chat',
-          })),
-        };
         const res = await fetch(
           getBaseUrl() + API_PATHS.profileSegments(profileId),
-          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }
         );
         const data = await res.json();
-        if (data.ok) {
-          if (!skipToast) this.showToast(this.t('toastSegmentSaved'), 'success');
-        } else {
-          if (!skipToast) this.showToast(`段落保存失败: ${data.error || ''}`, 'error');
-        }
+        if (!res.ok || !data.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+        if (!skipToast) this.showToast(this.t('toastSegmentSaved'), 'success');
+        return true;
       } catch (e) {
-        if (!skipToast) this.showToast(`段落保存失败: ${e.message}`, 'error');
+        this.showToast(`段落保存失败: ${e.message}`, 'error');
+        return false;
       } finally {
         this.segmentSaving = false;
       }
@@ -3032,11 +3140,17 @@ const SettingsMixin = {
       if (!profileId || this.profileAllSaving) return;
       this.profileAllSaving = true;
       const opts = { skipToast: true };
+      const sequence = this.profileEnginesLoadSequence;
+      const current = () => this.selectedProfileId === profileId && this.profileEnginesLoadSequence === sequence;
       try {
         await this.saveProfile(opts);
+        if (!current()) return;
         await this.saveProfileEngineConfig(opts);
-        await this.saveSegmentConfig(opts);
+        if (!current()) return;
+        if (!await this.saveSegmentConfig(opts)) return;
+        if (!current()) return;
         await this.saveSpecialDates(opts);
+        if (!current()) return;
         // 自省 + ASE 段落（时段问候、沉默后首条等）写在 segments_config.json，须走 reflection_config PUT；此前若只点「保存全部」会丢改动的触发参数
         if (
           this.reflectionFormProfileId === profileId &&
@@ -3360,6 +3474,7 @@ const SettingsMixin = {
     },
 
     beginAddCustomSeg() {
+      if (!this.segmentFormProfileId || this.segmentFormProfileId !== this.selectedProfileId) return;
       const uid = `custom_${Date.now()}`;
       this.newCustomSeg = {
         segment_id: uid, label: '', content: '',
@@ -3371,7 +3486,7 @@ const SettingsMixin = {
     },
 
     confirmAddCustomSeg() {
-      if (!this.newCustomSeg) return;
+      if (!this.newCustomSeg || this.segmentFormProfileId !== this.selectedProfileId) return;
       if (!this.newCustomSeg.label.trim()) {
         this.showToast('请填写段落名称', 'error');
         return;
@@ -3389,6 +3504,7 @@ const SettingsMixin = {
     },
 
     deleteCustomSeg(idx) {
+      if (!this.segmentFormProfileId || this.segmentFormProfileId !== this.selectedProfileId) return;
       this.customSegmentList.splice(idx, 1);
     },
 
@@ -3409,7 +3525,6 @@ const SettingsMixin = {
     /* ─────────────── System ─────────────── */
 
     async loadSystemConfig() {
-      this._systemFormLoaded = false;
       // Restore bubble size from localStorage (frontend-only, no backend involved)
       const savedFontSize = localStorage.getItem('bubble_font_size');
       const savedBubbleWidth = localStorage.getItem('bubble_max_width');
@@ -3418,17 +3533,28 @@ const SettingsMixin = {
       this.applyBubbleSize();
 
       try {
+        const pending = this.flushSettingsWrite('system');
+        const current = this.beginSettingsRead('system');
+        if (pending) await pending;
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSystem());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        this.systemForm.log_level = data.log_level || 'info';
-        this.serverAddress = data.server_address || '';
+        if (current()) {
+          this._systemFormLoaded = false;
+          this.systemForm.log_level = data.log_level || 'info';
+          this.serverAddress = data.server_address || '';
+          this._systemFormLoaded = true;
+        }
       } catch (_) {}
       try {
+        const pending = this.flushSettingsWrite('system-env');
+        const current = this.beginSettingsRead('system-env');
+        const snapshot = JSON.stringify(this.systemEnvForm);
+        if (pending) await pending;
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSystemEnv());
         if (res.ok) {
           const data = await res.json();
-          this.systemEnvForm.proxy_enabled = !!data.proxy_enabled;
-          this.systemEnvForm.proxy_url = data.proxy_url || '';
+          if (current() && snapshot === JSON.stringify(this.systemEnvForm)) this.applySystemEnv(data);
         }
       } catch (_) {}
       try {
@@ -3438,7 +3564,6 @@ const SettingsMixin = {
           this.uiPrefsShowLauncher = prefs.show_startup_launcher !== false;
         }
       } catch (_) {}
-      this.$nextTick(() => { this._systemFormLoaded = true; });
     },
 
     async saveUiPrefsLauncher() {
@@ -3456,40 +3581,61 @@ const SettingsMixin = {
       }
     },
 
-    async saveSystemConfig(silent = false) {
-      if (this.systemSaving) return;
+    saveSystemConfig(silent = false, debounce = false) {
+      const body = JSON.stringify({ log_level: this.systemForm.log_level });
+      return this.queueSettingsWrite('system', () => this.writeSystemConfig(body, silent), debounce);
+    },
+
+    async writeSystemConfig(body, silent) {
       this.systemSaving = true;
       if (silent) this.setAutoSaveState('saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSystem(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ log_level: this.systemForm.log_level }),
+          body,
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastSystemSaved'), 'success'); }
+        if (res.ok && data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastSystemSaved'), 'success'); }
         else { if (silent) this.setAutoSaveState(null); this.showToast(`保存失败: ${data.error || ''}`, 'error'); }
       } catch (e) {
+        if (silent) this.setAutoSaveState(null);
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.systemSaving = false;
       }
     },
 
-    async saveSystemEnv(silent = false) {
-      if (this.systemEnvSaving) return;
+    applySystemEnv(data) {
+      this.systemEnvForm = {
+        proxy_enabled: !!data.proxy_enabled,
+        http_proxy: data.http_proxy || '',
+        https_proxy: data.https_proxy || '',
+      };
+      this.systemEnvLoaded = true;
+    },
+
+    saveSystemEnv(silent = false, debounce = false) {
+      const body = JSON.stringify(this.systemEnvForm);
+      return this.queueSettingsWrite('system-env', () => this.writeSystemEnv(body, silent), debounce);
+    },
+
+    async writeSystemEnv(body, silent) {
       this.systemEnvSaving = true;
       if (silent) this.setAutoSaveState('saving');
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsSystemEnv(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.systemEnvForm),
+          body,
         });
         const data = await res.json();
-        if (data.ok) { if (silent) this.setAutoSaveState('saved'); else this.showToast(this.t('toastEnvSaved'), 'success'); }
-        else { if (silent) this.setAutoSaveState(null); this.showToast(`保存失败: ${data.error || ''}`, 'error'); }
+        if (!res.ok || !data.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+        if (Object.hasOwn(data, 'http_proxy') && body === JSON.stringify(this.systemEnvForm)) this.applySystemEnv(data);
+        if (silent) this.setAutoSaveState('saved');
+        else this.showToast(this.t('toastEnvSaved'), 'success');
       } catch (e) {
+        if (silent) this.setAutoSaveState(null);
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.systemEnvSaving = false;
@@ -3893,11 +4039,15 @@ const SettingsMixin = {
     /* ─────────────── Memory (P6) ─────────────── */
 
     async loadMemoryGlobalConfig() {
-      this._memGlobalFormLoaded = false;
       try {
+        const pending = this.flushSettingsWrite('memory-global');
+        const current = this.beginSettingsRead('memory-global');
+        if (pending) await pending;
         const res = await fetch(getBaseUrl() + API_PATHS.settingsMemory());
         if (!res.ok) return;
         const data = await res.json();
+        if (!current()) return;
+        this._memGlobalFormLoaded = false;
         this.memoryGlobalForm = {
           enabled:               data.enabled               ?? false,
           vector_enabled:        data.vector_enabled        ?? false,
@@ -3925,56 +4075,68 @@ const SettingsMixin = {
           daily_consolidation_weight_below: data.daily_consolidation_weight_below ?? 0.3,
           daily_consolidation_batch_max: data.daily_consolidation_batch_max ?? 15,
         };
-        this.$nextTick(() => { this._memGlobalFormLoaded = true; });
+        this._memGlobalFormLoaded = true;
       } catch (e) {
         console.error('[settings] loadMemoryGlobalConfig:', e);
       }
     },
 
-    async saveMemoryGlobalConfig(silent = false) {
-      if (this.memoryGlobalSaving) return;
+    saveMemoryGlobalConfig(silent = false, debounce = false) {
+      const number = (key, fallback, parse = parseInt) => {
+        const value = parse(this.memoryGlobalForm[key], 10);
+        return Number.isFinite(value) ? value : fallback;
+      };
+      const body = JSON.stringify({
+        enabled:               this.memoryGlobalForm.enabled,
+        vector_enabled:        this.memoryGlobalForm.vector_enabled,
+        extraction_frequency:  parseInt(this.memoryGlobalForm.extraction_frequency, 10) || 5,
+        extraction_weight_threshold: Math.max(0, Math.min(1, number('extraction_weight_threshold', 0.5, parseFloat))),
+        max_facts_in_prompt:   parseInt(this.memoryGlobalForm.max_facts_in_prompt, 10) || 8,
+        max_history_turns:    Math.max(1, Math.min(200, parseInt(this.memoryGlobalForm.max_history_turns, 10) || 60)),
+        day_summary_enabled:     this.memoryGlobalForm.day_summary_enabled,
+        day_summary_keep_days:   parseInt(this.memoryGlobalForm.day_summary_keep_days, 10) || 14,
+        day_summary_max_messages:   Math.max(10, Math.min(500, parseInt(this.memoryGlobalForm.day_summary_max_messages, 10) || 100)),
+        day_summary_max_conv_chars: Math.max(2000, Math.min(100000, parseInt(this.memoryGlobalForm.day_summary_max_conv_chars, 10) || 12000)),
+        recent_fact_quota: number('recent_fact_quota', 3),
+        semantic_fact_quota: number('semantic_fact_quota', 2),
+        recent_days:       number('recent_days', 3),
+        semantic_distance: number('semantic_distance', 0.45, parseFloat),
+        vector_dedup_distance_threshold: Math.max(0.01, Math.min(0.5, parseFloat(this.memoryGlobalForm.vector_dedup_distance_threshold) || 0.1)),
+        daily_run_at_hour: Math.max(0, Math.min(23, parseInt(this.memoryGlobalForm.daily_run_at_hour, 10) || 0)),
+        daily_run_at_minute: Math.max(0, Math.min(59, number('daily_run_at_minute', 5))),
+        daily_forgetting_enabled: !!this.memoryGlobalForm.daily_forgetting_enabled,
+        daily_decay_factor: Math.max(0.9, Math.min(1, parseFloat(this.memoryGlobalForm.daily_decay_factor) || 0.998)),
+        daily_decay_min_weight: Math.max(0, Math.min(1, number('daily_decay_min_weight', 0.1, parseFloat))),
+        daily_reinforcement_enabled: !!this.memoryGlobalForm.daily_reinforcement_enabled,
+        daily_consolidation_enabled: !!this.memoryGlobalForm.daily_consolidation_enabled,
+        daily_consolidation_after_days: Math.max(7, Math.min(365, parseInt(this.memoryGlobalForm.daily_consolidation_after_days, 10) || 30)),
+        daily_consolidation_weight_below: Math.max(0, Math.min(1, number('daily_consolidation_weight_below', 0.3, parseFloat))),
+        daily_consolidation_batch_max: Math.max(5, Math.min(30, parseInt(this.memoryGlobalForm.daily_consolidation_batch_max, 10) || 15)),
+      });
+      return this.queueSettingsWrite('memory-global', () => this.writeMemoryGlobalConfig(body, silent), debounce);
+    },
+
+    async writeMemoryGlobalConfig(body, silent) {
       this.memoryGlobalSaving = true;
+      clearTimeout(this._memGlobalSaveStateTimer);
+      this.memGlobalSaveState = 'saving';
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.settingsMemory(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            enabled:               this.memoryGlobalForm.enabled,
-            vector_enabled:        this.memoryGlobalForm.vector_enabled,
-            extraction_frequency:  parseInt(this.memoryGlobalForm.extraction_frequency, 10) || 5,
-            extraction_weight_threshold: Math.max(0, Math.min(1, parseFloat(this.memoryGlobalForm.extraction_weight_threshold) || 0.5)),
-            max_facts_in_prompt:   parseInt(this.memoryGlobalForm.max_facts_in_prompt, 10) || 8,
-            max_history_turns:    Math.max(1, Math.min(200, parseInt(this.memoryGlobalForm.max_history_turns, 10) || 60)),
-            day_summary_enabled:     this.memoryGlobalForm.day_summary_enabled,
-            day_summary_keep_days:   parseInt(this.memoryGlobalForm.day_summary_keep_days, 10) || 14,
-            day_summary_max_messages:   Math.max(10, Math.min(500, parseInt(this.memoryGlobalForm.day_summary_max_messages, 10) || 100)),
-            day_summary_max_conv_chars: Math.max(2000, Math.min(100000, parseInt(this.memoryGlobalForm.day_summary_max_conv_chars, 10) || 12000)),
-            recent_fact_quota: parseInt(this.memoryGlobalForm.recent_fact_quota, 10) ?? 3,
-            semantic_fact_quota: parseInt(this.memoryGlobalForm.semantic_fact_quota, 10) ?? 2,
-            recent_days:       parseInt(this.memoryGlobalForm.recent_days, 10) ?? 3,
-            semantic_distance: parseFloat(this.memoryGlobalForm.semantic_distance) ?? 0.45,
-            vector_dedup_distance_threshold: Math.max(0.01, Math.min(0.5, parseFloat(this.memoryGlobalForm.vector_dedup_distance_threshold) || 0.1)),
-            daily_run_at_hour: Math.max(0, Math.min(23, parseInt(this.memoryGlobalForm.daily_run_at_hour, 10) || 0)),
-            daily_run_at_minute: Math.max(0, Math.min(59, parseInt(this.memoryGlobalForm.daily_run_at_minute, 10) || 5)),
-            daily_forgetting_enabled: !!this.memoryGlobalForm.daily_forgetting_enabled,
-            daily_decay_factor: Math.max(0.9, Math.min(1, parseFloat(this.memoryGlobalForm.daily_decay_factor) || 0.998)),
-            daily_decay_min_weight: Math.max(0, Math.min(1, parseFloat(this.memoryGlobalForm.daily_decay_min_weight) || 0.1)),
-            daily_reinforcement_enabled: !!this.memoryGlobalForm.daily_reinforcement_enabled,
-            daily_consolidation_enabled: !!this.memoryGlobalForm.daily_consolidation_enabled,
-            daily_consolidation_after_days: Math.max(7, Math.min(365, parseInt(this.memoryGlobalForm.daily_consolidation_after_days, 10) || 30)),
-            daily_consolidation_weight_below: Math.max(0, Math.min(1, parseFloat(this.memoryGlobalForm.daily_consolidation_weight_below) || 0.3)),
-            daily_consolidation_batch_max: Math.max(5, Math.min(30, parseInt(this.memoryGlobalForm.daily_consolidation_batch_max, 10) || 15)),
-          }),
+          body,
         });
         const data = await res.json();
-        if (data.ok) {
+        if (res.ok && data.ok) {
           if (!silent) this.showToast(this.t('toastMemoryGlobalSaved'), 'success');
           this.memGlobalSaveState = 'saved';
-          setTimeout(() => { this.memGlobalSaveState = null; }, 2000);
+          this._memGlobalSaveStateTimer = setTimeout(() => { this.memGlobalSaveState = null; }, 2000);
         } else {
+          this.memGlobalSaveState = null;
           this.showToast(`保存失败: ${data.error || ''}`, 'error');
         }
       } catch (e) {
+        this.memGlobalSaveState = null;
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.memoryGlobalSaving = false;
@@ -4063,15 +4225,45 @@ const SettingsMixin = {
 
     async loadMemoryProfileConfig(profileId) {
       if (!profileId) return;
+      const sequence = ++this.personaMemoryLoadSequence;
       this._memProfileFormLoaded = false;
       this.memoryFormProfileId = '';
       try {
+        const pending = this.flushSettingsWrite(`persona-memory:${profileId}`);
+        if (pending) await pending;
         const res = await fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId));
         if (!res.ok) return;
         const data = await res.json();
+        if (sequence !== this.personaMemoryLoadSequence || profileId !== this.selectedProfileId) return;
+        const cfg = data.memory_config || {};
+        this.memoryProfileForm = {
+          extraction_prompt: cfg.extraction_prompt ?? '',
+          day_summary_prompt: cfg.day_summary_prompt ?? '',
+        };
+        this.memoryFormProfileId = profileId;
+        this._memProfileFormLoaded = true;
+      } catch (e) {
+        console.error('[settings] loadMemoryProfileConfig:', e);
+      }
+    },
+
+    async loadMemoryTabProfileConfig(profileId = this.memoryProfileId) {
+      if (!profileId || profileId !== this.memoryProfileId) return;
+      const sequence = ++this.memoryTabProfileLoadSequence;
+      const generation = this.memoryViewGeneration;
+      this.memoryTabProfileLoaded = false;
+      this.memoryTabFormProfileId = '';
+      try {
+        const pending = this.flushSettingsWrite(`memory-tab:${profileId}`);
+        if (pending) await pending;
+        const res = await fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId));
+        if (!res.ok) return;
+        const data = await res.json();
+        if (sequence !== this.memoryTabProfileLoadSequence || generation !== this.memoryViewGeneration
+            || profileId !== this.memoryProfileId) return;
         const cfg = data.memory_config || {};
         const _pn = (v) => v != null ? v : '';
-        this.memoryProfileForm = {
+        this.memoryTabProfileForm = {
           enabled:              cfg.enabled              ?? null,
           vector_enabled:       cfg.vector_enabled       ?? null,
           day_summary_enabled:  cfg.day_summary_enabled  ?? null,
@@ -4080,8 +4272,6 @@ const SettingsMixin = {
           max_facts_in_prompt:    _pn(cfg.max_facts_in_prompt),
           max_history_turns:      _pn(cfg.max_history_turns),
           extraction_llm_preset:  cfg.extraction_llm_preset ?? '',
-          extraction_prompt:      cfg.extraction_prompt     ?? '',
-          day_summary_prompt:     cfg.day_summary_prompt    ?? '',
           recent_fact_quota: _pn(cfg.recent_fact_quota),
           semantic_fact_quota: _pn(cfg.semantic_fact_quota),
           recent_days:       _pn(cfg.recent_days),
@@ -4098,72 +4288,159 @@ const SettingsMixin = {
           daily_consolidation_weight_below: _pn(cfg.daily_consolidation_weight_below),
           daily_consolidation_batch_max: _pn(cfg.daily_consolidation_batch_max),
         };
-        this.memoryFormProfileId = profileId;
-        this.$nextTick(() => { this._memProfileFormLoaded = true; });
+        this.memoryTabFormProfileId = profileId;
+        this.memoryTabProfileLoaded = true;
       } catch (e) {
-        console.error('[settings] loadMemoryProfileConfig:', e);
+        console.error('[settings] loadMemoryTabProfileConfig:', e);
       }
     },
 
-    async saveMemoryProfileConfig(silent = false) {
-      if (this.memoryProfileSaving || !this.memoryFormProfileId) return;
-      this.memoryProfileSaving = true;
-      try {
-        const cfg = {};
-        if (this.memoryProfileForm.enabled !== null)             cfg.enabled             = this.memoryProfileForm.enabled;
-        if (this.memoryProfileForm.vector_enabled !== null)      cfg.vector_enabled      = this.memoryProfileForm.vector_enabled;
-        if (this.memoryProfileForm.day_summary_enabled !== null) cfg.day_summary_enabled = this.memoryProfileForm.day_summary_enabled;
-        if (this.memoryProfileForm.extraction_frequency !== '')       cfg.extraction_frequency  = parseInt(this.memoryProfileForm.extraction_frequency, 10);
-        if (this.memoryProfileForm.extraction_weight_threshold !== '') cfg.extraction_weight_threshold = Math.max(0, Math.min(1, parseFloat(this.memoryProfileForm.extraction_weight_threshold) || 0.5));
-        if (this.memoryProfileForm.max_facts_in_prompt !== '')        cfg.max_facts_in_prompt   = parseInt(this.memoryProfileForm.max_facts_in_prompt, 10);
-        if (this.memoryProfileForm.max_history_turns !== '' && this.memoryProfileForm.max_history_turns != null) {
-          const v = parseInt(this.memoryProfileForm.max_history_turns, 10);
-          if (!isNaN(v)) cfg.max_history_turns = Math.max(1, Math.min(200, v));
-        }
-        if (this.memoryProfileForm.extraction_llm_preset !== undefined) cfg.extraction_llm_preset = this.memoryProfileForm.extraction_llm_preset;
-        if (this.memoryProfileForm.extraction_prompt.trim())          cfg.extraction_prompt     = this.memoryProfileForm.extraction_prompt.trim();
-        if (this.memoryProfileForm.day_summary_prompt !== undefined)  cfg.day_summary_prompt    = this.memoryProfileForm.day_summary_prompt;
-        // 槽位配额（留空则不覆盖全局配置）
-        const _pi = (v) => v !== '' ? parseInt(v, 10) : undefined;
-        const _pf = (v) => v !== '' ? parseFloat(v) : undefined;
-        if (_pi(this.memoryProfileForm.recent_fact_quota) !== undefined) cfg.recent_fact_quota = _pi(this.memoryProfileForm.recent_fact_quota);
-        if (_pi(this.memoryProfileForm.semantic_fact_quota) !== undefined) cfg.semantic_fact_quota = _pi(this.memoryProfileForm.semantic_fact_quota);
-        if (_pi(this.memoryProfileForm.recent_days) !== undefined)       cfg.recent_days       = _pi(this.memoryProfileForm.recent_days);
-        if (_pf(this.memoryProfileForm.semantic_distance) !== undefined) cfg.semantic_distance = _pf(this.memoryProfileForm.semantic_distance);
-        if (_pf(this.memoryProfileForm.vector_dedup_distance_threshold) !== undefined) cfg.vector_dedup_distance_threshold = Math.max(0.01, Math.min(0.5, _pf(this.memoryProfileForm.vector_dedup_distance_threshold)));
-        if (this.memoryProfileForm.daily_forgetting_enabled !== null) cfg.daily_forgetting_enabled = this.memoryProfileForm.daily_forgetting_enabled;
-        if (_pf(this.memoryProfileForm.daily_decay_factor) !== undefined) cfg.daily_decay_factor = _pf(this.memoryProfileForm.daily_decay_factor);
-        if (_pf(this.memoryProfileForm.daily_decay_min_weight) !== undefined) cfg.daily_decay_min_weight = _pf(this.memoryProfileForm.daily_decay_min_weight);
-        if (this.memoryProfileForm.daily_reinforcement_enabled !== null) cfg.daily_reinforcement_enabled = this.memoryProfileForm.daily_reinforcement_enabled;
-        if (this.memoryProfileForm.daily_consolidation_enabled !== null) cfg.daily_consolidation_enabled = this.memoryProfileForm.daily_consolidation_enabled;
-        if (_pi(this.memoryProfileForm.daily_consolidation_after_days) !== undefined) cfg.daily_consolidation_after_days = _pi(this.memoryProfileForm.daily_consolidation_after_days);
-        if (_pf(this.memoryProfileForm.daily_consolidation_weight_below) !== undefined) cfg.daily_consolidation_weight_below = _pf(this.memoryProfileForm.daily_consolidation_weight_below);
-        if (_pi(this.memoryProfileForm.daily_consolidation_batch_max) !== undefined) cfg.daily_consolidation_batch_max = _pi(this.memoryProfileForm.daily_consolidation_batch_max);
-        if (_pi(this.memoryProfileForm.group_chat_self_recap_max_groups) !== undefined) cfg.group_chat_self_recap_max_groups = Math.max(1, Math.min(20, _pi(this.memoryProfileForm.group_chat_self_recap_max_groups) || 5));
-        if (this.memoryProfileForm.group_chat_merge_into_history === false) cfg.group_chat_merge_into_history = false;
-        else if (this.memoryProfileForm.group_chat_merge_into_history === true) cfg.group_chat_merge_into_history = true;
-        const res = await fetch(
-          getBaseUrl() + API_PATHS.profileMemoryConfig(this.memoryFormProfileId),
-          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }
-        );
-        const data = res.ok ? (await res.json().catch(() => null)) : null;
-        if (data && data.ok) {
-          if (!silent) this.showToast(this.t('toastMemoryProfileSaved'), 'success');
-          this.memProfileSaveState = 'saved';
-          setTimeout(() => { this.memProfileSaveState = null; }, 2000);
+    saveMemoryProfileConfig(silent = false, debounce = false) {
+      const profileId = this.memoryFormProfileId;
+      if (!profileId || profileId !== this.selectedProfileId) return;
+      const body = JSON.stringify({
+        extraction_prompt: this.memoryProfileForm.extraction_prompt.trim(),
+        day_summary_prompt: this.memoryProfileForm.day_summary_prompt,
+      });
+      return this.queueSettingsWrite(`persona-memory:${profileId}`,
+        () => this.writeMemoryProfileConfig(profileId, body, silent, false), debounce);
+    },
+
+    saveMemoryTabProfileConfig(silent = false, debounce = false) {
+      const profileId = this.memoryTabFormProfileId;
+      if (!profileId || profileId !== this.memoryProfileId) return;
+      const form = this.memoryTabProfileForm;
+      const cfg = { extraction_llm_preset: form.extraction_llm_preset };
+      for (const key of ['enabled', 'vector_enabled', 'day_summary_enabled', 'daily_forgetting_enabled',
+        'daily_reinforcement_enabled', 'daily_consolidation_enabled', 'group_chat_merge_into_history']) {
+        cfg[key] = form[key];
+      }
+      const numeric = {
+        extraction_frequency: [parseInt],
+        extraction_weight_threshold: [parseFloat, 0, 1],
+        max_facts_in_prompt: [parseInt],
+        max_history_turns: [parseInt, 1, 200],
+        recent_fact_quota: [parseInt],
+        semantic_fact_quota: [parseInt],
+        recent_days: [parseInt],
+        semantic_distance: [parseFloat],
+        vector_dedup_distance_threshold: [parseFloat, 0.01, 0.5],
+        daily_decay_factor: [parseFloat],
+        daily_decay_min_weight: [parseFloat],
+        daily_consolidation_after_days: [parseInt],
+        daily_consolidation_weight_below: [parseFloat],
+        daily_consolidation_batch_max: [parseInt],
+        group_chat_self_recap_max_groups: [parseInt, 1, 20],
+      };
+      for (const [key, [parse, min = -Infinity, max = Infinity]] of Object.entries(numeric)) {
+        const raw = form[key];
+        if (raw === '' || raw === null) {
+          cfg[key] = null;
         } else {
-          this.showToast(`保存失败: ${(data && data.error) || (!res.ok ? `HTTP ${res.status}` : 'unknown')}`, 'error');
+          const value = parse(raw, 10);
+          if (Number.isFinite(value)) cfg[key] = Math.max(min, Math.min(max, value));
+        }
+      }
+      const body = JSON.stringify(cfg);
+      const generation = this.memoryViewGeneration;
+      return this.queueSettingsWrite(`memory-tab:${profileId}`,
+        () => this.writeMemoryProfileConfig(profileId, body, silent, true, generation), debounce);
+    },
+
+    async writeMemoryProfileConfig(profileId, body, silent, memoryTab, generation) {
+      const current = () => memoryTab && profileId === this.memoryProfileId && generation === this.memoryViewGeneration;
+      if (current()) {
+        clearTimeout(this._memProfileSaveStateTimer);
+        this.memoryTabProfileSaving = true;
+        this.memProfileSaveState = 'saving';
+      }
+      if (!memoryTab) this.memoryProfileSaving = true;
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId),
+          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }
+        );
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+        if (!silent) this.showToast(this.t('toastMemoryProfileSaved'), 'success');
+        if (current()) {
+          this.memProfileSaveState = 'saved';
+          this._memProfileSaveStateTimer = setTimeout(() => {
+            if (current()) this.memProfileSaveState = null;
+          }, 2000);
         }
       } catch (e) {
+        if (current()) this.memProfileSaveState = null;
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
-        this.memoryProfileSaving = false;
+        if (current()) this.memoryTabProfileSaving = false;
+        if (!memoryTab) this.memoryProfileSaving = false;
       }
     },
 
-    async loadMemoryData(profileId) {
-      if (!profileId) return;
-      this.memoryContentProfileId = '';
+    async openMemoryView() {
+      if (!this.profiles.length) await this.loadProfiles();
+      const hasProfile = id => this.profiles.some(profile => profile.profile_id === id);
+      const profileId = hasProfile(this.memoryProfileId) ? this.memoryProfileId
+        : hasProfile(this.currentSessionId) ? this.currentSessionId : this.profiles[0]?.profile_id || '';
+      this.selectMemoryProfile(profileId);
+      if (this.memoryPanelTab === 'settings') return this.loadMemoryTabProfileConfig(profileId);
+      return this.loadMemoryData(profileId);
+    },
+
+    selectMemoryProfile(profileId) {
+      this.memoryProfileId = profileId;
+      if (this.memoryContentProfileId === profileId) return;
+      this.memoryViewGeneration++;
+      this.memoryContentProfileId = profileId;
+      this.memoryPanelLoading = false;
+      this.memoryTabFormProfileId = '';
+      this.memoryTabProfileLoaded = false;
+      this.memoryTabProfileSaving = false;
+      this.memProfileSaveState = null;
+      this.memoryStatus = null;
+      this.memoryFacts = [];
+      this.memoryEditingFact = null;
+      this.memoryFactForm = { content: '', category: 'other', weight: 1.0 };
+      this.memoryVectors = [];
+      this.memoryVectorText = '';
+      this.memorySummaries = [];
+      this.memorySummaryDays = 30;
+      this.factsDisplayLimit = this.vectorsDisplayLimit = this.summariesDisplayLimit = 30;
+      this.chatHistory = [];
+      this.chatHistoryTotal = this.chatHistoryOffset = 0;
+      this.chatHistoryContextSince = this.chatHistoryContextStart = 0;
+      this.chatHistoryAppliedSearch = this.chatHistoryPendingSearch = '';
+      this.chatHistoryLoading = false;
+      this.diaryPreview = [];
+      this.diaryResultPerDate = [];
+      this.diaryMessage = '';
+      this.diaryPreviewLoading = this.diaryLoading = false;
+      this.syncFactsResult = '';
+      this.syncFactsLoading = false;
+      this.forgettingPreview = null;
+      this.forgettingPreviewLoading = this.forgettingRunLoading = false;
+      this.memoryChangelog = [];
+      this.memoryChangelogLoading = this.memoryRollbackLoading = false;
+      this.memChangelogExpanded = '';
+      const action = this.confirmingAction;
+      if (action && (action.key.startsWith('clear') || action.key === 'backup') && action.data.profileId !== profileId) {
+        this.confirmingAction = null;
+      }
+    },
+
+    beginMemoryRequest(profileId, key) {
+      if (!profileId || profileId !== this.memoryProfileId) return null;
+      const generation = this.memoryViewGeneration;
+      const sequence = (this.memoryRequestSequences[key] || 0) + 1;
+      this.memoryRequestSequences[key] = sequence;
+      return () => this.memoryProfileId === profileId && this.memoryViewGeneration === generation
+        && this.memoryRequestSequences[key] === sequence;
+    },
+
+    async loadMemoryData(profileId = this.memoryProfileId) {
+      if (!profileId || profileId !== this.memoryProfileId) return;
+      this.selectMemoryProfile(profileId);
+      const current = this.beginMemoryRequest(profileId, 'panel');
       this.memoryPanelLoading = true;
       try {
         await Promise.all([
@@ -4171,48 +4448,62 @@ const SettingsMixin = {
           this.loadMemoryFacts(profileId),
           this.loadMemoryVectors(profileId),
           this.loadMemorySummaries(profileId),
-          this.loadMemoryProfileConfig(profileId),
           this.loadChatHistory(profileId),
           this.loadMemoryChangelog(profileId),
+          this.memoryActiveSubTab === 'summaries' ? this.loadDiaryPreview(profileId) : null,
         ]);
-        this.memoryContentProfileId = profileId;
       } finally {
-        this.memoryPanelLoading = false;
+        if (current()) this.memoryPanelLoading = false;
       }
     },
 
     async loadMemoryStatus(profileId) {
+      const current = this.beginMemoryRequest(profileId, 'status');
+      if (!current) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryStatus(profileId));
-        if (res.ok) this.memoryStatus = await res.json();
+        if (!res.ok) return;
+        const data = await res.json();
+        if (current()) this.memoryStatus = data;
       } catch (_) {}
     },
 
     async loadMemoryFacts(profileId) {
+      const current = this.beginMemoryRequest(profileId, 'facts');
+      if (!current) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryFacts(profileId));
+        if (!res.ok) return;
         const data = await res.json();
-        this.memoryFacts = data.facts || [];
-        this.factsDisplayLimit = 30;
-      } catch (_) { this.memoryFacts = []; }
+        if (!current() || !Array.isArray(data.facts)) return;
+        this.memoryFacts = data.facts;
+      } catch (_) {}
     },
 
     async loadMemoryVectors(profileId) {
+      const current = this.beginMemoryRequest(profileId, 'vectors');
+      if (!current) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryVectors(profileId));
+        if (!res.ok) return;
         const data = await res.json();
-        this.memoryVectors = data.vectors || data.items || [];
-        this.vectorsDisplayLimit = 30;
-      } catch (_) { this.memoryVectors = []; }
+        const vectors = data.vectors || data.items;
+        if (!current() || !Array.isArray(vectors)) return;
+        this.memoryVectors = vectors;
+      } catch (_) {}
     },
 
-    async loadMemorySummaries(profileId, days = 30) {
+    async loadMemorySummaries(profileId, days = this.memorySummaryDays) {
+      const current = this.beginMemoryRequest(profileId, 'summaries');
+      if (!current) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memorySummariesDays(profileId, days));
+        if (!res.ok) return;
         const data = await res.json();
-        this.memorySummaries = data.summaries || [];
-        this.summariesDisplayLimit = 30;
-      } catch (_) { this.memorySummaries = []; }
+        if (!current() || !Array.isArray(data.summaries)) return;
+        this.memorySummaries = data.summaries;
+        this.memorySummaryDays = days;
+      } catch (_) {}
     },
 
     factsLoadMore() {
@@ -4226,18 +4517,20 @@ const SettingsMixin = {
     },
 
     async loadDiaryPreview(profileId) {
-      if (!profileId) return;
+      const current = this.beginMemoryRequest(profileId, 'diaryPreview');
+      if (!current) return;
       this.diaryPreviewLoading = true;
-      this.diaryPreview = [];
       try {
         const days = Math.max(1, Math.min(365, parseInt(this.diaryDays, 10) || 1));
         const res = await fetch(
           getBaseUrl() + API_PATHS.memorySummariesPreview(profileId, this.diaryStartDate, days)
         );
         const data = await res.json();
-        if (res.ok && Array.isArray(data.per_date)) this.diaryPreview = data.per_date;
-      } catch (_) {}
-      this.diaryPreviewLoading = false;
+        if (current() && res.ok && Array.isArray(data.per_date)) this.diaryPreview = data.per_date;
+      } catch (_) {
+      } finally {
+        if (current()) this.diaryPreviewLoading = false;
+      }
     },
 
     diaryPreviewStatusLabel(row) {
@@ -4262,7 +4555,9 @@ const SettingsMixin = {
     },
 
     async generateDiary(profileId) {
-      if (!profileId || this.diaryLoading) return;
+      if (this.diaryLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'diaryGenerate');
+      if (!current) return;
       this.diaryMessage = '';
       this.diaryResultPerDate = [];
       this.diaryLoading = true;
@@ -4277,6 +4572,10 @@ const SettingsMixin = {
           }),
         });
         const data = await res.json();
+        if (!current()) {
+          if (res.ok && data.generated?.length) await this.loadMemorySummaries(profileId, 90);
+          return;
+        }
         if (!res.ok) {
           this.diaryMessage = (typeof data.detail === 'string' ? data.detail : data.error) || '请求失败';
           this.diaryMessageOk = false;
@@ -4306,10 +4605,11 @@ const SettingsMixin = {
           this.diaryMessageOk = false;
         }
       } catch (e) {
+        if (!current()) return;
         this.diaryMessage = (e && e.message) ? e.message : '网络或服务器错误';
         this.diaryMessageOk = false;
       } finally {
-        this.diaryLoading = false;
+        if (current()) this.diaryLoading = false;
       }
     },
 
@@ -4320,25 +4620,30 @@ const SettingsMixin = {
     },
 
     async addMemoryFact() {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!this.memoryFactForm.content.trim() || !profileId) return;
+      const generation = this.memoryViewGeneration;
+      const draft = this.memoryFactForm;
+      const { content, category, weight } = draft;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryFacts(profileId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            content:  this.memoryFactForm.content.trim(),
-            category: this.memoryFactForm.category || 'other',
-            weight:   Math.max(0.1, Math.min(3, parseFloat(this.memoryFactForm.weight) || 1.0)),
+            content: content.trim(),
+            category: category || 'other',
+            weight: Math.max(0.1, Math.min(3, parseFloat(weight) || 1.0)),
             tags: [],
           }),
         });
         const data = await res.json();
-        if (data.id) {
-          this.memoryFacts.push(data);
-          this.memoryFactForm = { content: '', category: 'other', weight: 1.0 };
+        if (res.ok && data.id) {
+          if (this.memoryViewGeneration === generation && this.memoryFactForm === draft
+              && draft.content === content && draft.category === category && draft.weight === weight) {
+            this.memoryFactForm = { content: '', category: 'other', weight: 1.0 };
+          }
           this.showToast('✓ 事实已添加', 'success');
-          await this.loadMemoryStatus(profileId);
+          await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`添加失败: ${data.detail || data.error || ''}`, 'error');
         }
@@ -4350,9 +4655,10 @@ const SettingsMixin = {
     },
 
     async saveMemoryFact() {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!this.memoryEditingFact || !profileId) return;
-      const { id, content, category, weight } = this.memoryEditingFact;
+      const draft = this.memoryEditingFact;
+      const { id, content, category, weight } = draft;
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.memoryFactById(profileId, id),
@@ -4363,8 +4669,9 @@ const SettingsMixin = {
           }
         );
         const data = await res.json();
-        if (data.ok) {
-          this.memoryEditingFact = null;
+        if (res.ok && data.ok) {
+          if (this.memoryEditingFact === draft && draft.content === content
+              && draft.category === category && draft.weight === weight) this.memoryEditingFact = null;
           await this.loadMemoryFacts(profileId);
           this.showToast('✓ 事实已更新', 'success');
         } else {
@@ -4374,7 +4681,7 @@ const SettingsMixin = {
     },
 
     async deleteMemoryFact(factId) {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!profileId) return;
       try {
         const res = await fetch(
@@ -4382,10 +4689,9 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         const data = await res.json();
-        if (data.ok) {
-          this.memoryFacts = this.memoryFacts.filter(f => f.id !== factId);
+        if (res.ok && data.ok) {
           this.showToast('✓ 事实已删除', 'success');
-          this.loadMemoryStatus(profileId);
+          await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`删除失败: ${data.error || ''}`, 'error');
         }
@@ -4393,7 +4699,7 @@ const SettingsMixin = {
     },
 
     async toggleMemoryFactPin(fact) {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!profileId) return;
       const newPinned = !fact.pinned;
       try {
@@ -4403,9 +4709,9 @@ const SettingsMixin = {
             body: JSON.stringify({ pinned: newPinned }) }
         );
         const data = await res.json();
-        if (data.ok) {
-          fact.pinned = newPinned;
+        if (res.ok && data.ok) {
           this.showToast(newPinned ? '📌 已设为永久显示' : '✓ 已取消永久显示', 'success');
+          await this.loadMemoryFacts(profileId);
         } else {
           this.showToast(`操作失败: ${data.error || ''}`, 'error');
         }
@@ -4413,8 +4719,10 @@ const SettingsMixin = {
     },
 
     async addMemoryVector() {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!this.memoryVectorText.trim() || !profileId) return;
+      const generation = this.memoryViewGeneration;
+      const draft = this.memoryVectorText;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryVectors(profileId), {
           method: 'POST',
@@ -4422,8 +4730,8 @@ const SettingsMixin = {
           body: JSON.stringify({ text: this.memoryVectorText.trim() }),
         });
         const data = await res.json();
-        if (data.id) {
-          this.memoryVectorText = '';
+        if (res.ok && data.id) {
+          if (this.memoryViewGeneration === generation && this.memoryVectorText === draft) this.memoryVectorText = '';
           await this.loadMemoryVectors(profileId);
           this.loadMemoryStatus(profileId);
           this.showToast('✓ 向量已添加', 'success');
@@ -4434,7 +4742,7 @@ const SettingsMixin = {
     },
 
     async deleteMemoryVector(memId) {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!profileId) return;
       try {
         const res = await fetch(
@@ -4442,10 +4750,9 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         const data = await res.json();
-        if (data.ok) {
-          this.memoryVectors = this.memoryVectors.filter(v => v.id !== memId);
+        if (res.ok && data.ok) {
           this.showToast('✓ 向量已删除', 'success');
-          this.loadMemoryStatus(profileId);
+          await Promise.all([this.loadMemoryVectors(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`删除失败: ${data.error || ''}`, 'error');
         }
@@ -4453,8 +4760,10 @@ const SettingsMixin = {
     },
 
     async syncFactsToVectors() {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
-      if (this.syncFactsLoading || !profileId) return;
+      const profileId = this.memoryProfileId;
+      if (this.syncFactsLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'syncFacts');
+      if (!current) return;
       this.syncFactsLoading = true;
       this.syncFactsResult = '同步中…';
       try {
@@ -4464,38 +4773,41 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok) {
-          this.syncFactsResult = `✓ 新增 ${data.synced} 条（共 ${data.total} 条事实，向量库 ${data.vector_count} 条）`;
+          if (current()) this.syncFactsResult = `✓ 新增 ${data.synced} 条（共 ${data.total} 条事实，向量库 ${data.vector_count} 条）`;
           await this.loadMemoryVectors(profileId);
           await this.loadMemoryStatus(profileId);
-        } else {
+        } else if (current()) {
           this.syncFactsResult = `同步失败: ${data.detail || ''}`;
         }
       } catch (e) {
-        this.syncFactsResult = `同步失败: ${e.message}`;
+        if (current()) this.syncFactsResult = `同步失败: ${e.message}`;
       } finally {
-        this.syncFactsLoading = false;
+        if (current()) this.syncFactsLoading = false;
       }
     },
 
     async loadForgettingPreview(profileId) {
-      if (!profileId || this.forgettingPreviewLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'forgettingPreview');
+      if (!current) return;
       this.forgettingPreviewLoading = true;
-      this.forgettingPreview = null;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryForgettingPreview(profileId));
         const data = await res.json();
+        if (!current()) return;
         if (res.ok) this.forgettingPreview = data;
         else this.showToast('预览失败: ' + (data.detail || ''), 'error');
       } catch (e) {
-        this.showToast('预览失败: ' + e.message, 'error');
+        if (current()) this.showToast('预览失败: ' + e.message, 'error');
       } finally {
-        this.forgettingPreviewLoading = false;
+        if (current()) this.forgettingPreviewLoading = false;
       }
     },
 
     async runForgettingNow() {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
-      if (this.forgettingRunLoading || !profileId) return;
+      const profileId = this.memoryProfileId;
+      if (this.forgettingRunLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'forgettingRun');
+      if (!current) return;
       this.forgettingRunLoading = true;
       try {
         const res = await fetch(
@@ -4505,7 +4817,11 @@ const SettingsMixin = {
         const data = await res.json();
         if (res.ok && data.ok) {
           this.showToast('✓ 已执行一次每日记忆/遗忘任务', 'success');
-          this.forgettingPreview = null;
+          if (current()) {
+            this.beginMemoryRequest(profileId, 'forgettingPreview');
+            this.forgettingPreview = null;
+            this.forgettingPreviewLoading = false;
+          }
           await this.loadMemoryFacts(profileId);
           await this.loadMemoryStatus(profileId);
           await this.loadMemoryChangelog(profileId);
@@ -4515,26 +4831,29 @@ const SettingsMixin = {
       } catch (e) {
         this.showToast(`执行失败: ${e.message}`, 'error');
       } finally {
-        this.forgettingRunLoading = false;
+        if (current()) this.forgettingRunLoading = false;
       }
     },
 
     async loadMemoryChangelog(profileId) {
-      if (!profileId || this.memoryChangelogLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'changelog');
+      if (!current) return;
       this.memoryChangelogLoading = true;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryChangelog(profileId));
         const data = await res.json();
-        if (res.ok) this.memoryChangelog = data.changelog || [];
+        if (current() && res.ok) this.memoryChangelog = data.changelog || [];
       } catch (e) {
         console.warn('[memory] loadMemoryChangelog:', e);
       } finally {
-        this.memoryChangelogLoading = false;
+        if (current()) this.memoryChangelogLoading = false;
       }
     },
 
     async rollbackMemoryRun(profileId, runId) {
-      if (!profileId || !runId || this.memoryRollbackLoading) return;
+      if (!runId || this.memoryRollbackLoading) return;
+      const current = this.beginMemoryRequest(profileId, 'rollback');
+      if (!current) return;
       if (!confirm(this.t('confirmMemoryRollback'))) return;
       this.memoryRollbackLoading = true;
       try {
@@ -4556,7 +4875,7 @@ const SettingsMixin = {
       } catch (e) {
         this.showToast(`${this.t('toastMemoryRollbackFail')}: ${e.message}`, 'error');
       } finally {
-        this.memoryRollbackLoading = false;
+        if (current()) this.memoryRollbackLoading = false;
       }
     },
 
@@ -4570,7 +4889,7 @@ const SettingsMixin = {
     },
 
     async deleteMemorySummary(dateStr) {
-      const profileId = this.memoryContentProfileId || this.selectedProfileId;
+      const profileId = this.memoryProfileId;
       if (!profileId) return;
       try {
         const res = await fetch(
@@ -4578,9 +4897,9 @@ const SettingsMixin = {
           { method: 'DELETE' }
         );
         const data = await res.json();
-        if (data.ok) {
-          this.memorySummaries = this.memorySummaries.filter(s => s.date !== dateStr);
+        if (res.ok && data.ok) {
           this.showToast('✓ 摘要已删除', 'success');
+          await Promise.all([this.loadMemorySummaries(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`删除失败: ${data.error || ''}`, 'error');
         }
@@ -4590,10 +4909,15 @@ const SettingsMixin = {
     /* ─────────────── Reflection / ASE / VLM ─────────────── */
 
     async loadReflectionConfig() {
-      this._reflectionFormLoaded = false;
       try {
+        const pending = this.flushSettingsWrite('reflection');
+        const current = this.beginSettingsRead('reflection');
+        if (pending) await pending;
         const res = await fetch(getBaseUrl() + API_PATHS.settingsReflection());
+        if (!res.ok) return;
         const data = await res.json();
+        if (!current()) return;
+        this._reflectionFormLoaded = false;
         // Merge scalar fields directly（ase_modes / topic_discovery 是嵌套对象，单独深合并）
         const { ase_modes, topic_discovery, ...rest } = data;
         Object.assign(this.reflectionForm, rest);
@@ -4625,40 +4949,45 @@ const SettingsMixin = {
             else td.sources[sid] = srcs[sid];
           }
         }
+        this._reflectionFormLoaded = true;
       } catch (e) {
         console.warn('[reflection] load config failed:', e);
       }
-      this.$nextTick(() => { this._reflectionFormLoaded = true; });
     },
 
-    async saveReflectionConfig(silent = false) {
-      if (this.reflectionSaving) return;
-      if (silent) this.setAutoSaveState('saving');
+    saveReflectionConfig(silent = false, debounce = false) {
+      const f = this.reflectionForm;
+      const body = {
+        ...f,
+        // Convert _enabled flags to null (means "use preset default")
+        reflection_temperature:       f.reflection_temperature_enabled       ? parseFloat(f.reflection_temperature)       : null,
+        reflection_top_p:             f.reflection_top_p_enabled             ? parseFloat(f.reflection_top_p)             : null,
+        reflection_presence_penalty:  f.reflection_presence_penalty_enabled  ? parseFloat(f.reflection_presence_penalty)  : null,
+        reflection_frequency_penalty: f.reflection_frequency_penalty_enabled ? parseFloat(f.reflection_frequency_penalty) : null,
+        reflection_max_tokens:        f.reflection_max_tokens_enabled        ? (parseInt(f.reflection_max_tokens, 10) || null) : null,
+      };
+      const snapshot = JSON.stringify(body);
+      return this.queueSettingsWrite('reflection', () => this.writeReflectionConfig(snapshot, silent), debounce);
+    },
+
+    async writeReflectionConfig(body, silent) {
       this.reflectionSaving = true;
+      if (silent) this.setAutoSaveState('saving');
       try {
-        const f = this.reflectionForm;
-        const body = {
-          ...f,
-          // Convert _enabled flags to null (means "use preset default")
-          reflection_temperature:       f.reflection_temperature_enabled       ? parseFloat(f.reflection_temperature)       : null,
-          reflection_top_p:             f.reflection_top_p_enabled             ? parseFloat(f.reflection_top_p)             : null,
-          reflection_presence_penalty:  f.reflection_presence_penalty_enabled  ? parseFloat(f.reflection_presence_penalty)  : null,
-          reflection_frequency_penalty: f.reflection_frequency_penalty_enabled ? parseFloat(f.reflection_frequency_penalty) : null,
-          reflection_max_tokens:        f.reflection_max_tokens_enabled        ? (parseInt(f.reflection_max_tokens, 10) || null) : null,
-        };
         const res = await fetch(getBaseUrl() + API_PATHS.settingsReflection(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body,
         });
         const data = await res.json();
-        if (data.ok) {
+        if (res.ok && data.ok) {
           if (silent) this.setAutoSaveState('saved'); else this.showToast('自省与主动设置已保存', 'success');
         } else {
           if (silent) this.setAutoSaveState(null);
           this.showToast(`保存失败: ${data.detail || ''}`, 'error');
         }
       } catch (e) {
+        if (silent) this.setAutoSaveState(null);
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         this.reflectionSaving = false;
@@ -4672,20 +5001,55 @@ const SettingsMixin = {
       this.loadUserPortrait(profileId);
     },
     onMemoryContentProfileChange(profileId) {
-      if (profileId && this.profiles.some(p => p.profile_id === profileId)) this.selectProfile(profileId);
-      this.loadMemoryData(profileId);
+      this.selectMemoryProfile(profileId);
+      return this.loadMemoryData(profileId);
     },
     onMemorySettingsProfileChange(profileId) {
-      if (profileId && this.profiles.some(p => p.profile_id === profileId)) this.selectProfile(profileId);
-      this.loadMemoryProfileConfig(profileId);
+      this.selectMemoryProfile(profileId);
+      return this.loadMemoryTabProfileConfig(profileId);
     },
     /** 全局自动保存状态指示（saving → saved → null） */
     setAutoSaveState(state) {
+      clearTimeout(this._autoSaveStateTimer);
       this.autoSaveState = state;
       if (state === 'saved') {
-        clearTimeout(this._autoSaveStateTimer);
         this._autoSaveStateTimer = setTimeout(() => { this.autoSaveState = null; }, 2000);
       }
+    },
+
+    // A snapshot is captured by the caller before it enters the queue. Writes to
+    // the same endpoint run in order, including edits made during an earlier PUT.
+    queueSettingsWrite(key, write, debounce = false) {
+      this.beginSettingsRead(key); // Invalidate a GET issued before this edit.
+      const pending = this.settingsWriteTimers.get(key);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.settingsWriteTimers.delete(key);
+      }
+      if (debounce) {
+        const timer = setTimeout(() => this.queueSettingsWrite(key, write), 800);
+        this.settingsWriteTimers.set(key, { timer, write });
+        return;
+      }
+      const previous = this.settingsWrites.get(key);
+      const next = (previous ? previous.catch(() => {}) : Promise.resolve()).then(write);
+      this.settingsWrites.set(key, next);
+      const finish = () => {
+        if (this.settingsWrites.get(key) === next) this.settingsWrites.delete(key);
+      };
+      next.then(finish, finish);
+      return next;
+    },
+
+    flushSettingsWrite(key) {
+      const pending = this.settingsWriteTimers.get(key);
+      return pending ? this.queueSettingsWrite(key, pending.write) : this.settingsWrites.get(key);
+    },
+
+    beginSettingsRead(key) {
+      const revision = (this.settingsReadRevisions[key] || 0) + 1;
+      this.settingsReadRevisions[key] = revision;
+      return () => this.settingsReadRevisions[key] === revision;
     },
 
     /** 设置抽屉内容区滚回顶部（确认条、人格头等在上方时） */
@@ -4739,19 +5103,19 @@ const SettingsMixin = {
     },
 
     async loadReflectionProfileConfig(profileId) {
+      const sequence = ++this.reflectionProfileLoadSequence;
+      this._reflectionProfileFormLoaded = false;
+      this.reflectionFormProfileId = '';
       if (!profileId) {
-        this.reflectionFormProfileId = '';
         return;
       }
-      this._reflectionProfileFormLoaded = false;
-      // 同步标记当前人格，避免先清空再拉取导致「空状态」闪屏与 .settings-body 滚动被重置到顶
-      this.reflectionFormProfileId = profileId;
       try {
+        const pending = this.flushSettingsWrite(`profile-reflection:${profileId}`);
+        if (pending) await pending;
         const res = await fetch(getBaseUrl() + API_PATHS.profileReflectionConfig(profileId));
         if (!res.ok) return;
         const data = await res.json();
-        // 竞态：切换人格或关闭设置后丢弃过期响应
-        if (profileId !== this.selectedProfileId || profileId !== this.reflectionFormProfileId) return;
+        if (profileId !== this.selectedProfileId || sequence !== this.reflectionProfileLoadSequence) return;
         const segments = (data.segments || []).map(s => ({
           ...s,
           trigger_param: this.coerceRefaseTriggerParam(s),
@@ -4763,40 +5127,48 @@ const SettingsMixin = {
           long_absence_hours: typeof data.long_absence_hours === 'number' ? data.long_absence_hours : 48,
           segments,
         };
+        this.reflectionFormProfileId = profileId;
+        this._reflectionProfileFormLoaded = true;
       } catch (e) {
         console.error('[settings] loadReflectionProfileConfig:', e);
       }
-      this.$nextTick(() => { this._reflectionProfileFormLoaded = true; });
     },
 
-    async saveReflectionProfileConfig(opts = {}) {
+    saveReflectionProfileConfig(opts = {}) {
       const skipToast = opts.skipToast === true;
-      if (this.reflectionProfileSaving || !this.reflectionFormProfileId) return;
+      const profileId = this.reflectionFormProfileId;
+      if (!profileId || profileId !== this.selectedProfileId) return;
+      const segments = (this.reflectionProfileForm.segments || []).map(s => ({
+        segment_id: s.segment_id,
+        label: s.label || s.segment_id,
+        content: (s.content || '').trim(),
+        priority: parseInt(s.priority, 10) || 50,
+        enabled: s.enabled !== false,
+        trigger_mode: s.trigger_mode || 'always',
+        trigger_param: this.coerceRefaseTriggerParam(s),
+        trigger_keywords: s.trigger_keywords || null,
+        inject_into: s.inject_into || 'reflection_ase',
+      }));
+      const body = JSON.stringify({
+        custom_prompt: this.reflectionProfileForm.custom_prompt || '',
+        chat_inject_topic_anchor: this.reflectionProfileForm.chat_inject_topic_anchor,
+        long_absence_hours: this.reflectionProfileForm.long_absence_hours,
+        segments,
+      });
+      return this.queueSettingsWrite(`profile-reflection:${profileId}`,
+        () => this.writeReflectionProfileConfig(profileId, body, skipToast), opts.debounce);
+    },
+
+    async writeReflectionProfileConfig(profileId, body, skipToast) {
       this.reflectionProfileSaving = true;
       if (skipToast) this.setAutoSaveState('saving');
       try {
-        const segments = (this.reflectionProfileForm.segments || []).map(s => ({
-          segment_id: s.segment_id,
-          label: s.label || s.segment_id,
-          content: (s.content || '').trim(),
-          priority: parseInt(s.priority, 10) || 50,
-          enabled: s.enabled !== false,
-          trigger_mode: s.trigger_mode || 'always',
-          trigger_param: this.coerceRefaseTriggerParam(s),
-          trigger_keywords: s.trigger_keywords || null,
-          inject_into: s.inject_into || 'reflection_ase',
-        }));
         const res = await fetch(
-          getBaseUrl() + API_PATHS.profileReflectionConfig(this.reflectionFormProfileId),
+          getBaseUrl() + API_PATHS.profileReflectionConfig(profileId),
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              custom_prompt: this.reflectionProfileForm.custom_prompt || '',
-              chat_inject_topic_anchor: this.reflectionProfileForm.chat_inject_topic_anchor,
-              long_absence_hours: this.reflectionProfileForm.long_absence_hours,
-              segments,
-            }),
+            body,
           }
         );
         const data = res.ok ? await res.json().catch(() => null) : null;
@@ -5130,26 +5502,58 @@ const SettingsMixin = {
 
     /* ─────────────── Tools tab ─────────────── */
 
+    _applyAgentSettings(settings, patch = {}) {
+      const saved = { ...AGENT_SETTINGS_DEFAULTS, ...settings };
+      const form = { ...saved };
+      if (this.agentSavedSettings) {
+        for (const key of ['max_model_requests', 'timeout_seconds', 'autonomy_interval_seconds', 'autonomy_max_requests_per_hour']) {
+          const draft = this.agentSettingsForm[key];
+          if (!Object.hasOwn(patch, key) && draft !== this.agentSavedSettings[key]) form[key] = draft;
+        }
+      }
+      this.agentSavedSettings = saved;
+      this.agentSettingsForm = form;
+    },
+
+    async loadAgentStatus(check = false) {
+      const sequence = ++this.agentStatusSequence;
+      this.agentStatusBusy = true;
+      this.agentStatusError = '';
+      try {
+        const status = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
+        if (sequence === this.agentStatusSequence) this.agentRuntime = status;
+      } catch (error) {
+        if (sequence !== this.agentStatusSequence) return;
+        this.agentStatusError = error.message;
+        this.agentRuntime = null;
+      } finally {
+        if (sequence === this.agentStatusSequence) this.agentStatusBusy = false;
+      }
+    },
+
     async loadAgentSettings(check = false, includeStatus = true) {
-      if (this.agentSettingsBusy) return;
+      if (this.agentSettingsBusy) {
+        if (includeStatus) await this.loadAgentStatus(check);
+        return;
+      }
       this.agentSettingsBusy = true;
       this.agentSettingsError = '';
       try {
         const settings = await this.agentFetch(API_PATHS.agentSettings());
-        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
-          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '', ...settings };
+        this._applyAgentSettings(settings);
         this.agentSettingsLoaded = true;
-        if (includeStatus) {
-          this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
-        }
       } catch (error) {
         this.agentSettingsError = error.message;
-        this.agentRuntime = null;
       } finally { this.agentSettingsBusy = false; }
+      if (includeStatus) await this.loadAgentStatus(check);
     },
 
     async saveAgentSettings(patch) {
       if (this.agentSettingsBusy || !this.agentSettingsLoaded) return;
+      if (patch.workspace_enabled === false) {
+        // Global code execution requires the global workspace. Profile overrides are separate.
+        patch = { ...patch, code_enabled: false };
+      }
       if (('max_model_requests' in patch && (!Number.isInteger(patch.max_model_requests) || patch.max_model_requests < 1 || patch.max_model_requests > 32)) ||
           ('timeout_seconds' in patch && (!Number.isInteger(patch.timeout_seconds) || patch.timeout_seconds < 10 || patch.timeout_seconds > 600))) {
         this.agentSettingsError = this.t('agentLimitsInvalid');
@@ -5167,14 +5571,13 @@ const SettingsMixin = {
         const settings = await this.agentFetch(API_PATHS.agentSettings(), {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
-        this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
-          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '', ...settings };
-        this.agentRuntime = await this.agentFetch(API_PATHS.agentStatus());
-        this.showToast(this.t('savedOk'), 'success');
+        this._applyAgentSettings(settings, patch);
       } catch (error) {
         this.agentSettingsError = error.message;
-        this.agentRuntime = null;
+        return;
       } finally { this.agentSettingsBusy = false; }
+      this.showToast(this.t('savedOk'), 'success');
+      if (this.activeTab === 'tools') await this.loadAgentStatus();
     },
 
     async loadToolsConfig(profileId) {
@@ -5206,7 +5609,7 @@ const SettingsMixin = {
 
     async saveToolConfig(toolId, config, profileId) {
       const pid = profileId || this.selectedProfileId;
-      if (!pid) return;
+      if (!pid) return false;
       const sequence = this.toolsLoadSequence;
       const isCurrent = () => pid === this.selectedProfileId && sequence === this.toolsLoadSequence;
       this.toolsSaving = { ...this.toolsSaving, [toolId]: true };
@@ -5216,18 +5619,36 @@ const SettingsMixin = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tool_id: toolId, config }),
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.detail || this.t('errSave'));
+        await this._readSettingsResult(res, true);
+      } catch (e) {
+        if (isCurrent()) this.showToast(`${this.t('errSave')}: ${e.message}`, 'error');
+        this.toolsSaving = { ...this.toolsSaving, [toolId]: false };
+        return false;
+      }
+      try {
         if (isCurrent()) {
           this.showToast(this.t('savedOk'), 'success');
           if (toolId === 'agent') await this.loadProfiles();
           if (isCurrent()) await this.loadToolsConfig(pid);
         }
       } catch (e) {
-        if (isCurrent()) this.showToast(this.t('errSave'), 'error');
+        if (isCurrent()) this.showToast(this.t('errLoadTools'), 'error');
       } finally {
         this.toolsSaving = { ...this.toolsSaving, [toolId]: false };
       }
+      return true;
+    },
+
+    profileAgentPermissionSummary(key) {
+      if (!this.agentSavedSettings) return '';
+      const choice = this.getProfileAgentPermission(key);
+      if (key === 'autonomy_enabled' && !(this.getProfileAgentPermission('enabled') ?? this.agentSavedSettings.enabled)) {
+        return this.t('agentAutonomyNeedsTools');
+      }
+      const enabled = choice ?? this.agentSavedSettings[key];
+      return this.t('agentEffectivePermission')
+        .replace('{state}', this.t(enabled ? 'optOn' : 'optOff'))
+        .replace('{source}', this.t(choice === null ? 'optInheritGlobal' : 'agentPersonaOverride'));
     },
 
     getProfileAgentPermission(key) {
@@ -5258,7 +5679,7 @@ const SettingsMixin = {
       this.trendFetching = true;
       try {
         const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/fetch`, { method: 'POST' });
-        const data = await res.json();
+        const data = await this._readSettingsResult(res, true);
         this.showToast(this.t('trendFetchDone').replace('{n}', data.added || 0), 'success');
         await this.loadTrendStatus(pid);
       } catch (e) {
@@ -5272,7 +5693,8 @@ const SettingsMixin = {
       const pid = profileId || this.selectedProfileId;
       if (!pid) return;
       try {
-        await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/cache`, { method: 'DELETE' });
+        const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/cache`, { method: 'DELETE' });
+        await this._readSettingsResult(res, true);
         this.showToast(this.t('trendClearCacheDone'), 'success');
         await this.loadTrendStatus(pid);
       } catch (e) {
@@ -5284,11 +5706,12 @@ const SettingsMixin = {
       const sources = [...(trendCfg.sources || [])];
       if (sources.some(ss => ss.url === preset.url)) return;
       sources.push({ type: preset.type, label: preset.label, url: preset.url });
-      this.saveToolConfig('trend', { ...trendCfg, sources }, profileId);
+      this.saveToolConfig('trend', { sources }, profileId);
     },
 
-    addTrendSource(trendCfg, profileId) {
-      const s = this.trendNewSource;
+    async addTrendSource(trendCfg, profileId) {
+      const pid = profileId || this.selectedProfileId;
+      const s = { ...this.trendNewSource };
       if (!s.label) { this.showToast(this.t('errTrendSourceLabel'), 'error'); return; }
       if ((s.type === 'rss' || s.type === 'api') && !s.url) { this.showToast(this.t('errTrendSourceUrl'), 'error'); return; }
       if (s.type === 'websearch' && !s.query) { this.showToast(this.t('errTrendSourceQuery'), 'error'); return; }
@@ -5297,14 +5720,17 @@ const SettingsMixin = {
       if (s.type === 'rss' || s.type === 'api') entry.url = s.url;
       if (s.type === 'websearch') entry.query = s.query;
       sources.push(entry);
-      this.trendNewSource = { type: 'rss', label: '', url: '', query: '' };
-      this.saveToolConfig('trend', { ...trendCfg, sources }, profileId);
+      if (await this.saveToolConfig('trend', { sources }, pid)
+          && pid === this.selectedProfileId
+          && Object.keys(s).every(key => s[key] === this.trendNewSource[key])) {
+        this.trendNewSource = { type: 'rss', label: '', url: '', query: '' };
+      }
     },
 
     removeTrendSource(trendCfg, idx, profileId) {
       const sources = [...(trendCfg.sources || [])];
       sources.splice(idx, 1);
-      this.saveToolConfig('trend', { ...trendCfg, sources }, profileId);
+      this.saveToolConfig('trend', { sources }, profileId);
     },
 
     async loadWeatherStatus(profileId) {

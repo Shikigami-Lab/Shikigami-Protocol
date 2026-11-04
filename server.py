@@ -119,7 +119,7 @@ from src.api.chat import router as chat_router
 from src.api.compose_assist import router as compose_assist_router
 from src.api.sessions import router as sessions_router
 from src.api.settings import router as settings_router
-from src.api.settings_ext import router as settings_ext_router
+from src.api.settings_ext import guard_settings_access, load_managed_preset_keys, router as settings_ext_router
 from src.api.ws_tts import router as ws_tts_router
 from src.api.history import router as history_router
 from src.api.events import router as events_router
@@ -180,6 +180,11 @@ async def lifespan(app: FastAPI):
 
     _write_startup_progress(35, "Loading configuration...")
     config = AppConfig.load()
+    load_managed_preset_keys(config)
+    from src.memory.embedding import bind_legacy_embedding_config
+    embedding = config.get_memory_config()["embedding"]
+    bind_legacy_embedding_config(embedding)
+    config.memory["embedding"] = embedding
     app.state.config = config
     app.state.version = _load_version_from_package_json()
 
@@ -410,6 +415,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.middleware("http")(guard_settings_access)
 
 app.include_router(chat_router)
 app.include_router(compose_assist_router)
@@ -462,6 +468,7 @@ if __name__ == "__main__":
         import json as _json
 
         config = AppConfig.load()
+        load_managed_preset_keys(config)
         from src.api.setup_guide import build_setup_status_dict
 
         # Windows 打包 exe 下 stdout 常为系统代码页；写 buffer 保证 UTF-8，与前端读静态资源一致
