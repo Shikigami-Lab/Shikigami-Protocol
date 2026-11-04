@@ -359,7 +359,7 @@ test('continuation is rejected for other profiles, running tasks, groups and cle
   assert.equal(model.agentContinueRunId, '');
 });
 
-test('detach never aborts, background task forces a plain foreground reply and old tokens/finally stay isolated', async () => {
+for (const change of ['detach', 'switch']) test(change + ' allows plain chat during final task synthesis', async () => {
   const reads = [], requests = [];
   const { model } = harness(async (url, options) => {
     requests.push({ body: JSON.parse(options.body), signal: options.signal });
@@ -369,15 +369,20 @@ test('detach never aborts, background task forces a plain foreground reply and o
   const frame = values => ({ done: false, value: new TextEncoder().encode(values.map(v => 'data: ' + JSON.stringify(v) + '\n\n').join('')) });
   const old = model.sendMessage(); await tick();
   reads.shift()(frame([{ agent_event: event(1, 'started', { request_id: requests[0].body.request_id }) }, { token: 'Old prefix' }])); await tick();
-  const oldContext = model.agentChatContext;
-  model.detachAgentChat();
-  assert.equal(oldContext.detached, true);
+  if (change === 'detach') {
+    const oldContext = model.agentChatContext;
+    model.detachAgentChat();
+    assert.equal(oldContext.detached, true);
+  } else {
+    model.currentSessionId = 'p2'; model.agentViewChanged();
+    model.currentSessionId = 'p1'; model.agentViewChanged();
+  }
   assert.equal(requests[0].signal.aborted, false);
   assert.equal(model.isStreaming, false);
   // Execution is done, but the detached chat model is still writing its reply.
   reads.shift()(frame([{ agent_event: event(2, 'completed') }])); await tick();
   assert.equal(model.agentOwnTaskActive, false);
-  assert.equal(model.agentDetachedReplyPending, true);
+  assert.equal(model.agentChatReplyPending, true);
   model.inputText = 'new conversation';
   const next = model.sendMessage(); await tick();
   assert.equal(requests[1].body.conversation_only, true);
@@ -390,10 +395,11 @@ test('detach never aborts, background task forces a plain foreground reply and o
   // The foreground read was enqueued before the detached read.
   const finishNew = reads.shift(), finishOld = reads.shift();
   finishOld({ done: true }); await old;
-  assert.equal(model.agentDetachedReplyPending, false);
+  assert.deepEqual(Object.keys(model.agentPendingChatReplies), [requests[1].body.request_id]);
   assert.equal(model.isStreaming, true);
   finishNew(frame([{ done: true }])); await tick();
   reads.shift()({ done: true }); await next;
+  assert.equal(model.agentChatReplyPending, false);
   assert.equal(model.messages.filter(m => m.role === 'assistant' && !m.partial).at(-1).content, 'New reply');
 });
 

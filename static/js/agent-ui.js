@@ -50,7 +50,7 @@
   }
   const mixin = {
     data() { return { agentRuns: {}, agentRunErrors: {}, agentPollBusy: false,
-      agentPollTimer: null, agentViewVersion: 0, agentChatContext: null, agentDetachedReplies: {},
+      agentPollTimer: null, agentViewVersion: 0, agentChatContext: null, agentPendingChatReplies: {},
       agentContinueRunId: '', agentHistorySequence: 0, agentCapabilities: capabilityKeys,
       agentWorkspaceOpen: false, agentWorkspaceFiles: [], agentWorkspaceInventory: {}, agentWorkspaceSelected: null,
       agentWorkspaceTab: 'files', agentDrawerNarrow: false,
@@ -108,8 +108,8 @@
         return !this.currentGroupId && Object.values(this.agentRuns).some(run =>
           run.profile_id === this.currentSessionId && run.session_id === this.currentSessionId && !terminal(run.state));
       },
-      agentDetachedReplyPending() {
-        return Object.values(this.agentDetachedReplies).includes(this.currentSessionId);
+      agentChatReplyPending() {
+        return Object.values(this.agentPendingChatReplies).includes(this.currentSessionId);
       },
       agentCanDetach() {
         const run = this.agentRuns[this.agentChatContext?.runKey];
@@ -557,7 +557,7 @@
         const stored = this.agentRuns[keyOf(run)];
         // Until polling confirms the origin, a terminal event might be autonomous.
         return (stored?.origin || run.origin) === 'user' && run.origin !== 'reflection' && !this.currentGroupId &&
-          !this.isStreaming && !this.agentOwnTaskActive && !this.agentDetachedReplyPending && terminal(run.state) &&
+          !this.isStreaming && !this.agentOwnTaskActive && !this.agentChatReplyPending && terminal(run.state) &&
           run.profile_id === this.currentSessionId && run.session_id === this.currentSessionId;
       },
       selectAgentContinuation(run) {
@@ -573,7 +573,6 @@
         this.preserveChatReply(context);
         context.detachedText = this.streamingText;
         context.detached = true;
-        this.agentDetachedReplies[context.requestId] = context.sessionId;
         // Keep the original fetch/controller alive in sendMessage's closure.
         this._chatAbortController = null;
         this.isStreaming = false;

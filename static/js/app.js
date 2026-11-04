@@ -1415,7 +1415,7 @@ const App = {
       const text = (this.inputText || '').trim();
       const hasImage = !!this.pendingScreenshot;
       if ((!text && !hasImage) || this.isStreaming) return;
-      const backgroundReply = this.agentOwnTaskActive || this.agentDetachedReplyPending;
+      const backgroundReply = this.agentOwnTaskActive || this.agentChatReplyPending;
       if (this.agentContinueRunId && (backgroundReply || text.startsWith('/'))) { this.statusText = this.t('agentContinueBlocked'); return; }
       if (text.startsWith('/')) this._recordRecentCommand(text);
 
@@ -1479,6 +1479,7 @@ const App = {
 
       try {
         if (controller.signal.aborted || !this.agentChatIsVisible(context)) throw new DOMException('Chat view changed or stopped', 'AbortError');
+        this.agentPendingChatReplies[context.requestId] = context.sessionId;
         const response = await fetch(getBaseUrl() + API_PATHS.chat(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1582,7 +1583,7 @@ const App = {
         this.isStreaming = false;
         this.streamingText = '';
       } finally {
-        if (context.detached) delete this.agentDetachedReplies[context.requestId];
+        delete this.agentPendingChatReplies[context.requestId];
         if (this.agentChatIsVisible(context)) {
           if (!context.replyDone) this.preserveChatReply(context);
           this._chatAbortController = null;
