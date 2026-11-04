@@ -28,11 +28,10 @@ class AutonomyRunner:
         current = manager.get_current() if manager else None
         return current is not None and current.id == session.id and current.profile_id == session.profile_id
 
-    def _build_messages(self, session, goal):
+    def _build_messages(self, session, goal, preset):
         from src.config.effective_config import get_effective_max_history_turns
         from src.prompt.pipeline import build_messages
         runtime = self.runtime
-        preset = runtime.app.state.config.get_active_llm_preset()
         return build_messages(session, goal, session.conversation_store,
             n_history_turns=get_effective_max_history_turns(runtime.app, session.profile_id),
             preset=preset, app=runtime.app,
@@ -53,6 +52,10 @@ class AutonomyRunner:
         if sum(not r.terminal for r in runtime._runs.values()) >= 2:
             return False
         settings = runtime.settings
+        try:
+            preset = runtime.tool_model_preset()
+        except ValueError:
+            return False
         admission = str(uuid.uuid5(uuid.NAMESPACE_URL, session.profile_id + ':reflection:' + str(cycle_id)))
         allowance = runtime.store.claim_autonomy(admission, session.profile_id, goal,
             settings['autonomy_interval_seconds'], settings['autonomy_max_requests_per_hour'],
@@ -61,11 +64,10 @@ class AutonomyRunner:
             return False
         run = None
         try:
-            messages = self._build_messages(session, goal.strip())
+            messages = self._build_messages(session, goal.strip(), preset)
             # Build is synchronous: no UI switch can interleave admission and
             # prepare. Execution subsequently remains bound to this session.
-            run = runtime.prepare(session, messages,
-                runtime.app.state.config.get_active_llm_preset(), request_id=admission, origin='reflection')
+            run = runtime.prepare(session, messages, preset, request_id=admission, origin='reflection')
             run.gateway.max_requests = allowance
             task = asyncio.create_task(self._consume(run), name='reflection-action-' + run.id)
             self.tasks.add(task)

@@ -3,13 +3,15 @@ from pathlib import Path
 import os
 import tempfile
 
-DEFAULTS = {"enabled": False, "max_model_requests": 6, "timeout_seconds": 120}
+DEFAULTS = {"enabled": False, "max_model_requests": 6, "timeout_seconds": 120, "model_preset": ""}
 DEFAULTS.update(autonomy_enabled=False, autonomy_interval_seconds=900, autonomy_max_requests_per_hour=12)
 DEFAULTS.update({key: False for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled')})
 
 
 def normalize_settings(raw=None):
     value = {**DEFAULTS, **(raw or {})}
+    if not isinstance(value['model_preset'], str):
+        raise ValueError('model_preset must be a preset name or an empty string')
     for key in ('enabled', 'workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled', 'autonomy_enabled'):
         if type(value[key]) is not bool:
             raise ValueError(f"{key} must be a boolean")

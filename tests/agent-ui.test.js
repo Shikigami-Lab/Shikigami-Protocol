@@ -284,6 +284,25 @@ test('autonomy settings default off with contract defaults, including older resp
   assert.equal(model.agentSettingsForm.autonomy_max_requests_per_hour, 12);
 });
 
+test('model settings load and persist the tool preset through agent settings', async () => {
+  const { model } = harness();
+  const calls = [];
+  model.agentFetch = async (url, options) => {
+    calls.push({ url, options });
+    if (options?.method === 'PATCH') return JSON.parse(options.body);
+    if (url === '/api/agent/status') return { model: 'small-model' };
+    return { model_preset: 'existing' };
+  };
+  await model.loadAgentSettings(false, false);
+  assert.deepEqual(calls.map(call => call.url), ['/api/agent/settings']);
+  assert.equal(model.agentSettingsForm.model_preset, 'existing');
+  await model.saveAgentSettings({ model_preset: 'small' });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { model_preset: 'small' });
+  assert.equal(model.agentSettingsForm.model_preset, 'small');
+  await model.saveAgentSettings({ model_preset: '' });
+  assert.equal(model.agentSettingsForm.model_preset, '');
+});
+
 test('autonomy validates integer ranges without making requests and saves valid limits', async () => {
   const { model } = harness();
   model.agentSettingsLoaded = true;

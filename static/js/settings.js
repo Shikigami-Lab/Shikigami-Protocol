@@ -214,7 +214,7 @@ const SettingsMixin = {
       toolsLoadSequence: 0,
       profilesLoadSequence: 0,
       agentSettingsForm: { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false, enabled: false, max_model_requests: null, timeout_seconds: null,
-        autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12 },
+        autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '' },
       agentRuntime: null,
       agentSettingsLoaded: false,
       agentSettingsBusy: false,
@@ -944,6 +944,7 @@ const SettingsMixin = {
           this.loadLLMPresets();
         }
       }
+      if (newTab === 'llm' && this.settingsOpen) this.loadAgentSettings(false, false);
       if (newTab === 'tools' && this.settingsOpen) {
         this.loadToolsConfig();
         this.loadAgentSettings();
@@ -1072,6 +1073,7 @@ const SettingsMixin = {
 
     openSettings() {
       this.settingsOpen = true;
+      if (this.activeTab === 'llm') this.loadAgentSettings(false, false);
       if (this.activeTab === 'tools') {
         this.loadToolsConfig();
         this.loadAgentSettings();
@@ -5128,16 +5130,18 @@ const SettingsMixin = {
 
     /* ─────────────── Tools tab ─────────────── */
 
-    async loadAgentSettings(check = false) {
+    async loadAgentSettings(check = false, includeStatus = true) {
       if (this.agentSettingsBusy) return;
       this.agentSettingsBusy = true;
       this.agentSettingsError = '';
       try {
         const settings = await this.agentFetch(API_PATHS.agentSettings());
         this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
-          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
+          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '', ...settings };
         this.agentSettingsLoaded = true;
-        this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
+        if (includeStatus) {
+          this.agentRuntime = await this.agentFetch(check ? API_PATHS.agentCheck() : API_PATHS.agentStatus(), check ? { method: 'POST' } : undefined);
+        }
       } catch (error) {
         this.agentSettingsError = error.message;
         this.agentRuntime = null;
@@ -5164,7 +5168,7 @@ const SettingsMixin = {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
         this.agentSettingsForm = { workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
-          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, ...settings };
+          autonomy_enabled: false, autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '', ...settings };
         this.agentRuntime = await this.agentFetch(API_PATHS.agentStatus());
         this.showToast(this.t('savedOk'), 'success');
       } catch (error) {

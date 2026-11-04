@@ -26,6 +26,7 @@ def _runtime(request):
 class SettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: Optional[bool] = Field(default=None, strict=True)
+    model_preset: Optional[str] = Field(default=None, strict=True)
     workspace_enabled: Optional[bool] = Field(default=None, strict=True)
     code_enabled: Optional[bool] = Field(default=None, strict=True)
     web_enabled: Optional[bool] = Field(default=None, strict=True)
@@ -62,6 +63,8 @@ async def patch_settings(request: Request, body: SettingsPatch):
     changes = body.model_dump(exclude_unset=True)
     try:
         value = normalize_settings({**runtime.settings, **changes})
+        if changes.get('model_preset'):
+            runtime.tool_model_preset(value['model_preset'])
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
     save_settings(runtime.root / "config" / "app.yaml", value)

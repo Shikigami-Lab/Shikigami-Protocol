@@ -55,6 +55,7 @@ class _Run:
     before_files: dict = field(default_factory=dict)
     workspace_warning: str = ''
     autonomy_summary: str = ''
+    model_preset: dict = field(default_factory=dict, repr=False)
 
 
 class AgentRuntime:
@@ -81,6 +82,7 @@ class AgentRuntime:
         self._state_lock = threading.RLock()
         self._health = None
         self._health_at = 0
+        self._health_model = None
         self._closed = False
         from src.agent.autonomy import AutonomyRunner
         self.autonomy = AutonomyRunner(self)
@@ -88,6 +90,18 @@ class AgentRuntime:
     @property
     def settings(self):
         return normalize_settings(getattr(self.app.state.config, "agent", {}))
+
+    def tool_model_preset(self, name=None):
+        config = self.app.state.config
+        name = self.settings['model_preset'] if name is None else name
+        if name:
+            preset = getattr(config, 'llm_presets', {}).get(name)
+            if preset is None:
+                raise ValueError('Selected tool model preset is missing. Choose a preset in Models settings.')
+        else:
+            preset = config.get_active_llm_preset()
+        model_route(preset)
+        return dict(preset)
 
     def tools_allowed(self, profile_id):
         from src.agent.capabilities import resolve_setting
@@ -180,22 +194,32 @@ class AgentRuntime:
                 self.store.set_parent(run_id, continue_run_id)
             run = _Run(run_id, session.profile_id, session.id, revision, envelope, gateway, limits,
                        origin == 'user' and self.timer_allowed(session.profile_id), client_id)
+            run.model_preset = {key: preset.get(key) for key in ('base_url', 'model')}
             self._runs[run_id] = run
             run.access = self.access_for(session.profile_id)
             run.session = session
         return run
 
-    async def status(self, *, refresh=False):
+    async def status(self, *, refresh=False, preset=None):
         settings = self.settings
-        preset = self.app.state.config.get_active_llm_preset()
-        if refresh or self._health is None or time.monotonic() - self._health_at > 10:
-            self._health = await asyncio.to_thread(self._probe, preset)
-            self._health_at = time.monotonic()
         manager = getattr(self.app.state, 'session_manager', None)
         current = manager.get_current() if callable(getattr(manager, 'get_current', None)) else None
         effective = self.tools_allowed(current.profile_id) if current is not None else settings['enabled']
-        return {**settings, **self._health, "model": preset.get("model", ""), 'effective_enabled': effective,
-                "state": "disabled" if not effective else ("ready" if self._health["available"] else "unavailable")}
+        try:
+            if preset is None:
+                preset = self.tool_model_preset()
+        except ValueError as error:
+            preset = {}
+            health = {'available': False, 'detail': str(error)}
+        else:
+            model_key = (preset.get('base_url'), preset.get('model'))
+            if refresh or self._health is None or model_key != self._health_model or time.monotonic() - self._health_at > 10:
+                self._health = await asyncio.to_thread(self._probe, preset)
+                self._health_at = time.monotonic()
+                self._health_model = model_key
+            health = self._health
+        return {**settings, **health, "model": preset.get("model", ""), 'effective_enabled': effective,
+                "state": "disabled" if not effective else ("ready" if health["available"] else "unavailable")}
 
     def _probe(self, preset):
         try:
@@ -322,7 +346,7 @@ class AgentRuntime:
         try:
             await self._publish(run, {"type": "started"})
             self._authorize(run)
-            readiness = await self.status()
+            readiness = await self.status(preset=run.model_preset)
             if not readiness["available"]:
                 raise RuntimeError(readiness["detail"])
             if run.access.get('workspace_enabled'):

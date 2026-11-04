@@ -28,7 +28,7 @@ docker build -t shikigami-harness:workspace-0.2.1rc2 integrations/deepseek-harne
 
 The root requirements include `mcp==1.26.0`; the image installs the pinned Harness dependencies from this integration's requirements. The workspace image adds Python, Pillow and Matplotlib for bounded code/image tasks. Both the SDK and runtime-bin are pinned to `0.2.1rc2`. Building the image and installing dependencies require network access.
 
-Start the application normally. Configure the existing **Models** tab, then open **Settings → Tools** to set AI tool defaults and inspect runtime status. Tools displays the current model preset read-only; it follows the existing model selection and has no separate key form. Advanced settings control request and timeout limits. **Profile → Tools** controls that profile's timer permission and overrides for tools, autonomy and capabilities.
+Start the application normally. In **Settings → Models → Tool execution model**, select a saved preset or keep the default that follows the active chat preset. This model handles the whole Harness chat turn, including turns without a tool call, and autonomous tasks. Ordinary chat and reflection retain their own presets. **Settings → Tools** shows the effective model and controls request and timeout limits. **Profile → Tools** controls that profile's timer permission and overrides for tools, autonomy and capabilities.
 
 Enable only the capabilities needed for a task, through application defaults in **Settings → Tools** or character overrides in **Profile → Tools**. These defaults live under the existing `agent` configuration; all default to `false`:
 

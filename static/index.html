@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261102trisync1"></script>
+  <script src="js/i18n.js?v=20261104toolmodel1"></script>
 </head>
 <body>
 
@@ -1537,6 +1537,22 @@
           </div>
 
         </div>
+
+        <collapsible-section :title="t('agentModel')">
+          <p class="form-hint">{{ t('agentModelHint') }}</p>
+          <div class="form-field">
+            <label class="form-label" for="tool-model-preset">{{ t('lblUsePreset') }}</label>
+            <select id="tool-model-preset" class="form-select" :value="agentSettingsForm.model_preset"
+                    :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                    @change="saveAgentSettings({model_preset: $event.target.value})">
+              <option value="">{{ t('optActiveModel') }}</option>
+              <option v-if="agentSettingsForm.model_preset && !llmPresets[agentSettingsForm.model_preset]"
+                      :value="agentSettingsForm.model_preset" disabled>{{ agentSettingsForm.model_preset }} · {{ t('agentModelMissing') }}</option>
+              <option v-for="(preset, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
+            </select>
+            <p v-if="agentSettingsError" role="alert" class="form-hint">{{ agentSettingsError }}</p>
+          </div>
+        </collapsible-section>
 
         <!-- Analysis model (collapsible) — 情绪/好感度辅助模型 -->
         <collapsible-section :title="t('llmAnalysisSectionTitle')">
@@ -5575,7 +5591,7 @@
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
 <script src="js/api-paths.js?v=20261102trisync1"></script>
 <script src="js/components.js?v=20261102trisync1"></script>
-<script src="js/settings.js?v=20261102trisync1"></script>
+<script src="js/settings.js?v=20261104toolmodel1"></script>
 <script src="js/agent-ui.js?v=20261102trisync1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261102trisync1"></script>

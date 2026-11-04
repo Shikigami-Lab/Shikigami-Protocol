@@ -10,6 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- [Tools] Select a separate saved model preset for Harness chat turns and autonomous tasks in Models settings. The default follows the active chat model.
 - [Tools] **Tool-assisted single chat and persistent character workspaces.** Opt-in file/code tasks, controlled web retrieval/search, original-history lookup and timers use the existing chat UI. The workspace drawer provides **Files**, **Plans** and **Tasks**, with file descriptions, separate user todos / character plans, artifact links and Stop/Continue controls.
 - [Reflection] **Opt-in autonomous tasks.** The selected single-chat character can start enabled tool work through the existing reflection loop; admitted tasks retain their owner after switching. Results return to that character's reflection without background chat messages. Autonomous tasks cannot change user todos or use timers; character on/off/inherit settings override application defaults while shared budgets and time limits remain hard bounds.
 

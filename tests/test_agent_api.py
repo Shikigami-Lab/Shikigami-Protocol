@@ -341,6 +341,27 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runtime._probe.call_count, 2)
         self.assertEqual(self.runtime._runs, {})
 
+    async def test_tool_model_selection_persists_and_updates_status(self):
+        self.config.llm_presets = {'small': {**PRESET, 'model': 'tool-fixture'}}
+        before = await self.request('GET', '/status')
+        self.assertEqual(before.json()['model'], 'fixture')
+        saved = await self.request('PATCH', '/settings', json={'model_preset': 'small'})
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()['model_preset'], 'small')
+        self.assertEqual(YAML().load(self.settings_path.read_text(encoding='utf-8'))['agent']['model_preset'], 'small')
+        status = await self.request('GET', '/status')
+        self.assertEqual(status.json()['model'], 'tool-fixture')
+        self.assertEqual(self.runtime._probe.call_count, 2)
+        invalid = await self.request('PATCH', '/settings', json={'model_preset': 'missing'})
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(self.config.agent['model_preset'], 'small')
+        self.config.llm_presets.clear()
+        missing = await self.request('GET', '/status')
+        self.assertEqual(missing.json()['state'], 'unavailable')
+        inherited = await self.request('PATCH', '/settings', json={'model_preset': ''})
+        self.assertEqual(inherited.status_code, 200)
+        self.assertEqual((await self.request('GET', '/status')).json()['model'], 'fixture')
+
     async def test_cross_origin_cannot_read_metadata_or_mutate(self):
         run = self.prepare()
         before_yaml = self.settings_path.read_bytes()

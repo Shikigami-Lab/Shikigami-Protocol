@@ -31,7 +31,7 @@ class AutonomyTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.autonomy = self.runner
         self.started = []
         self.messages = [{'role': 'system', 'content': 'Synthetic character'}, {'role': 'user', 'content': 'Synthetic action'}]
-        self.builder = patch.object(self.runner, '_build_messages', side_effect=lambda s, g: self.messages)
+        self.builder = patch.object(self.runner, '_build_messages', side_effect=lambda s, g, p: self.messages)
         self.builder.start()
         self.addCleanup(self.builder.stop)
 
@@ -52,6 +52,16 @@ class AutonomyTests(unittest.IsolatedAsyncioTestCase):
 
     async def settle(self):
         await asyncio.gather(*list(self.runner.tasks))
+
+    async def test_selected_tool_model_is_used_for_autonomy_prompt_and_gateway(self):
+        selected = {'base_url': 'http://localhost:9999/v1', 'model': 'tool-fixture'}
+        self.config.llm_presets = {'tools': selected}
+        self.config.agent['model_preset'] = 'tools'
+        self.assertTrue(await self.runner.start(self.current, 'write a note', 'model-choice'))
+        await self.settle()
+        self.assertEqual(self.started[0].gateway.route['model'], 'tool-fixture')
+        self.assertEqual(self.runner._build_messages.call_args.args[2], selected)
+        self.assertEqual(self.config.get_active_llm_preset()['model'], 'fake')
 
     async def test_default_off_and_strict_settings(self):
         self.assertFalse(normalize_settings()['autonomy_enabled'])
