@@ -52,6 +52,8 @@ def read_time_notice(locale='zh') -> str:
         return ('Memory/portrait update times are maintenance metadata, not event dates. Use explicit event '
                 'dates in the text. Unanchored relative dates in older memories are uncertain; consult original '
                 'dated messages when needed instead of interpreting them relative to today. A past scheduled '
-                'date alone does not prove the event actually happened.')
+                'date alone does not prove the event actually happened. For unconfirmed plans, ask whether they '
+                'went ahead instead of asking how they went. Do not presuppose attendance or completion.')
     return ('记忆/画像更新时间仅表示维护时间，不代表事件发生或原话说出的时间。事件以正文明确日期为准；'
-            '旧记录中未绑定原话日期的相对时间不能按今天重算，必要时查带日期的原始对话确认。计划日期已过也不代表事情已经发生。')
+            '旧记录中未绑定原话日期的相对时间不能按今天重算，必要时查带日期的原始对话确认。计划日期已过也不代表事情已经发生。'
+            '对于尚无完成证据的计划，只能询问后来是否成行；不要用“面试顺利吗”等预设已经参加或完成的问题。')
