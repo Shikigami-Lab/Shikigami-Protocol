@@ -280,6 +280,22 @@ class ConversationStore:
         return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
                 for row in rows]
 
+    def memory_turn_batch_after(self, after_id: int, max_user_turns: int) -> List[Dict]:
+        """Read complete user turns so extraction cadence can keep up with chat."""
+        boundary = self._conn.execute(
+            "SELECT id FROM messages WHERE id > ? AND timestamp >= ? AND role='user' "
+            "ORDER BY id LIMIT 1 OFFSET ?",
+            (after_id, self.context_since_ts, max_user_turns),
+        ).fetchone()
+        upper = boundary[0] - 1 if boundary else self.memory_tail_id()
+        rows = self._conn.execute(
+            "SELECT id, role, content, sender, timestamp, generation_status FROM messages "
+            "WHERE id > ? AND id <= ? AND timestamp >= ? ORDER BY id",
+            (after_id, upper, self.context_since_ts),
+        ).fetchall()
+        return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
+                for row in rows]
+
     def has_memory_evidence(self, message: Dict) -> bool:
         row = self._conn.execute(
             "SELECT role, content, sender, timestamp FROM messages WHERE id=? AND timestamp >= ?",

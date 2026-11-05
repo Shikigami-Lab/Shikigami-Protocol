@@ -220,3 +220,32 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         group.append("assistant", "群聊回复")
         await self.manager.auto_extract(sources, {}, self.app, first_message=("group:g", group_mid))
         self.assertIn(("group:g", group_mid), [(row["source"], row["id"]) for row in self.model.call_args.args[0]])
+
+    async def test_thirty_turn_cadence_processes_all_sixty_messages(self):
+        self.manager._cfg["extraction_frequency"] = 30
+        Path(self.manager._meta_path).write_text('{"extraction_turns":{"single":0}}', encoding="utf-8")
+        self.model.return_value = []
+        self.model.reset_mock()
+        for i in range(30):
+            mid = self.chat.append("user", f"normal user message {i}")
+            self.chat.append("assistant", "completed reply")
+            await self.manager.auto_extract(self.sources, {}, self.app, first_message=("single", mid))
+        self.assertEqual(self.manager.facts.source_cursors()["single"], self.chat.memory_tail_id())
+        self.assertEqual(len(self.model.call_args.args[0]), 60)
+        self.assertEqual(self.model.await_count, 1)
+
+    async def test_group_cadence_uses_complete_turns_with_multiple_assistants(self):
+        self.manager._cfg["extraction_frequency"] = 30
+        self.model.return_value = []
+        self.model.reset_mock()
+        group = ConversationStore(str(self.root / "large-group"), max_turns=0)
+        self.addCleanup(group.close)
+        sources = {**self.sources, "group:large": group}
+        for i in range(30):
+            mid = group.append("user", f"group user message {i}")
+            for sender in ("A", "B", "C"):
+                group.append("assistant", "completed group reply", sender=sender)
+            await self.manager.auto_extract(sources, {}, self.app, first_message=("group:large", mid))
+        self.assertEqual(self.manager.facts.source_cursors()["group:large"], group.memory_tail_id())
+        self.assertEqual(len(self.model.call_args.args[0]), 120)
+        self.assertEqual(self.model.await_count, 1)

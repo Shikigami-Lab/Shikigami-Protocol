@@ -311,13 +311,15 @@ class MemoryManager:
             rows = []
             next_cursors = dict(cursors)
             if due:
-                limit = max(2, 40 // max(1, len(sources)))
                 for source, store in sources.items():
                     # Another store may already contain a user message whose first reply
                     # is still streaming. Initialize that store on its own callback.
                     if source not in cursors:
                         continue
-                    fresh = store.memory_messages_after(cursors[source], limit)
+                    if source == trigger:
+                        fresh = store.memory_turn_batch_after(cursors[source], max(20, frequency * 2))
+                    else:
+                        fresh = store.memory_messages_after(cursors[source], 2)
                     if fresh:
                         next_cursors[source] = fresh[-1]["id"]
                     rows.extend(dict(row, source=source) for row in fresh if _is_memory_turn(row))
