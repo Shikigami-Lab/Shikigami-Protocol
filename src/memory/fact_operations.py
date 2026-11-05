@@ -75,7 +75,7 @@ def _parse_date(value):
 
 def _supported_evidence(operation, rows_by_ref):
     refs = operation.get("evidence")
-    if not isinstance(refs, list) or not 0 < len(refs) <= 8:
+    if not isinstance(refs, list) or not refs or len(refs) > len(rows_by_ref):
         return []
     result = []
     for ref in refs:

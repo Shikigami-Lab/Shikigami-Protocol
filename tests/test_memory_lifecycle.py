@@ -249,3 +249,21 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.facts.source_cursors()["group:large"], group.memory_tail_id())
         self.assertEqual(len(self.model.call_args.args[0]), 120)
         self.assertEqual(self.model.await_count, 1)
+
+
+    async def test_one_confirmation_can_cite_ten_valid_user_messages(self):
+        await self.turn("我喝茶不加糖", {"op": "add", "kind": "stable", "content": "用户喝茶不加糖"})
+        fid = self.manager.facts.get_all()[0].id
+        self.manager._cfg["extraction_frequency"] = 10
+        Path(self.manager._meta_path).write_text('{"extraction_turns":{"single":0}}', encoding="utf-8")
+        refs = []
+        for i in range(10):
+            mid = self.chat.append("user", f"喝茶仍然不加糖，第{i+1}次确认")
+            self.chat.append("assistant", "收到")
+            refs.append(f"single:{mid}")
+            self.model.return_value = [{"op": "confirm", "fact_id": fid, "evidence": refs.copy()}]
+            await self.manager.auto_extract(self.sources, {}, self.app, first_message=("single", mid))
+        self.assertEqual(self.manager.facts.source_cursors()["single"], self.chat.memory_tail_id())
+        fact = self.manager.facts.get_by_id(fid)
+        self.assertEqual(len(fact.evidence), 11)
+        self.assertEqual(self.manager.facts.count(), 1)
