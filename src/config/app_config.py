@@ -126,6 +126,7 @@ class AppConfig:
             "day_summary_max_messages": 100,      # 写日记/日摘要时单日最多取多少条对话（超出截断）
             "day_summary_max_conv_chars": 12000,   # 发给模型的对话总文本最大字符数（超出截断）
             "daily_forgetting_enabled": False,
+            "daily_curation_enabled": False,
             "daily_decay_factor": 0.998,
             "daily_decay_min_weight": 0.1,
             "daily_reinforcement_enabled": False,

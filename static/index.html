@@ -11,12 +11,12 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20261105lucide1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261105memoryviews1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261107curation1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261105memoryviews1"></script>
+  <script src="js/i18n.js?v=20261107curation3"></script>
 </head>
 <body>
 
@@ -4833,7 +4833,7 @@
           <button type="button" :aria-pressed="memoryActiveSubTab==='vectors'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='vectors'}]" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="memoryActiveSubTab='vectors'">{{ t('memTabVectors') }}</button>
           <button type="button" :aria-pressed="memoryActiveSubTab==='summaries'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='summaries'}]" @click="memoryActiveSubTab='summaries'; loadDiaryPreview(memoryProfileId)">{{ t('memTabSummaries') }}</button>
           <button type="button" :aria-pressed="memoryActiveSubTab==='history'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='history'}]" @click="memoryActiveSubTab='history'; loadChatHistory(memoryProfileId)">{{ t('memTabHistory') }}</button>
-          <button type="button" :aria-pressed="memoryActiveSubTab==='maintenance'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='maintenance'}]" @click="memoryActiveSubTab='maintenance'">{{ t('memTabMaintenance') }}</button>
+          <button type="button" :aria-pressed="memoryActiveSubTab==='maintenance'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='maintenance'}]" @click="memoryActiveSubTab='maintenance'; loadMemoryStatus(memoryProfileId)">{{ t('memTabMaintenance') }}</button>
         </div>
         <!-- 子 Tab 内容复用：事实库/向量/摘要/历史 与设置里原记忆 Tab 一致，见下方 memory-panel-sub 占位，由下一段注入 -->
         <div class="memory-panel-sub" :inert="memoryPanelLoading || !memoryProfileId">
@@ -4853,6 +4853,12 @@
               <button class="s-btn s-btn-primary" style="font-size:12px;padding:4px 10px;" @click="addMemoryFact()">{{ t('btnAddFact') }}</button>
             </div>
             <div class="mem-sort-bar">
+              <select class="form-select mem-fact-status-filter" v-model="factFilterStatus"
+                      :aria-label="t('lblFactStatusFilter')" @change="factsDisplayLimit = 30">
+                <option value="active">{{ t('memFactFilterActive') }}</option>
+                <option value="archived">{{ t('memFactFilterArchived') }}</option>
+                <option value="review">{{ t('memFactFilterReview') }}</option>
+              </select>
               <span class="mem-sort-label">{{ t('lblFactSortBy') }}</span>
               <button :class="['mem-sort-btn', factSortBy==='time'?'active':'']" @click="factSortBy='time'">{{ t('btnSortByTime') }}</button>
               <button :class="['mem-sort-btn', factSortBy==='category'?'active':'']" @click="factSortBy='category'">{{ t('btnSortByCategory') }}</button>
@@ -4864,7 +4870,9 @@
               <span class="mem-sort-count">{{ sortedMemoryFacts.length }}/{{ memoryFacts.length }}</span>
             </div>
             <div class="mem-list">
-              <div v-if="memoryFacts.length === 0" class="mem-empty">{{ t('memEmptyFacts') }}</div>
+              <div v-if="sortedMemoryFacts.length === 0" class="mem-empty">
+                {{ t(memoryFacts.length ? 'memEmptyFactFilter' : 'memEmptyFacts') }}
+              </div>
               <div v-for="fact in displayedMemoryFacts" :key="fact.id" class="mem-fact-row">
                 <template v-if="memoryEditingFact && memoryEditingFact.id === fact.id">
                   <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
@@ -4889,9 +4897,9 @@
                   <span class="mem-cat-badge">{{ fact.category || 'other' }}</span>
                   <span :class="['mem-fact-content', fact.pinned ? 'pinned' : '']">{{ fact.content }}</span>
                   <span v-if="fact.event_date" class="mem-cat-badge">{{ t('memFactEventDate') }} {{ fact.event_date }}</span>
-                  <span v-if="fact.archived || (fact.expires_at && fact.expires_at * 1000 <= Date.now())" class="mem-cat-badge">
-                    {{ t(fact.archived ? 'memFactArchived' : 'memFactExpired') }}
-                  </span>
+                  <span v-if="fact.archived" class="mem-cat-badge">{{ t('memFactArchived') }}</span>
+                  <span v-if="memoryFactExpired(fact)" class="mem-cat-badge">{{ t('memFactExpired') }}</span>
+                  <span v-if="fact.review_note" class="mem-cat-badge">{{ t('memFactFilterReview') }}</span>
                   <span v-if="fact.emotional_note" class="mem-emotional-badge">{{ fact.emotional_note }}</span>
                   <span :class="['mem-source-badge', fact.source === 'manual' ? 'manual' : 'auto']">{{ fact.source }}</span>
                   <span class="mem-weight-badge" :title="t('lblImportance')">{{ t('lblWeightBadge') }} {{ fact.weight != null ? Math.round(Number(fact.weight) * 100) / 100 : 1 }}</span>
@@ -4899,6 +4907,21 @@
                   <button :class="['icon-btn', fact.pinned ? 'pinned-active' : '']" :title="fact.pinned ? t('titlePinned') : t('titleNotPinned')" @click="toggleMemoryFactPin(fact)"><app-icon name="pin" :size="14"></app-icon></button>
                   <button class="icon-btn" :title="t('titleEditFact')" @click="startEditMemoryFact(fact)"><app-icon name="pencil" :size="14"></app-icon></button>
                   <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryFact(fact.id)"><app-icon name="x" :size="14"></app-icon></button>
+                  <button v-if="fact.archived && fact.archive_revision" type="button" class="s-btn s-btn-secondary mem-restore-btn"
+                          :disabled="!!memoryRestoringFactId || !!memoryCurationPending"
+                          @click="restoreMemoryFact(fact)">
+                    {{ t(memoryRestoringFactId === fact.id ? 'btnMemoryFactRestoring' : 'btnMemoryFactRestore') }}
+                  </button>
+                  <div v-if="fact.archived || fact.review_note" class="mem-fact-curation-details">
+                    <div v-if="fact.archived">
+                      {{ memoryArchiveReasonLabel(fact.archive_reason) }} · {{ memoryArchiveRecallLabel(fact) }}
+                    </div>
+                    <div v-if="fact.archive_note">{{ fact.archive_note }}</div>
+                    <div v-if="fact.merged_into">
+                      {{ t('memCurationMergeTarget') }} · {{ memoryArchiveTarget(fact)?.content || fact.merged_into }}
+                    </div>
+                    <div v-if="fact.review_note">{{ t('memFactFilterReview') }} · {{ fact.review_note }}</div>
+                  </div>
                   <details v-if="fact.versions?.length" class="mem-fact-versions">
                     <summary>{{ t('memFactEarlierVersions') }} · {{ fact.versions.length }}</summary>
                     <div v-for="(version, index) in fact.versions" :key="index">{{ version.content }}</div>
@@ -4942,6 +4965,96 @@
                     <span>{{ t('memMaintenanceStaleVectors') }}</span>
                     <span>{{ forgettingPreview.orphan_cleanup.enabled ? memItemCountText(forgettingPreview.orphan_cleanup.would_delete_count) : t('memMaintenanceVectorUnavailable') }}</span>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="s-card memory-maintenance-card">
+              <div class="s-card-title">{{ t('memCurationTitle') }}</div>
+              <p class="mem-cfg-hint">{{ t('hintMemoryCurationModel') }}</p>
+              <div class="memory-maintenance-actions">
+                <button type="button" class="s-btn s-btn-secondary"
+                        :disabled="!!memoryCurationPending || !!memoryRestoringFactId || !memoryProfileId"
+                        @click="loadMemoryCurationPreview(memoryProfileId)">
+                  {{ t(memoryCurationPending === 'preview' ? 'btnMemoryCurationGenerating' : 'btnMemoryCurationGenerate') }}
+                </button>
+              </div>
+
+              <div v-if="memoryCurationPreview" class="mem-curation-preview">
+                <div class="mem-diary-preview-title">{{ t('memCurationPreviewTitle') }}</div>
+                <div class="mem-curation-counts">
+                  <span v-for="(count, action) in memoryCurationCounts" :key="action" class="mem-cat-badge">
+                    {{ t('memCurationAction_' + action) }} · {{ count }}
+                  </span>
+                </div>
+                <div v-if="memoryCurationPreview.items.length" class="mem-list">
+                  <div v-for="item in memoryCurationPreview.items" :key="item.fact_id" class="mem-curation-item">
+                    <div class="mem-curation-meta">
+                      <label v-if="isMemoryCurationChange(item)" class="mem-curation-choice">
+                        <input type="checkbox" v-model="memoryCurationSelection" :value="item.fact_id"
+                               :disabled="!!memoryCurationPending"
+                               :aria-label="t('memCurationAction_' + item.action) + ' · ' + item.content" />
+                        <span class="mem-cat-badge">{{ t('memCurationAction_' + item.action) }}</span>
+                      </label>
+                      <span v-else class="mem-cat-badge">{{ t('memCurationAction_' + item.action) }}</span>
+                      <span>{{ item.fact_id }}</span>
+                    </div>
+                    <div class="mem-curation-original">{{ item.content }}</div>
+                    <div v-if="item.archive_reason" class="mem-curation-meta">{{ memoryArchiveReasonLabel(item.archive_reason) }}</div>
+                    <div v-if="item.reason" class="mem-curation-meta">{{ item.reason }}</div>
+                    <div v-if="item.target_id || item.target_content" class="mem-curation-meta">
+                      {{ t('memCurationMergeTarget') }} · {{ item.target_content || item.target_id }}
+                      <span v-if="item.target_content && item.target_id">({{ item.target_id }})</span>
+                    </div>
+                  </div>
+                </div>
+                <p v-if="memoryCurationCounts.keep" class="mem-cfg-hint">{{ t('hintMemoryCurationKeep') }}</p>
+                <div v-if="memoryCurationSelection.length || memoryCurationCounts.keep" class="memory-maintenance-actions">
+                  <button type="button" class="s-btn s-btn-primary"
+                          :disabled="!!memoryCurationPending || !!memoryRestoringFactId"
+                          @click="applyMemoryCuration()">
+                    {{ t(memoryCurationPending === 'apply' ? 'btnMemoryCurationApplying'
+                         : memoryCurationSelection.length ? 'btnMemoryCurationApply' : 'btnMemoryCurationMarkReviewed') }}
+                  </button>
+                </div>
+                <p v-else class="mem-cfg-hint">
+                  {{ t(memoryCurationPreview.items.length ? 'memCurationSelectChanges' : 'memCurationNoChanges') }}
+                </p>
+              </div>
+
+              <template v-if="memoryStatus?.curation">
+                <div id="memory-curation-latest" class="mem-curation-preview">
+                  <div class="mem-diary-preview-title">{{ t('memCurationLatestTitle') }}</div>
+                  <template v-if="memoryStatus.curation.latest">
+                    <p class="mem-cfg-hint">
+                      {{ t('memCurationOrigin_' + memoryStatus.curation.latest.origin) }} ·
+                      {{ new Date(memoryStatus.curation.latest.at * 1000).toLocaleString() }}
+                    </p>
+                    <div class="mem-curation-counts">
+                      <span class="mem-cat-badge">{{ t('memCurationAction_merge') }} · {{ memoryStatus.curation.latest.counts.merged }}</span>
+                      <span class="mem-cat-badge">{{ t('memCurationAction_archive') }} · {{ memoryStatus.curation.latest.counts.archived }}</span>
+                      <span class="mem-cat-badge">{{ t('memCurationAction_review') }} · {{ memoryStatus.curation.latest.counts.reviewed }}</span>
+                    </div>
+                  </template>
+                  <p v-else class="mem-cfg-hint">{{ t('memCurationLatestEmpty') }}</p>
+                </div>
+                <div id="memory-curation-daily-status" class="mem-curation-preview">
+                  <div class="mem-diary-preview-title">{{ t('memDailyCurationStatusTitle') }}</div>
+                  <p v-if="memoryStatus.curation.daily" class="mem-cfg-hint">
+                    {{ memoryStatus.curation.daily.day }} · {{ t('memDailyCurationStatus_' + memoryStatus.curation.daily.status) }}
+                  </p>
+                  <p v-else class="mem-cfg-hint">{{ t('memDailyCurationStatusEmpty') }}</p>
+                </div>
+                <p id="memory-curation-index-pending" v-if="memoryStatus.vector_ok && memoryStatus.curation.index_pending"
+                   class="mem-cfg-hint">{{ t('memCurationIndexPending') }}</p>
+              </template>
+
+              <div v-if="memoryCurationResult" class="mem-curation-preview" role="status">
+                <div class="mem-diary-preview-title">{{ t('memCurationResultTitle') }}</div>
+                <div class="mem-curation-counts">
+                  <span class="mem-cat-badge">{{ t('memCurationAction_merge') }} · {{ memoryCurationResult.merged }}</span>
+                  <span class="mem-cat-badge">{{ t('memCurationAction_archive') }} · {{ memoryCurationResult.archived }}</span>
+                  <span class="mem-cat-badge">{{ t('memCurationAction_review') }} · {{ memoryCurationResult.reviewed }}</span>
                 </div>
               </div>
             </div>
@@ -5262,6 +5375,17 @@
               </label>
             </div>
             <div class="form-hint">{{ t('hintEnableDailyForgetting') }}</div>
+
+            <div class="param-row" style="margin-top:10px;">
+              <span class="param-label">{{ t('lblEnableDailyCuration') }}</span>
+              <label class="toggle-switch">
+                <input id="memory-daily-curation-global" type="checkbox" v-model="memoryGlobalForm.daily_curation_enabled"
+                       :aria-label="t('lblEnableDailyCuration')" aria-describedby="memory-daily-curation-global-hint"
+                       :disabled="!memoryGlobalFormLoaded" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div id="memory-daily-curation-global-hint" class="form-hint">{{ t('hintDailyCuration') }}</div>
           </div><!-- end Maintenance card -->
 
           <!-- Global auto-save indicator -->
@@ -5296,6 +5420,7 @@
                 <label class="form-label" for="memory-extraction-model">{{ t('lblExtractionModel') }}</label>
                 <select id="memory-extraction-model" class="form-select" v-model="memoryTabProfileForm.extraction_llm_preset"
                         :disabled="!memoryProfileId">
+                  <option :value="null">{{ t('optInheritGlobal') }}</option>
                   <option value="__none__">{{ t('optNotSet') }}</option>
                   <option value="">{{ t('optActiveModel') }}</option>
                   <option v-if="isMissingModelPreset(memoryTabProfileForm.extraction_llm_preset)"
@@ -5424,6 +5549,18 @@
                 </div>
               </div>
               <p class="mem-cfg-hint">{{ t('hintEnableDailyForgetting') }}</p>
+              <div class="mem-cfg-item">
+                <div class="param-row">
+                  <label for="memory-daily-curation-profile" class="param-label">{{ t('lblEnableDailyCuration') }}</label>
+                  <select id="memory-daily-curation-profile" class="form-select" v-model="memoryTabProfileForm.daily_curation_enabled"
+                          aria-describedby="memory-daily-curation-profile-hint" style="min-width:120px;">
+                    <option :value="null">{{ t('optInheritGlobal') }}</option>
+                    <option :value="true">{{ t('optOn') }}</option>
+                    <option :value="false">{{ t('optOff') }}</option>
+                  </select>
+                </div>
+              </div>
+              <p id="memory-daily-curation-profile-hint" class="mem-cfg-hint">{{ t('hintDailyCuration') }}</p>
             </div>
 
             <!-- Group Recap -->
@@ -5433,17 +5570,19 @@
                 <div class="param-row">
                   <span class="param-label" style="font-weight:500;">{{ t('lblGroupMergeHistory') }}</span>
                   <label class="toggle-switch">
-                    <input type="checkbox" :aria-label="t('lblGroupMergeHistory')" v-model="memoryTabProfileForm.group_chat_merge_into_history" />
+                    <input id="memory-group-merge-history" type="checkbox" :aria-label="t('lblGroupMergeHistory')"
+                           :checked="memoryTabProfileForm.group_chat_merge_into_history !== false"
+                           @change="memoryTabProfileForm.group_chat_merge_into_history = $event.target.checked" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
                 <p class="mem-cfg-hint">{{ t('hintGroupMergeHistory') }}</p>
               </div>
-              <div class="settings-param-block" :class="{ disabled: !memoryTabProfileForm.group_chat_merge_into_history }">
+              <div class="settings-param-block" :class="{ disabled: memoryTabProfileForm.group_chat_merge_into_history === false }">
                 <div class="param-row" style="margin-top:8px;">
                   <span class="param-label">{{ t('lblGroupRecapMaxGroups') }}</span>
                   <input type="number" class="seg-num-input" min="1" max="20"
-                         v-model="memoryTabProfileForm.group_chat_self_recap_max_groups" placeholder="5" style="width:64px;" :disabled="!memoryTabProfileForm.group_chat_merge_into_history" />
+                         v-model="memoryTabProfileForm.group_chat_self_recap_max_groups" placeholder="5" style="width:64px;" :disabled="memoryTabProfileForm.group_chat_merge_into_history === false" />
                 </div>
                 <div class="form-hint">{{ t('hintGroupRecapMaxGroups') }}</div>
               </div>
@@ -5605,10 +5744,10 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261102trisync1"></script>
+<script src="js/api-paths.js?v=20261107curation1"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261105memoryviews1"></script>
+<script src="js/settings.js?v=20261107curation3"></script>
 <script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261105lucide1"></script>

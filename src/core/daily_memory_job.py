@@ -6,6 +6,8 @@ import os
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
+from src.memory.curation import curation_for, curation_preset, request_suggestions
+
 logger = logging.getLogger(__name__)
 
 _LAST_DAILY_RUN_FILE = "last_daily_run.json"
@@ -234,6 +236,26 @@ async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool 
         logger.exception("[daily_memory_job] portrait 刷新失败 profile=%s: %s", profile_id, e)
 
 
+async def _run_daily_curation(session, today: str, app) -> None:
+    def active_manager():
+        manager = _get_manager_for_session(session, app)
+        if manager and manager._cfg.get("enabled") and manager._cfg.get("daily_curation_enabled"):
+            return manager
+        return None
+
+    manager = active_manager()
+    if manager is None:
+        return
+    try:
+        preset = curation_preset(manager, app)
+        async def decide(rows):
+            return await request_suggestions(rows, preset)
+
+        await curation_for(manager).run_daily(today, decide, enabled=lambda: active_manager() is manager)
+    except Exception:
+        logger.warning("Daily curation unavailable for profile %s", session.profile_id)
+
+
 async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
     """分别运行日摘要、画像和事实索引维护。同一天的启动补跑和定时运行共用标记。"""
     sm = getattr(app.state, "session_manager", None)
@@ -252,12 +274,17 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
         logger.debug("[daily_memory_job] profile %s 今天已跑过每日任务，跳过", profile_id)
         return
 
+    await _run_daily_curation(session, today_str, app)
     await run_day_summary_for_profile(profile_id, yesterday, app)
 
     # 画像有独立开关。索引维护失败也不影响当日的画像任务。
     await run_portrait_refresh_for_profile(profile_id, app)
 
-    await run_forgetting_for_profile(profile_id, app)
+    index_counts = await run_forgetting_for_profile(profile_id, app)
+    if index_counts is None:
+        manager = _get_manager_for_session(session, app)
+        if manager and manager._cfg.get("enabled"):
+            await manager.prune_curation_index()
     _save_last_daily_run(session.storage_root, today_str)
 
 

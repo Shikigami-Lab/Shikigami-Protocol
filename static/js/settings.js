@@ -387,6 +387,7 @@ const SettingsMixin = {
         daily_run_at_hour: 0,
         daily_run_at_minute: 5,
         daily_forgetting_enabled: false,
+        daily_curation_enabled: false,
         daily_decay_factor: 0.998,
         daily_decay_min_weight: 0.1,
         daily_reinforcement_enabled: false,
@@ -427,7 +428,7 @@ const SettingsMixin = {
       personaMemoryLoadSequence: 0,
       memGlobalSaveState: null,
       memProfileSaveState: null,
-      _memGlobalFormLoaded: false,
+      memoryGlobalFormLoaded: false,
       _memGlobalSaveStateTimer: null,
       _memProfileFormLoaded: false,
       _memProfileSaveStateTimer: null,
@@ -456,6 +457,11 @@ const SettingsMixin = {
       forgettingRunLoading: false,
       forgettingPreview: null,
       forgettingPreviewLoading: false,
+      memoryCurationPreview: null,
+      memoryCurationSelection: [],
+      memoryCurationResult: null,
+      memoryCurationPending: '',
+      memoryRestoringFactId: '',
       memoryChangelog: [],       // 记忆变更历史（最近 20 条）
       memoryChangelogLoading: false,
       memShowChangelog: false,   // change history starts collapsed; 20 expanded entries would push the fact list out of view
@@ -463,6 +469,7 @@ const SettingsMixin = {
       memoryRollbackLoading: false,
       factSortBy: 'time',    // 'time' | 'category' | 'weight'
       factSearch: '',
+      factFilterStatus: 'active',
       factFilterEmotional: 'all',  // 'all' | 'with_note' 有情感注记
       vectorSortBy: 'time',  // 'time' (only option for now)
       factsDisplayLimit: 30,
@@ -619,7 +626,11 @@ const SettingsMixin = {
     },
 
     sortedMemoryFacts() {
-      let facts = this.memoryFacts;
+      let facts = this.memoryFacts.filter(fact => {
+        if (this.factFilterStatus === 'review') return !!fact.review_note;
+        const archivedOrExpired = fact.archived || this.memoryFactExpired(fact);
+        return this.factFilterStatus === 'archived' ? archivedOrExpired : !archivedOrExpired;
+      });
       if (this.factFilterEmotional === 'with_note') {
         facts = facts.filter(f => (f.emotional_note || '').trim().length > 0);
       }
@@ -647,6 +658,14 @@ const SettingsMixin = {
       // pinned also sorted by time desc among themselves
       const sortedPinned = [...pinned].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
       return [...sortedPinned, ...sorted];
+    },
+
+    memoryCurationCounts() {
+      const counts = { keep: 0, merge: 0, archive: 0, review: 0 };
+      for (const item of this.memoryCurationPreview?.items || []) {
+        if (Object.hasOwn(counts, item.action)) counts[item.action]++;
+      }
+      return counts;
     },
 
     sortedMemoryVectors() {
@@ -791,7 +810,7 @@ const SettingsMixin = {
       deep: true,
       flush: 'sync',
       handler() {
-        if (!this._memGlobalFormLoaded) return;
+        if (!this.memoryGlobalFormLoaded) return;
         this.saveMemoryGlobalConfig(true, true);
       },
     },
@@ -4172,7 +4191,7 @@ const SettingsMixin = {
         if (!res.ok) return;
         const data = await res.json();
         if (!current()) return;
-        this._memGlobalFormLoaded = false;
+        this.memoryGlobalFormLoaded = false;
         this.memoryGlobalForm = {
           enabled:               data.enabled               ?? false,
           vector_enabled:        data.vector_enabled        ?? false,
@@ -4192,6 +4211,7 @@ const SettingsMixin = {
           daily_run_at_hour: data.daily_run_at_hour ?? 0,
           daily_run_at_minute: data.daily_run_at_minute ?? 5,
           daily_forgetting_enabled: data.daily_forgetting_enabled ?? false,
+          daily_curation_enabled: data.daily_curation_enabled ?? false,
           daily_decay_factor: data.daily_decay_factor ?? 0.998,
           daily_decay_min_weight: data.daily_decay_min_weight ?? 0.1,
           daily_reinforcement_enabled: data.daily_reinforcement_enabled ?? false,
@@ -4200,7 +4220,7 @@ const SettingsMixin = {
           daily_consolidation_weight_below: data.daily_consolidation_weight_below ?? 0.3,
           daily_consolidation_batch_max: data.daily_consolidation_batch_max ?? 15,
         };
-        this._memGlobalFormLoaded = true;
+        this.memoryGlobalFormLoaded = true;
       } catch (e) {
         console.error('[settings] loadMemoryGlobalConfig:', e);
       }
@@ -4230,6 +4250,7 @@ const SettingsMixin = {
         daily_run_at_hour: Math.max(0, Math.min(23, parseInt(this.memoryGlobalForm.daily_run_at_hour, 10) || 0)),
         daily_run_at_minute: Math.max(0, Math.min(59, number('daily_run_at_minute', 5))),
         daily_forgetting_enabled: !!this.memoryGlobalForm.daily_forgetting_enabled,
+        daily_curation_enabled: !!this.memoryGlobalForm.daily_curation_enabled,
         daily_decay_factor: Math.max(0.9, Math.min(1, parseFloat(this.memoryGlobalForm.daily_decay_factor) || 0.998)),
         daily_decay_min_weight: Math.max(0, Math.min(1, number('daily_decay_min_weight', 0.1, parseFloat))),
         daily_reinforcement_enabled: !!this.memoryGlobalForm.daily_reinforcement_enabled,
@@ -4398,15 +4419,16 @@ const SettingsMixin = {
           extraction_weight_threshold: _pn(cfg.extraction_weight_threshold),
           max_facts_in_prompt:    _pn(cfg.max_facts_in_prompt),
           max_history_turns:      _pn(cfg.max_history_turns),
-          extraction_llm_preset:  cfg.extraction_llm_preset ?? '',
+          extraction_llm_preset:  cfg.extraction_llm_preset ?? null,
           recent_fact_quota: _pn(cfg.recent_fact_quota),
           semantic_fact_quota: _pn(cfg.semantic_fact_quota),
           recent_days:       _pn(cfg.recent_days),
           semantic_distance: _pn(cfg.semantic_distance),
           vector_dedup_distance_threshold: _pn(cfg.vector_dedup_distance_threshold),
           group_chat_self_recap_max_groups: _pn(cfg.group_chat_self_recap_max_groups),
-          group_chat_merge_into_history: cfg.group_chat_merge_into_history !== false,
+          group_chat_merge_into_history: cfg.group_chat_merge_into_history ?? null,
           daily_forgetting_enabled: cfg.daily_forgetting_enabled ?? null,
+          daily_curation_enabled: cfg.daily_curation_enabled ?? null,
           daily_decay_factor: _pn(cfg.daily_decay_factor),
           daily_decay_min_weight: _pn(cfg.daily_decay_min_weight),
           daily_reinforcement_enabled: cfg.daily_reinforcement_enabled ?? null,
@@ -4439,8 +4461,11 @@ const SettingsMixin = {
       const form = this.memoryTabProfileForm;
       const cfg = { extraction_llm_preset: form.extraction_llm_preset };
       for (const key of ['enabled', 'vector_enabled', 'day_summary_enabled', 'daily_forgetting_enabled',
-        'daily_reinforcement_enabled', 'daily_consolidation_enabled', 'group_chat_merge_into_history']) {
+        'daily_curation_enabled', 'daily_reinforcement_enabled', 'daily_consolidation_enabled']) {
         cfg[key] = form[key];
+      }
+      if (form.group_chat_merge_into_history != null) {
+        cfg.group_chat_merge_into_history = form.group_chat_merge_into_history;
       }
       const numeric = {
         extraction_frequency: [parseInt],
@@ -4546,6 +4571,10 @@ const SettingsMixin = {
       this.syncFactsLoading = false;
       this.forgettingPreview = null;
       this.forgettingPreviewLoading = this.forgettingRunLoading = false;
+      this.clearMemoryCurationPreview();
+      this.memoryCurationResult = null;
+      this.memoryCurationPending = this.memoryRestoringFactId = '';
+      this.factFilterStatus = 'active';
       this.memoryChangelog = [];
       this.memoryChangelogLoading = this.memoryRollbackLoading = false;
       this.memChangelogExpanded = '';
@@ -4747,6 +4776,60 @@ const SettingsMixin = {
       if (row.status === 'generated') return row.truncated ? '已生成（已截断）' : '已生成';
       if (row.status === 'no_messages') return '无对话';
       return row.note || '已跳过';
+    },
+
+    memoryFactExpired(fact) {
+      return fact.expires_at != null && fact.expires_at * 1000 <= Date.now();
+    },
+
+    memoryArchiveReasonLabel(reason) {
+      const reasons = ['merged', 'cold_memory', 'low_value', 'unsupported'];
+      return this.t(reasons.includes(reason) ? 'memArchiveReason_' + reason : 'memArchiveReasonUnknown');
+    },
+
+    memoryArchiveTarget(fact) {
+      return this.memoryFacts.find(target => target.id === fact.merged_into);
+    },
+
+    memoryArchiveRecallLabel(fact) {
+      if (fact.archive_recallable === false || this.memoryFactExpired(fact)) return this.t('memArchiveRecallUnavailable');
+      if (fact.archive_reason === 'merged') {
+        const target = this.memoryArchiveTarget(fact);
+        if (target && !target.archived && !this.memoryFactExpired(target)) return this.t('memArchiveRecallMerged');
+      }
+      if (fact.archive_reason === 'cold_memory') return this.t('memArchiveRecallCold');
+      return this.t('memArchiveRecallUnavailable');
+    },
+
+    async restoreMemoryFact(fact) {
+      const profileId = this.memoryProfileId;
+      if (this.memoryRestoringFactId || this.memoryCurationPending || this.memoryPanelLoading
+          || profileId !== this.memoryContentProfileId || !this.memoryFacts.includes(fact)
+          || !fact.archived || !fact.archive_revision) return;
+      const current = this.beginMemoryRequest(profileId, 'factRestore');
+      if (!current) return;
+      this.memoryRestoringFactId = fact.id;
+      this.clearMemoryCurationPreview();
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.memoryFactRestore(profileId, fact.id), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ archive_revision: fact.archive_revision }),
+        });
+        const data = await res.json();
+        if (!current()) return;
+        if (!res.ok || data.ok !== true) {
+          this.showToast(this.t('toastMemoryFactRestoreFail'), 'error');
+          await this.loadMemoryFacts(profileId);
+          return;
+        }
+        await this.refreshMemoryAfterCuration(profileId);
+        if (current()) this.showToast(this.t('toastMemoryFactRestored'), 'success');
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryFactRestoreFail'), 'error');
+      } finally {
+        if (current()) this.memoryRestoringFactId = '';
+      }
     },
 
     async addMemoryFact() {
@@ -4967,6 +5050,84 @@ const SettingsMixin = {
       } finally {
         if (current()) this.forgettingRunLoading = false;
       }
+    },
+
+    clearMemoryCurationPreview() {
+      this.memoryCurationPreview = null;
+      this.memoryCurationSelection = [];
+    },
+
+    isMemoryCurationChange(item) {
+      return ['merge', 'archive', 'review'].includes(item.action);
+    },
+
+    async loadMemoryCurationPreview(profileId) {
+      if (this.memoryCurationPending || this.memoryRestoringFactId || this.memoryPanelLoading
+          || profileId !== this.memoryContentProfileId) return;
+      const current = this.beginMemoryRequest(profileId, 'curation');
+      if (!current) return;
+      this.memoryCurationPending = 'preview';
+      this.clearMemoryCurationPreview();
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.memoryCurationPreview(profileId), { method: 'POST' });
+        const data = await res.json();
+        if (!current()) return;
+        if (res.ok && data.profile_id === profileId && data.preview_id && Array.isArray(data.items)) {
+          this.memoryCurationPreview = data;
+          this.memoryCurationSelection = data.items.filter(this.isMemoryCurationChange).map(item => item.fact_id);
+        } else {
+          this.showToast(this.t('toastMemoryCurationPreviewFail'), 'error');
+        }
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryCurationPreviewFail'), 'error');
+      } finally {
+        if (current()) this.memoryCurationPending = '';
+      }
+    },
+
+    async applyMemoryCuration() {
+      const profileId = this.memoryProfileId;
+      const preview = this.memoryCurationPreview;
+      if (this.memoryCurationPending || this.memoryRestoringFactId || this.memoryPanelLoading
+          || !preview || preview.profile_id !== profileId) return;
+      const selectedIds = new Set(this.memoryCurationSelection);
+      const factIds = preview.items.filter(item => this.isMemoryCurationChange(item) && selectedIds.has(item.fact_id))
+        .map(item => item.fact_id);
+      if (!factIds.length && !preview.items.some(item => item.action === 'keep')) return;
+      const current = this.beginMemoryRequest(profileId, 'curation');
+      if (!current) return;
+      this.memoryCurationPending = 'apply';
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.memoryCurationApply(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preview_id: preview.preview_id, fact_ids: factIds }),
+        });
+        const data = await res.json();
+        if (!current()) return;
+        if (!res.ok || data.ok !== true) {
+          this.showToast(this.t('toastMemoryCurationApplyFail'), 'error');
+          return;
+        }
+        this.memoryCurationResult = data;
+        await this.refreshMemoryAfterCuration(profileId);
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryCurationApplyFail'), 'error');
+      } finally {
+        if (current()) {
+          this.clearMemoryCurationPreview();
+          this.memoryCurationPending = '';
+        }
+      }
+    },
+
+    refreshMemoryAfterCuration(profileId) {
+      return Promise.all([
+        this.loadMemoryFacts(profileId),
+        this.loadMemoryStatus(profileId),
+        this.loadMemoryVectors(profileId),
+        this.loadMemoryChangelog(profileId),
+      ]);
     },
 
     async loadMemoryChangelog(profileId) {

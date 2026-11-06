@@ -1,9 +1,6 @@
 """/recall, /memory status, /help 处理器"""
-import logging
-
 from src.commands.base import CommandResult
-
-logger = logging.getLogger(__name__)
+from src.memory.recall import RecallCandidates, search_vectors
 
 _HELP_TEXT = """📌 可用命令（命令结果都会通过 AI 的语言表达）：
 
@@ -39,6 +36,7 @@ async def handle_recall(query: str, session, app) -> CommandResult:
       /recall 用户穿的衣服         → 默认召回 10 条
       /recall 5 用户穿的衣服       → 召回 5 条
     """
+    query = (query or "").strip()
     if not query:
         return CommandResult(
             context_for_llm=(
@@ -62,35 +60,44 @@ async def handle_recall(query: str, session, app) -> CommandResult:
     if not mgr:
         return CommandResult(context_for_llm="[命令执行结果 · /recall]\n记忆系统尚未初始化。")
 
+    def keyword_matches(pool, sources):
+        matches = {}
+        for source in sources.values():
+            if query in source.content:
+                fact = pool.resolve(source.id)
+                matches.setdefault(fact.content, fact)
+        return list(matches.values())[:limit]
+
+    pool = RecallCandidates(mgr.facts)
+    sources = pool.ranked_sources()
+    facts = keyword_matches(pool, sources)
+    vector_rows = []
+    if len(facts) < limit and mgr.vectors and mgr.vectors.is_available():
+        vec_limit = min(limit - len(facts) + 3, 20)
+        vector_rows = search_vectors(mgr.vectors, query, vec_limit)
+        pool = RecallCandidates(mgr.facts)
+        sources = pool.ranked_sources()
+        facts = keyword_matches(pool, sources)
+
     results = []
-    seen_contents: set = set()
-
-    # 事实库关键词匹配（精确包含）
-    facts = mgr.facts.get_recallable()
-    active_by_id = {fact.id: fact for fact in facts}
-    fact_matches = [f for f in facts if query in f.content]
-    for f in fact_matches[:limit]:
-        hours = (import_time() - f.updated_at) / 3600
+    seen_contents = set()
+    for fact in facts:
+        hours = (import_time() - fact.updated_at) / 3600
         age = _format_age(hours)
-        results.append(f"- {f.content}（{f.category}，{age}前）")
-        seen_contents.add(f.content)
+        results.append(f"- {fact.content}（{fact.category}，{age}前）")
+        seen_contents.add(fact.content)
 
-    # 向量语义检索（宽松阈值，去重）
-    if len(results) < limit and mgr.vectors and mgr.vectors.is_available():
-        vec_limit = min(limit - len(results) + 3, 20)
-        vec_results = mgr.vectors.search(query, limit=vec_limit)
-        for r in vec_results:
+    if vector_rows:
+        cold_distance = min(_VEC_DIST_THRESHOLD, float(mgr._cfg.get("semantic_distance", 0.45)))
+        for content, distance in pool.vector_text_hits(
+            sources, vector_rows, mgr.fact_vector_matches, _VEC_DIST_THRESHOLD, cold_distance=cold_distance,
+        ):
             if len(results) >= limit:
                 break
-            fid = (r.get("metadata") or {}).get("fact_id")
-            if fid and (fid not in active_by_id or not mgr.fact_vector_matches(active_by_id[fid], r)):
-                continue
-            doc = r.get("document", "")
-            dist = r.get("distance", 1.0)
-            if dist < _VEC_DIST_THRESHOLD and doc not in seen_contents:
-                sim_pct = max(0, 100 - int(dist * 100))
-                results.append(f"- [语义相关·相似度{sim_pct}%] {doc}")
-                seen_contents.add(doc)
+            if content not in seen_contents:
+                sim_pct = max(0, 100 - int(distance * 100))
+                results.append(f"- [语义相关·相似度{sim_pct}%] {content}")
+                seen_contents.add(content)
 
     if not results:
         return CommandResult(

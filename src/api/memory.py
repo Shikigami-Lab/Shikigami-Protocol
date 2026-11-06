@@ -19,8 +19,10 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from src.memory.curation import CurationConflict, curation_for, curation_preset, request_suggestions
+from src.memory.recall import RecallCandidates
 from src.utils.debug_logger import (
     log_app_event,
     log_fact_add,
@@ -96,7 +98,7 @@ def _require_manager(request: Request, profile_id: str):
 @router.get("/{profile_id}/status")
 async def get_memory_status(profile_id: str, request: Request):
     mgr = _require_manager(request, profile_id)
-    return mgr.status()
+    return {**mgr.status(), "curation": mgr.facts.curation_status()}
 
 
 # ── Facts CRUD ────────────────────────────────────────────────────────────────
@@ -119,8 +121,11 @@ class FactUpdate(BaseModel):
 @router.get("/{profile_id}/facts")
 async def get_facts(profile_id: str, request: Request):
     mgr = _require_manager(request, profile_id)
-    facts = mgr.facts.get_all()
-    return {"facts": [f.to_dict() for f in facts]}
+    pool = RecallCandidates(mgr.facts)
+    return {"facts": [
+        {**fact.to_dict(), "archive_recallable": fact.id in pool.cold or fact.id in pool.aliases}
+        for fact in pool.facts
+    ]}
 
 
 @router.post("/{profile_id}/facts", status_code=201)
@@ -185,6 +190,63 @@ async def delete_fact(profile_id: str, fact_id: str, request: Request):
 
 
 # ── Vectors ───────────────────────────────────────────────────────────────────
+
+class CurationApply(BaseModel):
+    preview_id: str = Field(min_length=32, max_length=32)
+    fact_ids: Optional[List[str]] = Field(default=None, max_length=24)
+
+
+class ArchiveRestore(BaseModel):
+    archive_revision: str = Field(max_length=32)
+
+
+def _require_curation(request: Request, profile_id: str):
+    from src.api.agent import _same_origin
+    _same_origin(request)
+    manager = _require_manager(request, profile_id)
+    if manager._profile_id != profile_id:
+        raise HTTPException(status_code=404, detail="Memory profile not found")
+    return manager, curation_for(manager)
+
+
+@router.post("/{profile_id}/curation/preview")
+async def preview_curation(profile_id: str, request: Request):
+    manager, curation = _require_curation(request, profile_id)
+    try:
+        async def decide(rows):
+            return await request_suggestions(rows, curation_preset(manager, request.app))
+
+        return await curation.preview(decide)
+    except CurationConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception:
+        logger.warning("Memory curation preview failed for profile %s", profile_id)
+        raise HTTPException(status_code=502, detail="The memory model did not return a valid preview")
+
+
+@router.post("/{profile_id}/curation/apply")
+async def apply_curation(profile_id: str, body: CurationApply, request: Request):
+    manager, curation = _require_curation(request, profile_id)
+    try:
+        receipt = curation.apply(body.preview_id, body.fact_ids)
+    except CurationConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    await manager.prune_curation_index()
+    return receipt
+
+
+@router.post("/{profile_id}/facts/{fact_id}/restore")
+async def restore_archived_fact(profile_id: str, fact_id: str, body: ArchiveRestore, request: Request):
+    manager, curation = _require_curation(request, profile_id)
+    try:
+        curation.restore(fact_id, body.archive_revision)
+    except CurationConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if manager.vectors and manager.vectors.is_available():
+        await manager.reembed_fact(fact_id)
+    return {"ok": True}
+
+
 
 class VectorCreate(BaseModel):
     text: str

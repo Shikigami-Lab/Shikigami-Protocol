@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import List, Optional
@@ -23,6 +24,21 @@ _LEGACY_ADDRESS = re.compile(
     r"|^(?:the )?user.{0,26}(?:calls?|address(?:es)?) (?:the ai|you|the character)\b",
     re.IGNORECASE,
 )
+
+
+@contextmanager
+def _fact_file_lock(path: str):
+    """Serialize the disk revision check and atomic replace across processes."""
+    with open(path + ".lock", "a+b") as lock:
+        lock.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # The OS releases the advisory lock when the handle closes.
+        yield
 
 
 def _disk_stamp(stat):
@@ -55,6 +71,14 @@ class LongTermFact:
     evidence: List[dict] = field(default_factory=list)
     versions: List[dict] = field(default_factory=list)
     archived: bool = False
+    archive_reason: str = ""
+    merged_into: Optional[str] = None
+    merged_source_version: str = ""
+    merged_target_version: str = ""
+    archive_revision: str = ""
+    archive_note: str = ""
+    review_note: str = ""
+    curation_protected: bool = False
 
     def is_active(self, now: Optional[float] = None) -> bool:
         return not self.archived and (
@@ -89,6 +113,14 @@ class LongTermFact:
             evidence=list(d.get("evidence") or []),
             versions=list(d.get("versions") or []),
             archived=bool(d.get("archived", False)),
+            archive_reason=d.get("archive_reason") or "",
+            merged_into=d.get("merged_into") or None,
+            merged_source_version=d.get("merged_source_version") or "",
+            merged_target_version=d.get("merged_target_version") or "",
+            archive_revision=d.get("archive_revision") or "",
+            archive_note=d.get("archive_note") or "",
+            review_note=d.get("review_note") or "",
+            curation_protected=bool(d.get("curation_protected", False)),
         )
 
 
@@ -99,6 +131,7 @@ class LongTermStore:
         self._path = os.path.join(storage_root, "long_term_facts.json")
         self._facts: List[LongTermFact] = []
         self._cursors: dict[str, int] = {}
+        self._curation: dict = {}
         self._revision = 0
         self._disk_stamp = None
         self._load()
@@ -165,6 +198,10 @@ class LongTermStore:
                 fact.pinned = bool(v)
         if semantic_changed:
             fact.updated_at = time.time()
+            fact.curation_protected = True
+            fact.review_note = ""
+        if fact.archived and fact != self._get_by_id(fact_id):
+            fact.archive_revision = uuid.uuid4().hex
         return self._commit([fact if f.id == fact_id else f for f in self._facts], self._cursors)
 
     def delete(self, fact_id: str) -> bool:
@@ -203,6 +240,36 @@ class LongTermStore:
 
     def apply_extraction(self, revision: int, facts: List[LongTermFact], cursors: dict[str, int]) -> bool:
         return self._commit(facts, cursors, expected_revision=revision)
+
+    def curation_snapshot(self):
+        self._refresh()
+        with _WRITE_LOCK:
+            return self._revision, dict(self._cursors), deepcopy(self._facts), deepcopy(self._curation)
+
+    def curation_status(self) -> dict:
+        self._refresh()
+        with _WRITE_LOCK:
+            daily = self._curation.get("daily")
+            return {
+                "latest": deepcopy(self._curation.get("latest")),
+                "index_pending": bool(self._curation.get("index_cleanup_pending")),
+                "daily": {"day": daily["day"], "status": daily["status"]} if daily else None,
+            }
+
+    def curation_index_token(self) -> Optional[str]:
+        self._refresh()
+        with _WRITE_LOCK:
+            return self._curation.get("index_cleanup_pending")
+
+    def mark_curation_index_clean(self, token: str) -> bool:
+        revision, cursors, facts, state = self.curation_snapshot()
+        if state.get("index_cleanup_pending") != token:
+            return False
+        state.pop("index_cleanup_pending")
+        return self.apply_curation(revision, facts, cursors, state)
+
+    def apply_curation(self, revision: int, facts: List[LongTermFact], cursors: dict[str, int], state: dict) -> bool:
+        return self._commit(facts, cursors, expected_revision=revision, curation=state)
 
     def get_top_n(self, n: int) -> List[LongTermFact]:
         """返回 prompt 用事实：全部 pinned + 按 score 降序填充剩余配额。"""
@@ -279,41 +346,38 @@ class LongTermStore:
                 data = json.load(fp)
                 stamp = _disk_stamp(os.fstat(fp.fileno()))
             facts = [LongTermFact.from_dict(d) for d in data.get("facts", [])]
+            curation = data.get("curation")
+            curation = curation if isinstance(curation, dict) else {}
             cursors = {key: value for key, value in (data.get("source_cursors") or {}).items()
                        if type(value) is int and value >= 0}
         except FileNotFoundError:
-            facts, cursors, stamp = [], {}, None
+            facts, cursors, curation, stamp = [], {}, {}, None
         except (OSError, ValueError, TypeError, AttributeError) as error:
             logger.error("[LongTermStore] Could not load facts: %s", error)
             return
-        self._facts, self._cursors, self._disk_stamp = facts, cursors, stamp
+        self._facts, self._cursors, self._curation, self._disk_stamp = facts, cursors, curation, stamp
         self._revision += 1
 
     def _commit(self, facts: List[LongTermFact], cursors: dict[str, int],
-                *, expected_revision: Optional[int] = None) -> bool:
+                *, expected_revision: Optional[int] = None, curation: Optional[dict] = None) -> bool:
         """Atomically replace only the version this store instance loaded."""
         with _WRITE_LOCK:
             if expected_revision is not None and self._revision != expected_revision:
                 return False
-            return self._replace_file(facts, cursors)
+            if curation is None:
+                return self._replace_file(facts, cursors)
+            return self._replace_file(facts, cursors, curation)
 
-    def _replace_file(self, facts: List[LongTermFact], cursors: dict[str, int]) -> bool:
-        tmp = self._path + ".tmp"
+    def _replace_file(self, facts: List[LongTermFact], cursors: dict[str, int],
+                      curation: Optional[dict] = None) -> bool:
+        curation = self._curation if curation is None else curation
+        tmp = f"{self._path}.{uuid.uuid4().hex}.tmp"
         try:
-            try:
-                current = _disk_stamp(os.stat(self._path))
-            except FileNotFoundError:
-                current = None
-            if current != self._disk_stamp:
-                logger.warning("[LongTermStore] Fact file changed since this store was loaded")
-                return False
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as fp:
-                json.dump({"facts": [f.to_dict() for f in facts], "source_cursors": cursors}, fp,
-                          ensure_ascii=False, indent=2)
-                fp.flush()
-                stamp = _disk_stamp(os.fstat(fp.fileno()))
-            os.replace(tmp, self._path)
+            with _fact_file_lock(self._path):
+                stamp = self._write_current_file(tmp, facts, cursors, curation)
+                if stamp is None:
+                    return False
         except (OSError, TypeError, ValueError) as error:
             logger.error("[LongTermStore] Could not save facts: %s", error)
             if os.path.exists(tmp):
@@ -325,5 +389,24 @@ class LongTermStore:
         self._disk_stamp = stamp
         self._facts = facts
         self._cursors = dict(cursors)
+        self._curation = deepcopy(curation)
         self._revision += 1
         return True
+
+    def _write_current_file(self, tmp, facts, cursors, curation):
+        try:
+            current = _disk_stamp(os.stat(self._path))
+        except FileNotFoundError:
+            current = None
+        if current != self._disk_stamp:
+            logger.warning("[LongTermStore] Fact file changed since this store was loaded")
+            return None
+        with open(tmp, "w", encoding="utf-8") as fp:
+            payload = {"facts": [f.to_dict() for f in facts], "source_cursors": cursors}
+            if curation:
+                payload["curation"] = curation
+            json.dump(payload, fp, ensure_ascii=False, indent=2)
+            fp.flush()
+            stamp = _disk_stamp(os.fstat(fp.fileno()))
+        os.replace(tmp, self._path)
+        return stamp

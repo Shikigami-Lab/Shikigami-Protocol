@@ -31,7 +31,8 @@ from src.utils.debug_logger import (
     log_memory_startup,
     log_summary_generate,
 )
-from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates
+from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates, rank_related
+from src.memory.recall import RecallCandidates, is_cold
 from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
@@ -206,6 +207,7 @@ class MemoryManager:
         self,
         max_count: int = 4,
         min_weight: float = 0.6,
+        query: str = "",
     ) -> List[Dict[str, Any]]:
         """返回适合注入 Reflection 的高权重长期事实，供记忆引用话题。
 
@@ -213,7 +215,13 @@ class MemoryManager:
         按 weight 降序再按 updated_at 降序。只返回 content/weight/updated_at 字段。
         """
         from datetime import datetime
-        all_facts = self.facts.get_recallable()
+        if query and max_count > 0:
+            pool = RecallCandidates(self.facts)
+            all_facts = pool.active.values()
+            related_cold = rank_related(list(pool.cold.values()), query, 1)
+        else:
+            all_facts = self.facts.get_recallable()
+            related_cold = []
         filtered = [f for f in all_facts if f.weight >= min_weight]
         # 有情感注记的排前面
         filtered.sort(
@@ -225,7 +233,7 @@ class MemoryManager:
             reverse=True,
         )
         result = []
-        for f in filtered[:max_count]:
+        for f in [*related_cold, *filtered[:max_count - len(related_cold)]]:
             dt = datetime.fromtimestamp(f.updated_at).strftime("%Y-%m-%d")
             result.append({
                 "content": f.content,
@@ -246,7 +254,10 @@ class MemoryManager:
         by_id = {row["metadata"]["fact_id"]: row for row in existing
                  if (row.get("metadata") or {}).get("fact_id")}
         count = 0
-        for fact in self.facts.get_active():
+        pool = RecallCandidates(self.facts)
+        for fact in pool.facts:
+            if not (fact.is_active(pool.now) or fact.id in pool.cold):
+                continue
             if fact.id in by_id and self.fact_vector_matches(fact, by_id[fact.id]):
                 continue
             count += int(await self.reembed_fact(fact.id))
@@ -257,20 +268,25 @@ class MemoryManager:
 
     @staticmethod
     def fact_vector_matches(fact, vector) -> bool:
-        # Older vector entries predate the canonical document format.
-        return not fact.kind or vector.get("document") == _vector_document_for_fact(fact)
+        document = vector.get("document")
+        # Legacy vectors may omit the keyword suffix, but still need current text.
+        return (document == _vector_document_for_fact(fact)
+                or (not fact.kind and document == fact.content.strip()))
 
     def _fact_index_cleanup(self):
-        now = time.time()
-        active = {f.id: f for f in self.facts.get_active(now)}
-        expired = sum(not f.archived and f.expires_at is not None and f.expires_at <= now
-                      for f in self.facts.get_all())
+        vectors = self.vectors.get_all() if self.vectors and self.vectors.is_available() else []
+        pool = RecallCandidates(self.facts)
+        active = {fact.id: fact for fact in pool.facts if fact.is_active(pool.now)}
+        # Keep existing aliases only while they can lead to a current representative.
+        indexable = {**active, **pool.cold}
+        indexable.update((fact.id, fact) for fact in pool.facts if fact.id in pool.aliases)
+        expired = sum(not f.archived and f.expires_at is not None and f.expires_at <= pool.now
+                      for f in pool.facts)
         obsolete = []
-        if self.vectors and self.vectors.is_available():
-            for vector in self.vectors.get_all():
-                fact_id = (vector.get("metadata") or {}).get("fact_id")
-                if fact_id and (fact_id not in active or not self.fact_vector_matches(active[fact_id], vector)):
-                    obsolete.append(vector["id"])
+        for vector in vectors:
+            fact_id = (vector.get("metadata") or {}).get("fact_id")
+            if fact_id and (fact_id not in indexable or not self.fact_vector_matches(indexable[fact_id], vector)):
+                obsolete.append(vector["id"])
         return len(active), expired, obsolete
 
     def preview_fact_index(self) -> dict:
@@ -280,11 +296,22 @@ class MemoryManager:
     async def maintain_fact_index(self) -> dict:
         """Prune vectors for unavailable or changed facts without requesting embeddings."""
         async with self._fact_index_lock:
+            token = self.facts.curation_index_token()
             active, expired, obsolete = await asyncio.to_thread(self._fact_index_cleanup)
             removed = 0
             for vector_id in obsolete:
                 removed += int(bool(await asyncio.to_thread(self.vectors.delete, vector_id)))
+            if token and self.vectors and self.vectors.is_available() and removed == len(obsolete):
+                await asyncio.to_thread(self.facts.mark_curation_index_clean, token)
         return {"active": active, "expired": expired, "vectors_removed": removed}
+
+    async def prune_curation_index(self) -> None:
+        if not self.vectors or not self.vectors.is_available() or not self.facts.curation_index_token():
+            return
+        try:
+            await self.maintain_fact_index()
+        except Exception:
+            logger.warning("Curation index cleanup will be retried for profile %s", self._profile_id)
 
     async def auto_extract(self, sources: Dict[str, Any], profile: Dict, app,
                            emotion_context: Optional[Dict] = None, *, first_message=None) -> None:
@@ -624,7 +651,9 @@ class MemoryManager:
                 return False
             try:
                 await asyncio.to_thread(self.vectors.delete_by_fact_ids, [fact_id])
-                if not fact.is_active() or self.facts.get_by_id(fact_id) is not fact:
+                fact = self.facts.get_by_id(fact_id)
+                now = time.time()
+                if not fact or not (fact.is_active(now) or is_cold(fact, now)):
                     return False
                 extra = {}
                 if emotion_context:

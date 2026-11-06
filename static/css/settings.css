@@ -1677,6 +1677,51 @@ textarea.form-input {
   max-width: 100%;
   white-space: normal;
 }
+.mem-fact-status-filter,
+.mem-restore-btn {
+  font-size: var(--fs-xs);
+  padding: 4px 8px;
+}
+.form-select.mem-fact-status-filter {
+  width: auto;
+  max-width: 100%;
+  padding-inline-end: 28px;
+}
+.mem-fact-curation-details {
+  flex: 1 1 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.mem-curation-preview { margin-top: 12px; }
+.mem-curation-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.mem-curation-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+}
+.mem-curation-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.mem-curation-item + .mem-curation-item { border-top: 1px solid var(--border); }
+.mem-curation-original {
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+}
+.mem-curation-meta {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
 .memory-cleanup { margin-top: 14px; }
 .memory-cleanup summary {
   display: flex;

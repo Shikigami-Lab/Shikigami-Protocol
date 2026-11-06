@@ -369,3 +369,303 @@ for (const [method, form, key, first, last] of [
     assert.deepEqual(writes, [first, last]);
   });
 }
+
+test('fact filters keep active records by default and make archived, expired and review records visible', () => {
+  const { model } = harness(async () => response({}));
+  const { computed } = vm.runInNewContext(source + '\nSettingsMixin;');
+  model.memoryFacts = [
+    { id: 'active' },
+    { id: 'review', review_note: 'Check original' },
+    { id: 'expired', expires_at: 1 },
+    { id: 'archived', archived: true, archive_reason: 'low_value' },
+  ];
+  const visible = () => Array.from(computed.sortedMemoryFacts.call(model), fact => fact.id);
+  assert.deepEqual(visible(), ['active', 'review']);
+  model.factFilterStatus = 'archived';
+  assert.deepEqual(visible(), ['expired', 'archived']);
+  model.factFilterStatus = 'review';
+  assert.deepEqual(visible(), ['review']);
+});
+
+test('archive recall labels distinguish cold memory, live merge targets and unavailable records', () => {
+  const { model } = harness(async () => response({}));
+  model.memoryFacts = [{ id: 'live', content: 'Retained original' }, { id: 'expired', expires_at: 1 }];
+  const label = (archive_reason, merged_into) => model.memoryArchiveRecallLabel({ archive_reason, merged_into });
+  assert.equal(label('cold_memory'), 'memArchiveRecallCold');
+  assert.equal(label('merged', 'live'), 'memArchiveRecallMerged');
+  assert.equal(label('merged', 'expired'), 'memArchiveRecallUnavailable');
+  assert.equal(label('merged', 'deleted'), 'memArchiveRecallUnavailable');
+  assert.equal(model.memoryArchiveRecallLabel({
+    archive_reason: 'merged', merged_into: 'live', expires_at: 1,
+  }), 'memArchiveRecallUnavailable');
+  for (const reason of ['low_value', 'unsupported', undefined]) {
+    assert.equal(label(reason), 'memArchiveRecallUnavailable');
+  }
+});
+
+test('curation posts a bodyless preview, counts its actions and only writes after explicit apply', async () => {
+  const calls = [];
+  const items = [
+    { fact_id: 'one', action: 'keep', content: 'Keep original' },
+    { fact_id: 'two', action: 'merge', content: 'Merge original', reason: 'Same topic', target_id: 'one', target_content: 'Keep original' },
+    { fact_id: 'three', action: 'archive', content: 'Archive original', archive_reason: 'low_value' },
+    { fact_id: 'four', action: 'review', content: 'Review original', reason: 'Check evidence' },
+  ];
+  const { model } = harness(async (url, options) => {
+    calls.push([url, options]);
+    if (url === 'memoryCurationPreview/a') return response({ profile_id: 'a', preview_id: 'p1', items });
+    if (url === 'memoryCurationApply/a') return response({ ok: true, merged: 1, archived: 0, reviewed: 1 });
+    if (url === 'memoryFacts/a') return response({ facts: [{ id: 'two', archived: true }] });
+    return response({});
+  });
+  const { computed } = vm.runInNewContext(source + '\nSettingsMixin;');
+  model.selectMemoryProfile('a');
+  await model.loadMemoryCurationPreview('a');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].method, 'POST');
+  assert.equal(calls[0][1].body, undefined);
+  assert.deepEqual(model.memoryCurationPreview.items, items);
+  assert.deepEqual({ ...computed.memoryCurationCounts.call(model) }, { keep: 1, merge: 1, archive: 1, review: 1 });
+  assert.deepEqual([...model.memoryCurationSelection], ['two', 'three', 'four']);
+  model.memoryCurationSelection = ['two', 'four'];
+  await model.applyMemoryCuration();
+  assert.equal(calls[1][0], 'memoryCurationApply/a');
+  assert.equal(calls[1][1].method, 'POST');
+  assert.deepEqual(JSON.parse(calls[1][1].body), { preview_id: 'p1', fact_ids: ['two', 'four'] });
+  assert.equal(model.memoryCurationPreview, null);
+  assert.equal(model.memoryCurationResult.merged, 1);
+  assert.equal(model.memoryFacts[0].archived, true);
+});
+
+test('an empty preview cannot be applied and a rejected preview cannot be applied again', async () => {
+  let items = [];
+  const writes = [];
+  const { model, toasts } = harness(async (url, options) => {
+    if (url.startsWith('memoryCurationPreview/')) return response({ profile_id: 'a', preview_id: 'p1', items });
+    if (options?.method === 'POST') {
+      writes.push([url, JSON.parse(options.body)]);
+      return response({ ok: false }, false);
+    }
+    return response({ facts: [] });
+  });
+  model.selectMemoryProfile('a');
+  await model.loadMemoryCurationPreview('a');
+  await model.applyMemoryCuration();
+  assert.deepEqual(writes, []);
+  items = [{ fact_id: 'one', action: 'keep' }];
+  await model.loadMemoryCurationPreview('a');
+  await model.applyMemoryCuration();
+  await model.applyMemoryCuration();
+  assert.deepEqual(writes, [['memoryCurationApply/a', { preview_id: 'p1', fact_ids: [] }]]);
+  assert.equal(model.memoryCurationPreview, null);
+  assert.deepEqual(toasts.map(toast => toast.type), ['error']);
+});
+
+test('only keep suggestions can be confirmed when every changed item is unchecked', async () => {
+  const writes = [];
+  let items = [{ fact_id: 'one', action: 'review' }];
+  const { model } = harness(async (url, options) => {
+    if (url.startsWith('memoryCurationPreview/')) return response({ profile_id: 'a', preview_id: 'p1', items });
+    if (url.startsWith('memoryCurationApply/')) {
+      writes.push(JSON.parse(options.body));
+      return response({ ok: true, merged: 0, archived: 0, reviewed: 0 });
+    }
+    return response({ facts: [] });
+  });
+  model.selectMemoryProfile('a');
+  await model.loadMemoryCurationPreview('a');
+  model.memoryCurationSelection = [];
+  await model.applyMemoryCuration();
+  assert.deepEqual(writes, []);
+
+  items = [...items, { fact_id: 'two', action: 'keep' }];
+  await model.loadMemoryCurationPreview('a');
+  model.memoryCurationSelection = [];
+  await model.applyMemoryCuration();
+  assert.deepEqual(writes, [{ preview_id: 'p1', fact_ids: [] }]);
+  assert.equal(model.memoryCurationResult.reviewed, 0);
+});
+
+test('switching away and back discards an older preview and apply result', async () => {
+  let finishPreview;
+  let finishApply;
+  const { model, toasts } = harness((url) => {
+    if (url === 'memoryCurationPreview/a' && !finishPreview) {
+      return new Promise(resolve => { finishPreview = resolve; });
+    }
+    if (url === 'memoryCurationApply/a') return new Promise(resolve => { finishApply = resolve; });
+    return Promise.resolve(response({ profile_id: 'a', preview_id: 'fresh', items: [{ fact_id: 'fresh-fact', action: 'review' }] }));
+  });
+  model.selectMemoryProfile('a');
+  const stalePreview = model.loadMemoryCurationPreview('a');
+  model.selectMemoryProfile('b');
+  model.selectMemoryProfile('a');
+  await model.loadMemoryCurationPreview('a');
+  finishPreview(response({ profile_id: 'a', preview_id: 'stale', items: [{ fact_id: 'stale-fact', action: 'archive' }] }));
+  await stalePreview;
+  assert.equal(model.memoryCurationPreview.preview_id, 'fresh');
+  assert.deepEqual([...model.memoryCurationSelection], ['fresh-fact']);
+
+  const apply = model.applyMemoryCuration();
+  model.selectMemoryProfile('b');
+  finishApply(response({ ok: true, reviewed: 1 }));
+  await apply;
+  assert.equal(model.memoryCurationPreview, null);
+  assert.equal(model.memoryCurationResult, null);
+  assert.deepEqual(toasts, []);
+});
+
+test('restore uses the visible archived fact revision and ignores stale profile responses', async () => {
+  const calls = [];
+  let finishRestore;
+  const { model, toasts } = harness((url, options) => {
+    calls.push([url, options]);
+    if (url.startsWith('memoryFactRestore/')) return new Promise(resolve => { finishRestore = resolve; });
+    return Promise.resolve(response({ facts: [{ id: 'one', archived: false }] }));
+  });
+  const fact = { id: 'one', archived: true, archive_revision: 'revision-a' };
+  model.selectMemoryProfile('a');
+  model.memoryFacts = [fact, { id: 'legacy', archived: true }];
+  await model.restoreMemoryFact(model.memoryFacts[1]);
+  const restore = model.restoreMemoryFact(fact);
+  await model.restoreMemoryFact(fact);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'memoryFactRestore/a/one');
+  assert.equal(calls[0][1].method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0][1].body), { archive_revision: 'revision-a' });
+  finishRestore(response({ ok: true }));
+  await restore;
+  assert.equal(model.memoryFacts[0].archived, false);
+  assert.equal(toasts.length, 1);
+
+  model.memoryFacts = [fact];
+  const staleRestore = model.restoreMemoryFact(fact);
+  model.selectMemoryProfile('b');
+  model.memoryFacts = [{ id: 'one', archived: true, archive_revision: 'revision-b' }];
+  finishRestore(response({ ok: true }));
+  await staleRestore;
+  await model.restoreMemoryFact(fact);
+  assert.equal(model.memoryFacts[0].archive_revision, 'revision-b');
+  assert.equal(calls.filter(([url]) => url.startsWith('memoryFactRestore/')).length, 2);
+  assert.equal(toasts.length, 1);
+});
+
+test('daily curation round-trips independently of index maintenance in global settings', async () => {
+  let stored = { daily_forgetting_enabled: true };
+  const writes = [];
+  const { model } = harness(async (url, options) => {
+    assert.equal(url, 'settingsMemory');
+    if (!options) return response(stored);
+    assert.equal(options.method, 'POST');
+    stored = JSON.parse(options.body);
+    writes.push([stored.daily_curation_enabled, stored.daily_forgetting_enabled]);
+    return response({ ok: true });
+  });
+  assert.equal(model.memoryGlobalForm.daily_curation_enabled, false);
+  assert.equal(model.memoryGlobalFormLoaded, false);
+  await model.loadMemoryGlobalConfig();
+  assert.equal(model.memoryGlobalFormLoaded, true);
+  assert.equal(model.memoryGlobalForm.daily_curation_enabled, false);
+  for (const enabled of [true, false]) {
+    model.memoryGlobalForm.daily_curation_enabled = enabled;
+    await model.saveMemoryGlobalConfig();
+    await model.loadMemoryGlobalConfig();
+    assert.equal(model.memoryGlobalForm.daily_curation_enabled, enabled);
+  }
+  assert.deepEqual(writes, [[true, true], [false, true]]);
+});
+
+test('daily curation autosave preserves the inherited extraction preset and absent group override', async () => {
+  let stored = {};
+  const writes = [];
+  const { model, watch, runDebounce } = harness(async (_url, options) => {
+    if (!options) return response({ memory_config: stored });
+    const body = JSON.parse(options.body);
+    writes.push(body);
+    stored = { ...stored, ...body };
+    return response({ ok: true });
+  });
+  await model.onMemorySettingsProfileChange('a');
+  assert.equal(model.memoryTabProfileForm.extraction_llm_preset, null);
+  assert.equal(model.memoryTabProfileForm.group_chat_merge_into_history, null);
+  model.memoryTabProfileForm.daily_curation_enabled = true;
+  watch.memoryTabProfileForm.handler.call(model);
+  runDebounce();
+  await tick();
+  assert.equal(writes[0].daily_curation_enabled, true);
+  assert.equal(writes[0].extraction_llm_preset, null);
+  assert.equal(Object.hasOwn(writes[0], 'group_chat_merge_into_history'), false);
+
+  stored = { extraction_llm_preset: '', group_chat_merge_into_history: false };
+  await model.loadMemoryTabProfileConfig('a');
+  assert.equal(model.memoryTabProfileForm.extraction_llm_preset, '');
+  assert.equal(model.memoryTabProfileForm.group_chat_merge_into_history, false);
+  model.memoryTabProfileForm.daily_curation_enabled = false;
+  await model.saveMemoryTabProfileConfig();
+  assert.equal(writes[1].extraction_llm_preset, '');
+  assert.equal(writes[1].group_chat_merge_into_history, false);
+});
+
+test('persona daily curation round-trips inherit, on and off through its memory config', async () => {
+  let stored = { daily_forgetting_enabled: false };
+  const writes = [];
+  const { model } = harness(async (url, options) => {
+    assert.equal(url, 'profileMemoryConfig/a');
+    if (!options) return response({ memory_config: stored });
+    assert.equal(options.method, 'PUT');
+    stored = JSON.parse(options.body);
+    writes.push([stored.daily_curation_enabled, stored.daily_forgetting_enabled]);
+    return response({ ok: true });
+  });
+  await model.onMemorySettingsProfileChange('a');
+  assert.equal(model.memoryTabProfileForm.daily_curation_enabled, null);
+  for (const enabled of [true, false, null]) {
+    model.memoryTabProfileForm.daily_curation_enabled = enabled;
+    await model.saveMemoryTabProfileConfig();
+    await model.loadMemoryTabProfileConfig();
+    assert.equal(model.memoryTabProfileForm.daily_curation_enabled, enabled);
+  }
+  assert.deepEqual(writes, [[true, false], [false, false], [null, false]]);
+});
+
+test('a queued curation toggle saves to the edited persona while old config and status reads are discarded', async () => {
+  const writes = [];
+  let delayA = false;
+  let finishConfig;
+  let finishStatus;
+  const daily = { day: '2026-11-07', status: 'running' };
+  const latest = { origin: 'daily', at: 1794000000, counts: { merged: 1, archived: 2, reviewed: 3 } };
+  const { model, watch, runDebounce } = harness((url, options) => {
+    if (options?.method === 'PUT') {
+      writes.push([url, JSON.parse(options.body).daily_curation_enabled]);
+      return Promise.resolve(response({ ok: true }));
+    }
+    if (url === 'profileMemoryConfig/a' && delayA) return new Promise(resolve => { finishConfig = resolve; });
+    if (url === 'memoryStatus/a') return new Promise(resolve => { finishStatus = resolve; });
+    if (url === 'memoryStatus/b') return Promise.resolve(response({ curation: { latest, daily } }));
+    return Promise.resolve(response({ memory_config: { daily_curation_enabled: url.endsWith('/a') } }));
+  });
+
+  await model.onMemorySettingsProfileChange('a');
+  model.memoryTabProfileForm.daily_curation_enabled = null;
+  watch.memoryTabProfileForm.handler.call(model);
+  const staleStatus = model.loadMemoryStatus('a');
+  delayA = true;
+  const staleConfig = model.loadMemoryTabProfileConfig('a');
+  await tick();
+  await model.onMemorySettingsProfileChange('b');
+  await model.loadMemoryStatus('b');
+  finishConfig(response({ memory_config: { daily_curation_enabled: true } }));
+  finishStatus(response({ curation: { latest: null, daily: { day: '2026-11-06', status: 'failed' } } }));
+  await Promise.all([staleConfig, staleStatus]);
+  runDebounce();
+  await tick();
+
+  assert.deepEqual(writes, [['profileMemoryConfig/a', null]]);
+  assert.equal(model.memoryTabFormProfileId, 'b');
+  assert.equal(model.memoryTabProfileForm.daily_curation_enabled, false);
+  assert.deepEqual(model.memoryStatus.curation, { latest, daily });
+  assert.equal(model.memoryCurationResult, null);
+  model.selectMemoryProfile('c');
+  assert.equal(model.memoryStatus, null);
+});

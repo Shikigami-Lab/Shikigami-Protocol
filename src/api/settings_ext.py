@@ -2951,6 +2951,7 @@ class MemoryConfigBody(BaseModel):
     daily_run_at_hour: int = 0
     daily_run_at_minute: int = 5
     daily_forgetting_enabled: bool = False
+    daily_curation_enabled: Optional[bool] = None
     daily_decay_factor: float = 0.998
     daily_decay_min_weight: float = 0.1
     daily_reinforcement_enabled: bool = False
@@ -2988,6 +2989,8 @@ async def save_memory_config(request: Request, body: MemoryConfigBody):
     m["daily_run_at_hour"] = max(0, min(23, body.daily_run_at_hour))
     m["daily_run_at_minute"] = max(0, min(59, body.daily_run_at_minute))
     m["daily_forgetting_enabled"] = body.daily_forgetting_enabled
+    if body.daily_curation_enabled is not None:
+        m["daily_curation_enabled"] = body.daily_curation_enabled
     m["daily_decay_factor"] = max(0.9, min(1.0, float(body.daily_decay_factor)))
     m["daily_decay_min_weight"] = max(0.0, min(1.0, float(body.daily_decay_min_weight)))
     m["daily_reinforcement_enabled"] = body.daily_reinforcement_enabled
@@ -3271,6 +3274,7 @@ class ProfileMemoryConfigBody(BaseModel):
     merged_history_max_messages: Optional[int] = None
     # 每日遗忘（只跑已加载且昨日有对话）
     daily_forgetting_enabled: Optional[bool] = None
+    daily_curation_enabled: Optional[bool] = None
     daily_decay_factor: Optional[float] = None
     daily_decay_min_weight: Optional[float] = None
     daily_reinforcement_enabled: Optional[bool] = None

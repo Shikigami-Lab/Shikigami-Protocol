@@ -31,7 +31,11 @@ class ReflectionMemoryFactsSegment(PromptSegment):
             return SegmentResult(messages=[])
 
         try:
-            facts = mm.get_reflection_context_facts(max_count=4, min_weight=0.6)
+            recent_user_text = [turn.get("content", "")[:300] for turn in ctx.recent_turns
+                                if turn.get("role") == "user"]
+            facts = mm.get_reflection_context_facts(
+                max_count=4, min_weight=0.6, query="\n".join(recent_user_text[-3:]),
+            )
         except Exception:
             return SegmentResult(messages=[])
 
