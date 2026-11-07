@@ -1,10 +1,11 @@
-"""Global task instructions for memory extraction and diaries."""
+"""Global task instructions for memory extraction, review, and diaries."""
 
 from src.config.prompt_loader import get_prompt
 
 TASK_PROMPT_KEYS = {
     "extraction_prompt": "memory.extraction_task",
     "day_summary_prompt": "memory.day_summary_task",
+    "review_prompt": "memory.review_task",
 }
 
 

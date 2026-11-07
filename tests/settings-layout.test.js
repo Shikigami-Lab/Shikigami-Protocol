@@ -136,6 +136,31 @@ test('manual and bulk update previews compare the original and proposed text and
   assert.match(html, /v-if="memoryStatus.curation.latest.counts.trimmed != null"/);
 });
 
+test('review scheduling has separate bounded controls and leaves summaries on the daily clock', () => {
+  const fields = [['interval', 'curation_interval_days', 30], ['hour', 'curation_run_at_hour', 24],
+    ['minute', 'curation_run_at_minute', 60]];
+  for (const [scope, model] of [['global', 'memoryGlobalForm'], ['profile', 'memoryTabProfileForm']]) {
+    for (const [part, field, options] of fields) {
+      const id = 'memory-curation-' + scope + '-' + part;
+      const control = html.match(new RegExp('<select id="' + id + '"[\\s\\S]*?</select>'))?.[0] || '';
+      assert.ok(html.includes('for="' + id + '"'), id + ' label');
+      assert.ok(control.includes('v-model="' + model + '.' + field + '"'), id + ' model');
+      assert.match(control, new RegExp('v-for="\\w+ in ' + options + '"'));
+      assert.equal(control.includes(':value="null"'), scope === 'profile' || part !== 'interval', id + ' inherit');
+    }
+  }
+  assert.match(html, /v-model\.number="memoryGlobalForm.daily_run_at_hour"/);
+  assert.match(html, /v-model\.number="memoryGlobalForm.daily_run_at_minute"/);
+  assert.match(html, /v-model="memoryGlobalForm.day_summary_enabled"/);
+  assert.match(html, /v-model="memoryTabProfileForm.day_summary_enabled"/);
+  assert.equal([...html.matchAll(/t\('hintDaySummarySchedule'\)/g)].length, 2);
+  const window = {};
+  runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
+  assert.match(window.LOCALES.en.hintDailyCuration, /at most one model request.*schedule/i);
+  assert.match(window.LOCALES.zh.hintDailyCuration, /计划日.*最多一次模型请求/);
+  assert.match(window.LOCALES.en.hintDaySummarySchedule, /daily.*daily job time/i);
+});
+
 test('daily curation controls are independently addressable and Maintenance renders durable and session results', () => {
   assert.doesNotMatch(html, /v-model="memory(?:GlobalForm|TabProfileForm)\.daily_forgetting_enabled"/);
   assert.match(html, /t\('memIndexMaintenanceTitle'\)/);
@@ -206,7 +231,8 @@ test('Memory completion exposes scoped controls and actual daily metrics in both
   assert.match(html, /v-if="memoryStatus.curation.daily\?\.requests != null"/);
   for (const locale of ['en', 'zh']) {
     const strings = window.LOCALES[locale];
-    assert.match(strings.lblEnableDailyCuration, locale === 'en' ? /pending chats.*old memories/i : /每日补提取与旧记忆整理/);
+    assert.match(strings.lblEnableDailyCuration, locale === 'en'
+      ? /scheduled old-memory review.*supplemental extraction/i : /定期旧记忆审阅与补提取/);
     assert.match(strings.hintDailyCuration, locale === 'en' ? /model.*charges/i : /模型.*费用/);
     for (const field of ['requests', 'dialogue_messages', 'dialogue_slices', 'added', 'updated', 'confirmed', 'merged', 'archived', 'reviewed']) {
       assert.ok(html.includes("'" + field + "'"), field);

@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 from unittest import TestCase
+from unittest.mock import patch
 
 from src.memory import curation_plan as review
 from src.memory.long_term_store import LongTermFact
@@ -37,7 +38,7 @@ class FixedReviewTests(TestCase):
         self.assertEqual(json.loads(messages[1]["content"])["comparison"]["fact_id"], comparison.id)
         self.assertIsNone(json.loads(review.review_messages([subject])[1]["content"])["comparison"])
         self.assertNotIn("must review", messages[0]["content"].lower())
-        self.assertIn('"that feeling"', messages[0]["content"])
+        self.assertIn(review.memory_task_prompt({}, "review_prompt"), messages[0]["content"])
 
     def test_unique_ephemeral_legacy_notes_need_no_duplicate_or_whitelist_match(self):
         for category in ("relationship", "habit"):
@@ -105,6 +106,38 @@ class FixedReviewTests(TestCase):
             with self.subTest(fields=fields):
                 note = fact("The imaginary key went back into its sleeve.", **fields)
                 self.assertEqual(self.decision(note)["action"], "keep")
+
+    def test_relative_scene_time_and_reality_label_are_not_archive_vetoes(self):
+        for text in ("角色承诺今晚会节制。", "用户在现实中透支了精力。", "The scene ended tonight."):
+            with self.subTest(text=text):
+                self.assertEqual(self.decision(fact(text))["action"], "archive")
+        self.assertEqual(self.decision(fact("今晚讨论下一场会面。", kind="temporary",
+                                            expires_at=4102444800.0))["action"], "keep")
+        self.assertEqual(self.decision(fact("现实中禁止公开角色资料。"))["action"], "keep")
+
+    def test_concrete_calendar_date_and_real_world_clause_are_protected(self):
+        event = fact("On April 17, 2024, I completed the licensure exam.")
+        self.assertEqual(self.decision(event)["action"], "keep")
+        note = fact("In real life my sibling lives in Toronto. I prefer tea.")
+        decision = self.decision(note, "update", keep_text="I prefer tea.",
+                                 future_use="When choosing a drink")
+        self.assertEqual(decision["action"], "keep")
+
+    def test_editable_guidance_keeps_the_fixed_response_protocol(self):
+        subject = fact("The curtain fell after the scene.")
+        messages = review.review_messages([subject], review_prompt="KEEP SHORT NOTES ONLY IN THE ARCHIVE")
+        system = messages[0]["content"]
+        self.assertIn("KEEP SHORT NOTES ONLY IN THE ARCHIVE", system)
+        self.assertIn("evidence_quote", system)
+        self.assertIn("fact_id", system)
+        self.assertIn("archive_reason", system)
+        self.assertIn("unsupported_inference", system)
+        self.assertNotIn("Keep durable preferences", system)
+
+    def test_missing_review_guidance_does_not_build_a_model_request(self):
+        with patch.object(review, "memory_task_prompt", return_value=""):
+            with self.assertRaisesRegex(ValueError, "instructions are missing"):
+                review.review_messages([fact("The curtain fell after the scene.")])
 
     def test_cold_archive_uses_existing_experience_provenance_gate(self):
         note = fact("We discussed how the recital rehearsal went.", kind="experience",

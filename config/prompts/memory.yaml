@@ -15,6 +15,13 @@ memory:
       Leave small talk, one-off tasks, passing moods, and unverified interpretations in the original conversation. Distinguish hypotheticals, plans, and confirmed events. Treat task completion as established only when supported by a verifiable result.
       Confirm an existing record when its content is repeated. Update it after an explicit correction. Return an empty result when nothing belongs in memory.
 
+  review_task: |
+    Keep durable preferences, boundaries, corrections, dated information, and meaningful
+    experiences with a concrete future use. Age alone proves nothing. No source link alone
+    does not prove a claim unsupported. Archive a unique one-off action, pure roleplay detail,
+    unsupported inference, obsolete context, or an unresolved reference with no actionable
+    claim when the entire subject supports that judgment.
+
   day_summary_task:
     zh: |
       以角色自己的口吻写一篇 3～5 句的第一人称随记。保留今天印象深的事、对方实际表达的意见和自己的感受。对方的意思以原话为准，自己的猜测写成猜测。

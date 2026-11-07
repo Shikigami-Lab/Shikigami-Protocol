@@ -21,7 +21,7 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.memory.curation import CurationConflict, curation_for, curation_preset, request_fixed_review, review_model_key
+from src.memory.curation import CurationConflict, curation_for, curation_preset, fixed_review_prompt, request_fixed_review, review_model_key
 from src.memory.recall import RecallCandidates, experience_links_by_day
 from src.memory.extraction_batches import memory_source_excerpt
 from src.memory.long_term_store import fact_action_revision
@@ -305,10 +305,12 @@ async def preview_curation(profile_id: str, request: Request):
     try:
         preset = curation_preset(manager, request.app)
 
-        async def decide(rows):
-            return await request_fixed_review(rows, preset)
+        prompt = fixed_review_prompt(request.app)
 
-        return await curation.preview_fixed(decide, model_key=review_model_key(preset))
+        async def decide(rows):
+            return await request_fixed_review(rows, preset, review_prompt=prompt)
+
+        return await curation.preview_fixed(decide, model_key=review_model_key(preset, review_prompt=prompt))
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception:
@@ -327,11 +329,13 @@ async def preview_curation_page(profile_id: str, body: BulkCurationPreview, requ
                 raise
             preset = None
 
+        prompt = fixed_review_prompt(request.app)
+
         async def decide(rows):
-            return await request_fixed_review(rows, preset)
+            return await request_fixed_review(rows, preset, review_prompt=prompt)
 
         return await curation.preview_bulk_fixed(
-            decide, cursor=body.cursor, fact_id=body.fact_id, model_key=review_model_key(preset),
+            decide, cursor=body.cursor, fact_id=body.fact_id, model_key=review_model_key(preset, review_prompt=prompt),
         )
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

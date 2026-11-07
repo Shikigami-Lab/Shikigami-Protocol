@@ -1101,6 +1101,32 @@ test('daily curation round-trips independently of index maintenance in global se
   assert.deepEqual(writes, [[true, true], [false, true]]);
 });
 
+test('global review schedule defaults independently and saves zero, inheritance and bounded integers', async () => {
+  let stored = { daily_run_at_hour: 4, daily_run_at_minute: 7, day_summary_enabled: true };
+  const readSchedule = config => [config.curation_interval_days, config.curation_run_at_hour, config.curation_run_at_minute];
+  const { model } = harness(async (_url, options) => {
+    if (!options) return response(stored);
+    stored = JSON.parse(options.body);
+    return response({ ok: true });
+  });
+  assert.deepEqual(readSchedule(model.memoryGlobalForm), [1, null, null]);
+  await model.loadMemoryGlobalConfig();
+  assert.deepEqual(readSchedule(model.memoryGlobalForm), [1, null, null]);
+  Object.assign(model.memoryGlobalForm, {
+    curation_interval_days: 4, curation_run_at_hour: 0, curation_run_at_minute: 0,
+  });
+  await model.saveMemoryGlobalConfig();
+  assert.deepEqual(readSchedule(stored), [4, 0, 0]);
+  assert.deepEqual([stored.daily_run_at_hour, stored.daily_run_at_minute, stored.day_summary_enabled], [4, 7, true]);
+  await model.loadMemoryGlobalConfig();
+  assert.deepEqual(readSchedule(model.memoryGlobalForm), [4, 0, 0]);
+  Object.assign(model.memoryGlobalForm, {
+    curation_interval_days: 100, curation_run_at_hour: null, curation_run_at_minute: 89.5,
+  });
+  await model.saveMemoryGlobalConfig();
+  assert.deepEqual(readSchedule(stored), [30, null, 59]);
+});
+
 test('daily curation autosave preserves the inherited extraction preset and absent group override', async () => {
   let stored = {};
   const writes = [];
@@ -1132,6 +1158,71 @@ test('daily curation autosave preserves the inherited extraction preset and abse
   assert.equal(writes[1].group_chat_merge_into_history, false);
 });
 
+test('stale persona history autosaves preserve schedule overrides edited elsewhere', async () => {
+  let stored = { curation_interval_days: 5, curation_run_at_minute: 12, max_history_turns: 40 };
+  const writes = [];
+  const scheduleKeys = ['daily_curation_enabled', 'curation_interval_days', 'curation_run_at_hour', 'curation_run_at_minute'];
+  const { model, watch, runDebounce } = harness(async (url, options) => {
+    assert.equal(url, 'profileMemoryConfig/a');
+    if (!options) return response({ memory_config: stored });
+    const patch = JSON.parse(options.body);
+    writes.push(patch);
+    stored = { ...stored, ...patch };
+    return response({ ok: true });
+  });
+  await model.onMemorySettingsProfileChange('a');
+  Object.assign(stored, { daily_curation_enabled: true, curation_interval_days: 8,
+    curation_run_at_hour: 22, curation_run_at_minute: 30 });
+
+  model.memoryTabProfileForm.max_history_turns = 50;
+  watch.memoryTabProfileForm.handler.call(model);
+  runDebounce();
+  await tick();
+  assert.equal(writes[0].max_history_turns, 50);
+  assert.deepEqual(scheduleKeys.filter(key => Object.hasOwn(writes[0], key)), []);
+  assert.deepEqual(scheduleKeys.map(key => stored[key]), [true, 8, 22, 30]);
+
+  model.memoryTabProfileForm.curation_run_at_minute = 0;
+  watch.memoryTabProfileForm.handler.call(model);
+  runDebounce();
+  await tick();
+  assert.deepEqual(scheduleKeys.filter(key => Object.hasOwn(writes[1], key)), ['curation_run_at_minute']);
+  assert.deepEqual(scheduleKeys.map(key => stored[key]), [true, 8, 22, 0]);
+
+  stored.curation_run_at_minute = 18;
+  model.memoryTabProfileForm.max_history_turns = 60;
+  watch.memoryTabProfileForm.handler.call(model);
+  runDebounce();
+  await tick();
+  assert.deepEqual(scheduleKeys.filter(key => Object.hasOwn(writes[2], key)), []);
+  assert.equal(stored.curation_run_at_minute, 18);
+});
+
+test('a schedule edit back to inherit is saved after the previous override in flight', async () => {
+  const writes = [];
+  let finishFirst;
+  const { model, watch, runDebounce } = harness((url, options) => {
+    assert.equal(url, 'profileMemoryConfig/a');
+    if (!options) return Promise.resolve(response({ memory_config: {} }));
+    writes.push(JSON.parse(options.body));
+    if (writes.length === 1) return new Promise(resolve => { finishFirst = resolve; });
+    return Promise.resolve(response({ ok: true }));
+  });
+  await model.onMemorySettingsProfileChange('a');
+  model.memoryTabProfileForm.curation_run_at_hour = 0;
+  watch.memoryTabProfileForm.handler.call(model);
+  runDebounce();
+  await tick();
+  model.memoryTabProfileForm.curation_run_at_hour = null;
+  watch.memoryTabProfileForm.handler.call(model);
+  runDebounce();
+  await tick();
+  assert.equal(writes.length, 1);
+  finishFirst(response({ ok: true }));
+  await tick();
+  assert.deepEqual(writes.map(write => write.curation_run_at_hour), [0, null]);
+});
+
 test('persona daily curation round-trips inherit, on and off through its memory config', async () => {
   let stored = { daily_forgetting_enabled: false };
   const writes = [];
@@ -1139,22 +1230,32 @@ test('persona daily curation round-trips inherit, on and off through its memory 
     assert.equal(url, 'profileMemoryConfig/a');
     if (!options) return response({ memory_config: stored });
     assert.equal(options.method, 'PUT');
-    stored = JSON.parse(options.body);
-    writes.push([stored.daily_curation_enabled, stored.daily_forgetting_enabled]);
+    const patch = JSON.parse(options.body);
+    stored = { ...stored, ...patch };
+    writes.push([patch.daily_curation_enabled, patch.daily_forgetting_enabled,
+      patch.curation_interval_days, patch.curation_run_at_hour, patch.curation_run_at_minute]);
     return response({ ok: true });
   });
   await model.onMemorySettingsProfileChange('a');
   assert.equal(model.memoryTabProfileForm.daily_curation_enabled, null);
-  for (const enabled of [true, false, null]) {
-    model.memoryTabProfileForm.daily_curation_enabled = enabled;
+  assert.deepEqual([model.memoryTabProfileForm.curation_interval_days, model.memoryTabProfileForm.curation_run_at_hour,
+    model.memoryTabProfileForm.curation_run_at_minute], [null, null, null]);
+  for (const [enabled, interval, hour, minute] of [[true, 2, 0, null], [false, 30, null, 0], [null, null, null, null]]) {
+    Object.assign(model.memoryTabProfileForm, {
+      daily_curation_enabled: enabled, curation_interval_days: interval,
+      curation_run_at_hour: hour, curation_run_at_minute: minute,
+    });
     await model.saveMemoryTabProfileConfig();
     await model.loadMemoryTabProfileConfig();
     assert.equal(model.memoryTabProfileForm.daily_curation_enabled, enabled);
+    assert.deepEqual([model.memoryTabProfileForm.curation_interval_days, model.memoryTabProfileForm.curation_run_at_hour,
+      model.memoryTabProfileForm.curation_run_at_minute], [interval, hour, minute]);
   }
-  assert.deepEqual(writes, [[true, false], [false, false], [null, false]]);
+  assert.deepEqual(writes, [[true, false, 2, 0, undefined], [false, false, 30, null, 0],
+    [null, false, null, undefined, null]]);
 });
 
-test('a queued curation toggle saves to the edited persona while old config and status reads are discarded', async () => {
+test('a queued curation schedule saves to the edited persona while old config and status reads are discarded', async () => {
   const writes = [];
   let delayA = false;
   let finishConfig;
@@ -1163,17 +1264,22 @@ test('a queued curation toggle saves to the edited persona while old config and 
   const latest = { origin: 'daily', at: 1794000000, counts: { merged: 1, archived: 2, reviewed: 3 } };
   const { model, watch, runDebounce } = harness((url, options) => {
     if (options?.method === 'PUT') {
-      writes.push([url, JSON.parse(options.body).daily_curation_enabled]);
+      const config = JSON.parse(options.body);
+      writes.push([url, config.daily_curation_enabled, config.curation_interval_days,
+        config.curation_run_at_hour, config.curation_run_at_minute]);
       return Promise.resolve(response({ ok: true }));
     }
     if (url === 'profileMemoryConfig/a' && delayA) return new Promise(resolve => { finishConfig = resolve; });
     if (url === 'memoryStatus/a') return new Promise(resolve => { finishStatus = resolve; });
     if (url === 'memoryStatus/b') return Promise.resolve(response({ curation: { latest, daily } }));
-    return Promise.resolve(response({ memory_config: { daily_curation_enabled: url.endsWith('/a') } }));
+    return Promise.resolve(response({ memory_config: { daily_curation_enabled: url.endsWith('/a'),
+      curation_interval_days: 8, curation_run_at_hour: 18, curation_run_at_minute: 15 } }));
   });
 
   await model.onMemorySettingsProfileChange('a');
-  model.memoryTabProfileForm.daily_curation_enabled = null;
+  Object.assign(model.memoryTabProfileForm, {
+    daily_curation_enabled: null, curation_interval_days: 2, curation_run_at_hour: 0, curation_run_at_minute: null,
+  });
   watch.memoryTabProfileForm.handler.call(model);
   const staleStatus = model.loadMemoryStatus('a');
   delayA = true;
@@ -1181,15 +1287,18 @@ test('a queued curation toggle saves to the edited persona while old config and 
   await tick();
   await model.onMemorySettingsProfileChange('b');
   await model.loadMemoryStatus('b');
-  finishConfig(response({ memory_config: { daily_curation_enabled: true } }));
+  finishConfig(response({ memory_config: { daily_curation_enabled: true, curation_interval_days: 3,
+    curation_run_at_hour: 23, curation_run_at_minute: 59 } }));
   finishStatus(response({ curation: { latest: null, daily: { day: '2026-11-06', status: 'failed' } } }));
   await Promise.all([staleConfig, staleStatus]);
   runDebounce();
   await tick();
 
-  assert.deepEqual(writes, [['profileMemoryConfig/a', null]]);
+  assert.deepEqual(writes, [['profileMemoryConfig/a', null, 2, 0, null]]);
   assert.equal(model.memoryTabFormProfileId, 'b');
   assert.equal(model.memoryTabProfileForm.daily_curation_enabled, false);
+  assert.deepEqual([model.memoryTabProfileForm.curation_interval_days, model.memoryTabProfileForm.curation_run_at_hour,
+    model.memoryTabProfileForm.curation_run_at_minute], [8, 18, 15]);
   assert.deepEqual(model.memoryStatus.curation, { latest, daily });
   assert.equal(model.memoryCurationResult, null);
   model.selectMemoryProfile('c');

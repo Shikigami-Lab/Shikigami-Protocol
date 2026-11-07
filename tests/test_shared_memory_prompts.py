@@ -100,9 +100,11 @@ class SharedMemoryPromptsTests(IsolatedAsyncioTestCase):
             original = (await client.get("/settings/memory/prompts")).json()
             self.assertTrue(original["defaults"]["extraction_prompt"])
             self.assertTrue(original["defaults"]["day_summary_prompt"])
+            self.assertTrue(original["defaults"]["review_prompt"])
             self.assertEqual(original["overrides"]["extraction_prompt"], None)
             edited = await client.patch("/settings/memory/prompts", json={
                 "extraction_prompt": "GLOBAL FACT TASK", "day_summary_prompt": "GLOBAL DIARY TASK",
+                "review_prompt": "GLOBAL REVIEW TASK",
             })
             self.assertEqual(edited.status_code, 200, edited.text)
 
@@ -131,7 +133,21 @@ class SharedMemoryPromptsTests(IsolatedAsyncioTestCase):
 
             reset = await client.patch("/settings/memory/prompts", json={"extraction_prompt": None})
             self.assertEqual(reset.status_code, 200, reset.text)
-            self.assertEqual(reset.json()["overrides"], {"extraction_prompt": None, "day_summary_prompt": "GLOBAL DIARY TASK"})
+            self.assertEqual(reset.json()["overrides"], {"extraction_prompt": None,
+                             "day_summary_prompt": "GLOBAL DIARY TASK", "review_prompt": "GLOBAL REVIEW TASK"})
+            from src.memory.curation import fixed_review_prompt, review_model_key
+            from src.memory.curation_plan import review_messages
+            from src.memory.long_term_store import LongTermFact
+            current = fixed_review_prompt(self.app)
+            self.assertEqual(current, "GLOBAL REVIEW TASK")
+            self.assertIn("GLOBAL REVIEW TASK", review_messages(
+                [LongTermFact("Synthetic note")], review_prompt=current)[0]["content"])
+            old_key = review_model_key({"model": "fixture"}, review_prompt=current)
+            review_reset = await client.patch("/settings/memory/prompts", json={"review_prompt": None})
+            self.assertEqual(review_reset.status_code, 200, review_reset.text)
+            self.assertEqual(fixed_review_prompt(self.app), original["defaults"]["review_prompt"])
+            self.assertNotEqual(old_key, review_model_key({"model": "fixture"},
+                                                        review_prompt=fixed_review_prompt(self.app)))
             await self.invoke_both(profiles[1])
             self.assertIn(original["defaults"]["extraction_prompt"], self.messages[-2][0]["content"])
             self.assertNotIn("GLOBAL FACT TASK", self.messages[-2][0]["content"])

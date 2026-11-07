@@ -127,6 +127,9 @@ class AppConfig:
             "day_summary_max_conv_chars": 12000,   # 发给模型的对话总文本最大字符数（超出截断）
             "daily_forgetting_enabled": False,
             "daily_curation_enabled": False,
+            "curation_interval_days": 1,
+            "curation_run_at_hour": None,
+            "curation_run_at_minute": None,
             "daily_decay_factor": 0.998,
             "daily_decay_min_weight": 0.1,
             "daily_reinforcement_enabled": False,

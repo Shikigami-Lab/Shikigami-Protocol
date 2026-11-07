@@ -10,7 +10,20 @@ const EMOTION_KEYS_FALLBACK = [
   'sad', 'disappointed', 'angry', 'sarcastic', 'vulnerable', 'tired',
 ];
 
-const MEMORY_PROMPT_KEYS = ['extraction_prompt', 'day_summary_prompt'];
+const MEMORY_PROMPT_KEYS = ['extraction_prompt', 'day_summary_prompt', 'review_prompt'];
+
+function memoryCurationSchedule(form, intervalFallback = null) {
+  const integer = (value, min, max, fallback = null) => {
+    if (value == null || value === '') return fallback;
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.trunc(number))) : fallback;
+  };
+  return {
+    curation_interval_days: integer(form.curation_interval_days, 1, 30, intervalFallback),
+    curation_run_at_hour: integer(form.curation_run_at_hour, 0, 23),
+    curation_run_at_minute: integer(form.curation_run_at_minute, 0, 59),
+  };
+}
 
 const PRESET_TEMPLATES = {
   openai: {
@@ -389,6 +402,7 @@ const SettingsMixin = {
         daily_run_at_minute: 5,
         daily_forgetting_enabled: false,
         daily_curation_enabled: false,
+        ...memoryCurationSchedule({}, 1),
         daily_decay_factor: 0.998,
         daily_decay_min_weight: 0.1,
         daily_reinforcement_enabled: false,
@@ -422,6 +436,7 @@ const SettingsMixin = {
       memoryPromptsRefreshQueued: false,
       memoryPromptsError: '',
       memoryTabProfileForm: {},
+      memoryTabProfileSavedSchedule: {},
       memoryTabFormProfileId: '',
       memoryTabProfileSaving: false,
       memoryTabProfileLoaded: false,
@@ -4184,6 +4199,7 @@ const SettingsMixin = {
           daily_run_at_minute: data.daily_run_at_minute ?? 5,
           daily_forgetting_enabled: data.daily_forgetting_enabled ?? false,
           daily_curation_enabled: data.daily_curation_enabled ?? false,
+          ...memoryCurationSchedule(data, 1),
           daily_decay_factor: data.daily_decay_factor ?? 0.998,
           daily_decay_min_weight: data.daily_decay_min_weight ?? 0.1,
           daily_reinforcement_enabled: data.daily_reinforcement_enabled ?? false,
@@ -4223,6 +4239,7 @@ const SettingsMixin = {
         daily_run_at_minute: Math.max(0, Math.min(59, number('daily_run_at_minute', 5))),
         daily_forgetting_enabled: !!this.memoryGlobalForm.daily_forgetting_enabled,
         daily_curation_enabled: !!this.memoryGlobalForm.daily_curation_enabled,
+        ...memoryCurationSchedule(this.memoryGlobalForm, 1),
         daily_decay_factor: Math.max(0.9, Math.min(1, parseFloat(this.memoryGlobalForm.daily_decay_factor) || 0.998)),
         daily_decay_min_weight: Math.max(0, Math.min(1, number('daily_decay_min_weight', 0.1, parseFloat))),
         daily_reinforcement_enabled: !!this.memoryGlobalForm.daily_reinforcement_enabled,
@@ -4358,7 +4375,8 @@ const SettingsMixin = {
     },
 
     saveMemoryPrompt(key, reset = false) {
-      if (!this.memoryPrompts || !MEMORY_PROMPT_KEYS.includes(key)) return;
+      if (!this.memoryPrompts || !MEMORY_PROMPT_KEYS.includes(key)
+          || !Object.hasOwn(this.memoryPrompts.defaults, key)) return;
       const dirty = this.memoryPromptIsDirty(key);
       if (!dirty && !(reset && this.memoryPrompts.overrides[key] !== null)) return;
       return this.requestMemoryPrompts({ [key]: reset ? null : this.memoryPromptDraft[key] });
@@ -4390,12 +4408,16 @@ const SettingsMixin = {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!patch && this.memoryPromptsRefreshQueued && this.memoryPromptsVisible) return;
-        if (!MEMORY_PROMPT_KEYS.every(key => typeof data?.defaults?.[key] === 'string' &&
+        // Older servers expose only the extraction and summary prompts.
+        const keys = MEMORY_PROMPT_KEYS.filter(key => key !== 'review_prompt'
+          || Object.hasOwn(data?.defaults ?? {}, key) || Object.hasOwn(data?.overrides ?? {}, key)
+          || Object.hasOwn(patch ?? {}, key));
+        if (!keys.every(key => typeof data?.defaults?.[key] === 'string' &&
           (data?.overrides?.[key] === null || typeof data?.overrides?.[key] === 'string'))) {
           throw new Error('Invalid memory prompts response');
         }
         const { defaults, overrides } = data;
-        for (const key of MEMORY_PROMPT_KEYS) {
+        for (const key of keys) {
           if ((patch && Object.hasOwn(patch, key)) || !this.memoryPromptIsDirty(key)) {
             this.memoryPromptDraft[key] = overrides[key] ?? defaults[key];
           }
@@ -4429,7 +4451,9 @@ const SettingsMixin = {
         if (sequence !== this.memoryTabProfileLoadSequence || generation !== this.memoryViewGeneration
             || profileId !== this.memoryProfileId) return;
         const cfg = data.memory_config || {};
+        const schedule = { daily_curation_enabled: cfg.daily_curation_enabled ?? null, ...memoryCurationSchedule(cfg) };
         const _pn = (v) => v != null ? v : '';
+        this.memoryTabProfileSavedSchedule = schedule;
         this.memoryTabProfileForm = {
           enabled:              cfg.enabled              ?? null,
           vector_enabled:       cfg.vector_enabled       ?? null,
@@ -4446,7 +4470,7 @@ const SettingsMixin = {
           group_chat_self_recap_max_groups: _pn(cfg.group_chat_self_recap_max_groups),
           group_chat_merge_into_history: cfg.group_chat_merge_into_history ?? null,
           daily_forgetting_enabled: cfg.daily_forgetting_enabled ?? null,
-          daily_curation_enabled: cfg.daily_curation_enabled ?? null,
+          ...schedule,
           daily_decay_factor: _pn(cfg.daily_decay_factor),
           daily_decay_min_weight: _pn(cfg.daily_decay_min_weight),
           daily_reinforcement_enabled: cfg.daily_reinforcement_enabled ?? null,
@@ -4466,9 +4490,11 @@ const SettingsMixin = {
       const profileId = this.memoryTabFormProfileId;
       if (!profileId || profileId !== this.memoryProfileId) return;
       const form = this.memoryTabProfileForm;
+      const schedule = { daily_curation_enabled: form.daily_curation_enabled ?? null, ...memoryCurationSchedule(form) };
+      const savedSchedule = this.memoryTabProfileSavedSchedule;
       const cfg = { extraction_llm_preset: form.extraction_llm_preset };
       for (const key of ['enabled', 'vector_enabled', 'day_summary_enabled', 'daily_forgetting_enabled',
-        'daily_curation_enabled', 'daily_reinforcement_enabled', 'daily_consolidation_enabled']) {
+        'daily_reinforcement_enabled', 'daily_consolidation_enabled']) {
         cfg[key] = form[key];
       }
       if (form.group_chat_merge_into_history != null) {
@@ -4499,10 +4525,16 @@ const SettingsMixin = {
           if (Number.isFinite(value)) cfg[key] = Math.max(min, Math.min(max, value));
         }
       }
-      const body = JSON.stringify(cfg);
       const generation = this.memoryViewGeneration;
-      return this.queueSettingsWrite(`memory-tab:${profileId}`,
-        () => this.writeMemoryProfileConfig(profileId, body, silent, generation), debounce);
+      return this.queueSettingsWrite(`memory-tab:${profileId}`, async () => {
+        // Diff after earlier writes finish so an edit back to inherit is sent
+        // if an override was saved while this snapshot was waiting.
+        const changes = Object.fromEntries(Object.entries(schedule).filter(([key, value]) => savedSchedule[key] !== value));
+        const body = JSON.stringify({ ...cfg, ...changes });
+        if (await this.writeMemoryProfileConfig(profileId, body, silent, generation)) {
+          Object.assign(savedSchedule, changes);
+        }
+      }, debounce);
     },
 
     async writeMemoryProfileConfig(profileId, body, silent, generation) {
@@ -4525,9 +4557,11 @@ const SettingsMixin = {
             if (current()) this.memProfileSaveState = null;
           }, 2000);
         }
+        return true;
       } catch (e) {
         if (current()) this.memProfileSaveState = null;
         this.showToast(`保存失败: ${e.message}`, 'error');
+        return false;
       } finally {
         if (current()) this.memoryTabProfileSaving = false;
       }

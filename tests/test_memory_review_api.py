@@ -92,7 +92,7 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
         facts.append(LongTermFact("Waved once.", id="transient", source="auto", is_manual=False))
         self.assertTrue(self.manager.facts.apply_extraction(revision, facts, cursors))
         original = await self.get_row("transient")
-        async def suggest(rows, _preset):
+        async def suggest(rows, _preset, **kwargs):
             return [
                 {"fact_id": fact.id, "action": "archive", "archive_reason": "ephemeral",
                  "future_use": "", "evidence_quote": fact.content, "reason": "Only a momentary action"}

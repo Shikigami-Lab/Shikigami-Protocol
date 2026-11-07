@@ -358,6 +358,36 @@ class SettingsIntegrityTests(unittest.TestCase):
         }}, self.client.get(path).json())
         self.assertNotIn("example", self.app.state.memory_managers)
 
+    def test_review_schedule_is_saved_independently_from_the_daily_summary_switch(self):
+        path = "/settings/memory"
+        fields = {"curation_interval_days": 7, "curation_run_at_hour": 0, "curation_run_at_minute": 0}
+        response = self.client.post(path, json={**fields, "day_summary_enabled": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.post(path, json={"day_summary_enabled": False}).status_code, 200)
+        saved = self.client.get(path).json()
+        self.assertFalse(saved["day_summary_enabled"])
+        self.assertEqual({key: saved[key] for key in fields}, fields)
+        for invalid in ({"curation_interval_days": 0}, {"curation_run_at_hour": 24},
+                        {"curation_run_at_minute": 60}, {"curation_interval_days": True}):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(self.client.post(path, json=invalid).status_code, 422)
+        self.assertEqual(self.client.post(path, json=dict.fromkeys(fields)).status_code, 200)
+        saved = self.client.get(path).json()
+        self.assertEqual(saved["curation_interval_days"], 1)
+        self.assertIsNone(saved["curation_run_at_hour"])
+        self.assertIsNone(saved["curation_run_at_minute"])
+
+    def test_profile_can_override_and_reset_review_schedule_without_changing_other_settings(self):
+        (self.profiles / "example.json").write_text(
+            '{"memory_config":{"day_summary_enabled":false}}', encoding="utf-8",
+        )
+        path = "/profiles/example/memory_config"
+        settings = {"curation_interval_days": 3, "curation_run_at_hour": 0, "curation_run_at_minute": 15}
+        self.assertEqual(self.client.put(path, json=settings).status_code, 200)
+        self.assertEqual(self.client.get(path).json()["memory_config"], {"day_summary_enabled": False, **settings})
+        self.assertEqual(self.client.put(path, json=dict.fromkeys(settings)).status_code, 200)
+        self.assertEqual(self.client.get(path).json()["memory_config"], {"day_summary_enabled": False})
+
     def test_delete_profile_retry_yields_and_stops_if_profile_was_recreated(self):
         card = self.profiles / "example.json"
         card.write_text("{}", encoding="utf-8")

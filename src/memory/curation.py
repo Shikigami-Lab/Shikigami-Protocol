@@ -12,6 +12,7 @@ import re
 import time
 import uuid
 
+from src.config.memory_prompts import memory_task_prompt
 from src.memory.fact_operations import apply_operations, normalize, rank_related
 from src.memory.long_term_store import LongTermFact, LongTermStore, fact_action_revision
 from src.memory.recall import semantic_version
@@ -20,7 +21,7 @@ from src.utils.memory_time import has_floating_date
 _BATCH_SIZE = 24
 _ARCHIVE_REASONS = {"cold_memory", "low_value", "unsupported"}
 _STABLE_CATEGORIES = {"habit", "preference", "taboo", "location"}
-_POLICY_VERSION = 3
+_POLICY_VERSION = 4
 # The entire note must describe a self-contained, momentary action. Arbitrary
 # subjects, objects and trailing clauses could carry information worth keeping.
 _ONE_OFF_ACTION = re.compile(
@@ -277,10 +278,12 @@ def _fixed_rows(subject, facts):
     return [subject, min(matches, key=lambda fact: fact.id)] if matches else [subject]
 
 
-def _pending_fixed_subject(facts, state):
+def _pending_fixed_subject(facts, state, model_key=""):
     reviewed = state.get("reviewed", {})
+    cached = state.get("fixed_reviews", {})
     return min((fact for fact in facts if _curation_keep_reason(fact) is None
-                and reviewed.get(fact.id) != _version(fact)),
+                and (reviewed.get(fact.id) != _version(fact)
+                     or (fact.id in cached and cached[fact.id].get("model_key") != model_key))),
                key=lambda fact: (fact.updated_at, fact.id), default=None)
 
 
@@ -293,12 +296,18 @@ def _save_excerpt(fact, new_content):
     fact.curation_protected = True
 
 
-def review_model_key(preset):
+def fixed_review_prompt(app) -> str:
+    config = getattr(app.state, "config", None)
+    return memory_task_prompt(getattr(config, "memory", {}) or {}, "review_prompt")
+
+
+def review_model_key(preset, *, review_prompt=None):
     if not preset:
         return ""
     fields = ("type", "model", "base_url", "temperature", "top_p", "presence_penalty",
               "frequency_penalty", "max_tokens", "extra_body", "unsupported_params")
-    payload = json.dumps({key: preset.get(key) for key in fields}, sort_keys=True)
+    prompt = review_prompt or memory_task_prompt({}, "review_prompt")
+    payload = json.dumps([{key: preset.get(key) for key in fields}, prompt], sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -334,7 +343,7 @@ class MemoryCuration:
 
         payload = {k: v for k, v in item.items() if k not in ("content", "target_content")}
         state.setdefault("fixed_reviews", {})[rows[0].id] = {
-            "key": review_key(rows, model_key), "item": payload,
+            "key": review_key(rows, model_key), "model_key": model_key, "item": payload,
         }
 
     async def _evaluate_fixed(self, decide, snapshot, rows, model_key):
@@ -360,7 +369,7 @@ class MemoryCuration:
             snapshot = self.store.curation_snapshot()
             _, _, facts, state = snapshot
             if fact_id is None:
-                subject = _pending_fixed_subject(facts, state)
+                subject = _pending_fixed_subject(facts, state, model_key)
             else:
                 subject = next((f for f in facts if f.id == fact_id), None)
                 if subject is None or _curation_keep_reason(subject):
@@ -611,7 +620,8 @@ class MemoryCuration:
         return self.store.curation_status()
 
     async def run_daily(self, day: str, decide: Decide, *, enabled: Callable[[], bool] = lambda: True,
-                        prepare_dialogue=None, decide_combined=None, decide_dialogue=None, model_key=""):
+                        prepare_dialogue=None, decide_combined=None, decide_dialogue=None, model_key="",
+                        review_is_current: Callable[[], bool] = lambda: True):
         """Reserve one attempt and commit its validated outputs together."""
         fixed = decide_dialogue is not None
         async with self._in_flight:
@@ -637,7 +647,7 @@ class MemoryCuration:
                     if not enabled() or state.get("daily", {}).get("day", "") >= day:
                         return
             if fixed:
-                subject = _pending_fixed_subject(facts, state)
+                subject = _pending_fixed_subject(facts, state, model_key)
                 if dialogue is not None and subject is not None and state.get("daily", {}).get("job") == "dialogue":
                     dialogue = None
                 rows = _fixed_rows(subject, facts) if dialogue is None and subject is not None else []
@@ -675,7 +685,7 @@ class MemoryCuration:
                     operations, raw_items = (await decide_combined(rows, dialogue) if dialogue is not None
                                              else ([], await decide(rows)))
                     items = _validate(rows, raw_items)
-                if not enabled():
+                if not enabled() or (reviewed_item is not None and not review_is_current()):
                     self._end_attempt(run_id, "cancelled")
                     return
                 revision, current_cursors, current_facts, state, current_offsets = self.store.curation_progress_snapshot()
@@ -786,10 +796,10 @@ def curation_preset(manager, app) -> dict:
     return preset
 
 
-async def request_fixed_review(rows, preset):
+async def request_fixed_review(rows, preset, *, review_prompt=None):
     from src.memory.curation_plan import review_messages
 
-    return (await _request_object(review_messages(rows), preset)).get("items")
+    return (await _request_object(review_messages(rows, review_prompt=review_prompt), preset)).get("items")
 
 
 async def request_daily_extraction(dialogue_messages, preset):

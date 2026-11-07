@@ -1,6 +1,7 @@
 """Offline acceptance of the daily dialogue or fixed-review request."""
 import asyncio
 import json
+from datetime import datetime
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
@@ -105,7 +106,9 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
             clock.today.return_value.strftime.return_value = DAY
             await job.run_daily_for_profile(PROFILE, "2026-11-06", self.app)
             diary.assert_awaited_once_with(PROFILE, "2026-11-06", self.app)
-        await self.run_job()
+            self.get_provider.assert_not_called()
+        await job._run_scheduled_curation(self.session, self.app, now=datetime(2026, 11, 7, 12))
+        await job._run_scheduled_curation(self.session, self.app, now=datetime(2026, 11, 7, 12, 1))
         self.get_provider.assert_called_once_with(self.preset)
         self.sdk_options.assert_called_once_with(max_retries=0, timeout=60.0)
         self.assertEqual(len(self.calls), 1)
@@ -117,6 +120,38 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
         self.assertEqual(store.source_cursors(), {"single": self.assistant_id})
         self.assertEqual(store.curation_status()["daily"]["status"], "completed")
         self.assert_daily_counts(requests=1, dialogue_messages=2, dialogue_slices=2, added=1)
+
+    async def test_scheduled_check_without_work_does_not_reserve_a_model_request(self):
+        self.seed(registered=False, old=False)
+        await job._run_scheduled_curation(self.session, self.app, now=datetime(2026, 11, 7, 12))
+        state = LongTermStore(self.root).curation_snapshot()[-1]
+        self.assertEqual(state["last_scheduled_check_date"], DAY)
+        self.assertNotIn("daily", state)
+        self.get_provider.assert_not_called()
+
+    async def test_prompt_change_during_review_cancels_old_decision(self):
+        self.seed(registered=False)
+        entered, release = asyncio.Event(), asyncio.Event()
+        self.app.state.config.memory = {"task_prompts": {"review_prompt": "Review old notes."}}
+
+        async def stream(messages):
+            self.assertIn("Review old notes.", messages[0]["content"])
+            entered.set()
+            await release.wait()
+            yield json.dumps({"items": [self.archive()]})
+
+        self.provider.stream_chat = stream
+        task = asyncio.create_task(self.run_job())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2)
+            self.app.state.config.memory["task_prompts"]["review_prompt"] = "Retain old notes."
+        finally:
+            release.set()
+            await task
+        state = LongTermStore(self.root).curation_snapshot()[-1]
+        self.assertEqual(state["daily"]["status"], "cancelled")
+        self.assertNotIn("fixed_reviews", state)
+        self.assertFalse(self.manager.facts.get_by_id("old").archived)
 
     async def test_empty_dialogue_operations_commit_cursor_and_clear_completed_offset(self):
         self.seed(offset=3)

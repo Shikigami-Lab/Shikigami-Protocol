@@ -1,9 +1,9 @@
-"""已加载人格的日摘要、用户画像和确定性事实索引维护。"""
+"""Independent daily maintenance and scheduled model memory work."""
 import asyncio
 import json
 import logging
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Optional
 
 from src.memory.curation import (
@@ -16,6 +16,7 @@ from src.memory.merged_history import memory_extraction_sources, memory_group_so
 logger = logging.getLogger(__name__)
 
 _LAST_DAILY_RUN_FILE = "last_daily_run.json"
+_LAST_CURATION_CHECK = "last_scheduled_check_date"
 
 
 def _msg_date(msg) -> str:
@@ -238,7 +239,40 @@ async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool 
         logger.exception("[daily_memory_job] portrait 刷新失败 profile=%s: %s", profile_id, e)
 
 
-async def _run_daily_curation(session, today: str, app) -> None:
+def _curation_is_due(state, cfg, now: datetime) -> bool:
+    interval = cfg.get("curation_interval_days", 1)
+    if type(interval) is not int or not 1 <= interval <= 30:
+        interval = 1
+
+    daily = state.get("daily")
+    legacy_day = daily.get("day") if isinstance(daily, dict) else None
+    last_dates = []
+    for value in (state.get(_LAST_CURATION_CHECK), legacy_day):
+        try:
+            last_dates.append(date.fromisoformat(value))
+        except (TypeError, ValueError):
+            continue
+    if last_dates:
+        elapsed = (now.date() - max(last_dates)).days
+        if elapsed != interval:
+            return elapsed > interval
+
+    hour = cfg.get("curation_run_at_hour")
+    minute = cfg.get("curation_run_at_minute")
+    deadline = time(int(cfg.get("daily_run_at_hour", 0) if hour is None else hour),
+                    int(cfg.get("daily_run_at_minute", 5) if minute is None else minute))
+    return now.time() >= deadline
+
+
+async def _run_scheduled_curation(session, app, *, now: Optional[datetime] = None) -> None:
+    try:
+        await _run_daily_curation(session, None, app, now=now)
+    except Exception:
+        logger.exception("Could not check the memory review schedule for profile %s", session.profile_id)
+
+
+async def _run_daily_curation(session, today: Optional[str], app, *, now: Optional[datetime] = None) -> None:
+    """Run the optional model task, recording a completed check when scheduled."""
     def active_manager():
         manager = _get_manager_for_session(session, app)
         if (manager and manager._cfg.get("enabled") and manager._cfg.get("daily_curation_enabled")
@@ -285,10 +319,13 @@ async def _run_daily_curation(session, today: str, app) -> None:
                 threshold=float(manager._cfg.get("extraction_weight_threshold", 0.5)),
             )
 
+        def review_is_current():
+            return fixed_review_prompt(app) == review_prompt
+
         async def decide(rows):
-            if active_manager() is not manager:
-                raise CurationConflict("Memory review was disabled before the request")
-            return await request_fixed_review(rows, preset)
+            if active_manager() is not manager or not review_is_current():
+                raise CurationConflict("Memory review settings changed before the request")
+            return await request_fixed_review(rows, preset, review_prompt=review_prompt)
 
         async def decide_dialogue(dialogue, facts):
             dialogue.candidates = await manager.choose_extraction_candidates(facts, dialogue.rows)
@@ -301,11 +338,28 @@ async def _run_daily_curation(session, today: str, app) -> None:
         async with manager._extraction_lock:
             if active_manager() is not manager:
                 return
+            scheduled = today is None
+            if scheduled:
+                checked_at = now if now is not None else datetime.now()
+                state = manager.facts.curation_snapshot()[-1]
+                if not _curation_is_due(state, manager._cfg, checked_at):
+                    return
+                today = checked_at.date().isoformat()
+
+            from src.memory.curation import fixed_review_prompt
+
             preset = curation_preset(manager, app)
+            review_prompt = fixed_review_prompt(app)
+            model_key = review_model_key(preset, review_prompt=review_prompt)
             changed = await curation_for(manager).run_daily(
                 today, decide, enabled=lambda: active_manager() is manager,
-                prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue, model_key=review_model_key(preset),
+                prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue, model_key=model_key,
+                review_is_current=review_is_current,
             )
+            if scheduled and active_manager() is manager:
+                revision, cursors, facts, state = manager.facts.curation_snapshot()
+                state[_LAST_CURATION_CHECK] = today
+                manager.facts.apply_curation(revision, facts, cursors, state)
         if changed and manager.vectors and manager.vectors.is_available():
             for fact_id in changed:
                 await manager.reembed_fact(fact_id)
@@ -332,7 +386,6 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
         return
 
     try:
-        await _run_daily_curation(session, today_str, app)
         await run_day_summary_for_profile(profile_id, yesterday, app)
         await run_portrait_refresh_for_profile(profile_id, app)
         _save_last_daily_run(session.storage_root, today_str)
@@ -359,16 +412,10 @@ async def _catch_up_missed_runs(app) -> None:
             logger.exception("[daily_memory_job] 补跑 profile %s 失败: %s", s.profile_id, e)
 
 
-async def run_daily_memory_loop(app) -> None:
-    """每日任务主循环：sleep 到下一日 00:05（或可配置时刻），遍历已加载的 session 执行任务。
-    启动 90 秒后先做一次补跑（见 _catch_up_missed_runs）。"""
-    logger.info("[daily_memory_job] 每日记忆任务循环已启动")
+async def _run_daily_tasks_loop(app) -> None:
+    """Run startup catch-up and the existing diary, portrait and index schedule."""
     try:
-        await asyncio.sleep(90)  # 避开启动高峰（TTS 预热、引擎启动）
         await _catch_up_missed_runs(app)
-    except asyncio.CancelledError:
-        logger.info("[daily_memory_job] 每日循环已取消")
-        return
     except Exception as e:
         logger.exception("[daily_memory_job] 启动补跑异常: %s", e)
     while True:
@@ -398,9 +445,38 @@ async def run_daily_memory_loop(app) -> None:
                     await run_daily_for_profile(s.profile_id, yesterday, app)
                 except Exception as e:
                     logger.exception("[daily_memory_job] profile %s 失败: %s", s.profile_id, e)
-        except asyncio.CancelledError:
-            logger.info("[daily_memory_job] 每日循环已取消")
-            break
         except Exception as e:
             logger.exception("[daily_memory_job] 循环异常: %s", e)
             await asyncio.sleep(60)
+
+
+async def _run_curation_schedule_loop(app) -> None:
+    """Check each loaded profile every minute without waiting on another profile's model."""
+    running = {}
+    try:
+        while True:
+            running = {profile_id: task for profile_id, task in running.items() if not task.done()}
+            try:
+                sm = getattr(app.state, "session_manager", None)
+                if sm:
+                    for session in sm.list_sessions():
+                        if session.profile_id not in running:
+                            running[session.profile_id] = asyncio.create_task(_run_scheduled_curation(session, app))
+            except Exception:
+                logger.exception("Could not enumerate scheduled memory reviews")
+            now = datetime.now()
+            await asyncio.sleep(60 - now.second - now.microsecond / 1_000_000)
+    finally:
+        for task in running.values():
+            task.cancel()
+        await asyncio.gather(*running.values(), return_exceptions=True)
+
+
+async def run_daily_memory_loop(app) -> None:
+    """Start the two memory schedules after the shared startup warmup."""
+    logger.info("[daily_memory_job] 每日记忆任务循环已启动")
+    try:
+        await asyncio.sleep(90)
+        await asyncio.gather(_run_daily_tasks_loop(app), _run_curation_schedule_loop(app))
+    except asyncio.CancelledError:
+        logger.info("[daily_memory_job] 每日循环已取消")

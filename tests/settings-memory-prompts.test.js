@@ -16,6 +16,7 @@ const { LOCALES } = runInNewContext(read('js/i18n.js') + '\nwindow;', { window: 
 const route = '/settings/memory/prompts';
 const extraction = 'extraction_prompt';
 const summary = 'day_summary_prompt';
+const review = 'review_prompt';
 const prompts = (overrides = {}) => ({
   defaults: { [extraction]: 'Extract facts from the conversation.', [summary]: 'Summarize the day.' },
   overrides: { [extraction]: null, [summary]: null, ...overrides },
@@ -42,6 +43,8 @@ test('Persona Prompt and the Memory shortcut expose one translated global card w
   assert.match(detail, /<!-- end profile-specific settings -->\s*<collapsible-section v-if="profileSubTab === 'prompts'" id="global-memory-prompts"/);
   const card = detail.match(/<collapsible-section[^>]*id="global-memory-prompts"[\s\S]*?<\/collapsible-section>/)[0];
   assert.match(card, /v-model="memoryPromptDraft\[key\]"/);
+  assert.match(card, /review_prompt: 'lblMemoryReviewPrompt'/);
+  assert.match(card, /v-if="key === 'review_prompt'"[^>]*>\{\{ t\('hintMemoryReviewPrompt'\) \}\}/);
   assert.match(card, /:disabled="memoryPromptsBusy"/);
   assert.match(card, /saveMemoryPrompt\(key\)/);
   assert.match(card, /saveMemoryPrompt\(key, true\)/);
@@ -54,7 +57,7 @@ test('Persona Prompt and the Memory shortcut expose one translated global card w
   assert.doesNotMatch(html, /profileWizardDisableMemory|wizardDisableMemory/);
   for (const locale of ['en', 'zh']) {
     for (const key of ['secMemoryExtractPrompts', 'hintGlobalMemoryPrompts', 'memoryPromptsLoadFailed',
-      'btnResetMemoryPrompt', 'lblExtractionPrompt', 'lblDaySummaryPrompt']) {
+      'btnResetMemoryPrompt', 'lblExtractionPrompt', 'lblDaySummaryPrompt', 'lblMemoryReviewPrompt', 'hintMemoryReviewPrompt']) {
       assert.ok(LOCALES[locale][key], `${locale} ${key}`);
     }
   }
@@ -79,6 +82,33 @@ test('entering Persona Prompt with no persona loads the built-in text and existi
   assert.equal(model.memoryPromptDraft[summary], 'Custom summary');
   assert.equal(model.memoryPromptIsDirty(extraction), false);
   assert.equal(model.memoryPromptIsDirty(summary), false);
+  assert.equal(Object.hasOwn(model.memoryPromptDraft, review), false);
+});
+
+test('editing and resetting the global review prompt PATCH only review_prompt and keep the other drafts', async () => {
+  const data = prompts({ [summary]: 'Saved summary', [review]: 'Saved review criteria' });
+  data.defaults[review] = 'Keep useful long-term memories.';
+  const writes = [];
+  const { model } = harness(async (url, options) => {
+    assert.equal(url, route);
+    if (options?.method === 'PATCH') {
+      const patch = JSON.parse(options.body);
+      writes.push(patch);
+      Object.assign(data.overrides, patch);
+    }
+    return reply(structuredClone(data));
+  });
+  await model.loadMemoryPrompts();
+  assert.equal(model.memoryPromptDraft[review], 'Saved review criteria');
+  model.memoryPromptDraft[extraction] = 'Unsaved extraction';
+  model.memoryPromptDraft[summary] = 'Unsaved summary';
+  model.memoryPromptDraft[review] = '  Revised review criteria\n';
+  await model.saveMemoryPrompt(review);
+  await model.saveMemoryPrompt(review, true);
+  assert.deepEqual(writes, [{ [review]: '  Revised review criteria\n' }, { [review]: null }]);
+  assert.equal(model.memoryPromptDraft[review], data.defaults[review]);
+  assert.equal(model.memoryPromptDraft[extraction], 'Unsaved extraction');
+  assert.equal(model.memoryPromptDraft[summary], 'Unsaved summary');
 });
 
 test('save and reset PATCH only their own field and preserve the other unsaved draft', async () => {
