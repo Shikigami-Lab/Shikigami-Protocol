@@ -2,22 +2,17 @@
 
 GET    /api/tools                                  — 返回注册表中所有工具 + 当前 profile 的 tool_configs
 PATCH  /api/profiles/{profile_id}/tool_configs    — 保存某工具的配置到 profile JSON
-POST   /api/profiles/{profile_id}/trend/fetch     — 手动触发一次趋势抓取（调试用）
-GET    /api/profiles/{profile_id}/trend/status    — 返回趋势缓存状态（条目数、最后抓取时间）
-DELETE /api/profiles/{profile_id}/trend/cache     — 清空趋势缓存
 GET    /api/profiles/{profile_id}/weather/status  — 返回天气缓存状态
 """
 import json
-import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from src.utils.paths import get_project_root
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
@@ -63,19 +58,13 @@ async def list_tools(request: Request, profile_id: str = ""):
             pass
 
     tools = get_all_tools()
+    tool_cfgs = profile_data.get("tool_configs") or {}
     result = []
     for t in tools:
         tool_id = t["tool_id"]
         default_cfg = t.get("default_config", {})
 
-        # Merge: default_config <- profile tool_configs override
-        # trend uses trend_config key; weather/others use tool_configs.{tool_id}
-        if tool_id == "trend":
-            profile_cfg = profile_data.get("trend_config") or {}
-        else:
-            tool_cfgs = profile_data.get("tool_configs") or {}
-            profile_cfg = tool_cfgs.get(tool_id) or {}
-
+        profile_cfg = tool_cfgs.get(tool_id) or {}
         merged = {**default_cfg, **profile_cfg}
         if t.get('agent_capable'):
             merged['enabled'] = merged.get('enabled', True) is True
@@ -93,7 +82,7 @@ class ToolConfigPatch(BaseModel):
 
 @router.patch("/api/profiles/{profile_id}/tool_configs")
 async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Request):
-    """保存某工具的配置到 profile JSON。trend 工具写入 trend_config，其余写入 tool_configs.{tool_id}。"""
+    """保存某工具的配置到 profile JSON 的 tool_configs.{tool_id}。"""
     from src.api.agent import _same_origin
     _same_origin(request)
     try:
@@ -110,14 +99,10 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Req
     if tool_id in ('timer', 'todo') and 'enabled' in cfg and type(cfg['enabled']) is not bool:
         raise HTTPException(status_code=422, detail='Tool permission must be a boolean')
 
-    if tool_id == "trend":
-        existing = data.get("trend_config") or {}
-        data["trend_config"] = {**existing, **cfg}
-    else:
-        tool_cfgs = data.get("tool_configs") or {}
-        existing = tool_cfgs.get(tool_id) or {}
-        tool_cfgs[tool_id] = {**existing, **cfg}
-        data["tool_configs"] = tool_cfgs
+    tool_cfgs = data.get("tool_configs") or {}
+    existing = tool_cfgs.get(tool_id) or {}
+    tool_cfgs[tool_id] = {**existing, **cfg}
+    data["tool_configs"] = tool_cfgs
 
     _save_profile(profile_id, data)
     if tool_id == 'agent' or (tool_id == 'todo' and cfg.get('enabled') is False):
@@ -127,58 +112,6 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Req
                 if run.profile_id == profile_id and not run.terminal and not runtime.permissions_valid(run):
                     await runtime.cancel(run.id, profile_id)
     return {"ok": True}
-
-
-# ── POST /api/profiles/{profile_id}/trend/fetch ────────────────────────────────
-
-@router.post("/api/profiles/{profile_id}/trend/fetch")
-async def manual_trend_fetch(profile_id: str):
-    """手动触发一次趋势抓取（调试 / 「立即抓取」按钮）。"""
-    try:
-        data = _load_profile(profile_id)
-    except HTTPException:
-        raise
-
-    storage_root = os.path.join(_PROFILES_DIR, profile_id)
-    try:
-        from src.tools.trends.fetcher import run_fetch_once
-        added = await run_fetch_once(profile_id, storage_root, data)
-        return {"ok": True, "added": added}
-    except Exception as e:
-        logger.warning("[tools_api] manual trend fetch error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── GET /api/profiles/{profile_id}/trend/status ────────────────────────────────
-
-@router.get("/api/profiles/{profile_id}/trend/status")
-async def trend_status(profile_id: str):
-    storage_root = os.path.join(_PROFILES_DIR, profile_id)
-    try:
-        from src.tools.trends.store import TrendStore
-        store = TrendStore(storage_root)
-        return {
-            "unused_count": store.count_unused(),
-            "total_count": len(store._items),
-            "last_fetched_at": store.last_fetched_at(),
-        }
-    except Exception as e:
-        return {"unused_count": 0, "total_count": 0, "last_fetched_at": None, "error": str(e)}
-
-
-# ── DELETE /api/profiles/{profile_id}/trend/cache ──────────────────────────────
-
-@router.delete("/api/profiles/{profile_id}/trend/cache")
-async def trend_clear_cache(profile_id: str):
-    storage_root = os.path.join(_PROFILES_DIR, profile_id)
-    try:
-        from src.tools.trends.store import TrendStore
-        store = TrendStore(storage_root)
-        store.clear_all()
-        return {"ok": True}
-    except Exception as e:
-        logger.warning("[tools_api] trend clear cache error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── GET /api/profiles/{profile_id}/weather/status ──────────────────────────────

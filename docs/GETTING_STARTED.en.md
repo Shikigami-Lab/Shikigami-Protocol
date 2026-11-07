@@ -52,7 +52,7 @@ You can also edit **`.env`** directly to set `HTTP_PROXY` / `HTTPS_PROXY` — sa
 | **Memory** | Facts, vectors, summaries, chat history, maintenance, and global or per-persona settings |
 | **TTS** | Voice engines: Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
 | **Behavior** | My profile, reflection, proactive messages, topic sources, screenshot behavior, and character state |
-| **Tools** | Todos, timers, weather, trends, web search — plugin toggles and config |
+| **Tools** | Toggles and configuration for todos, timers, weather, and web search |
 | **System** | Theme, proxy, HF mirror, offline toggle |
 
 Persona cards can also configure emotion/energy/affinity prompts, memory strategy, and TTS reference audio — see [profile_prompts.en.md](./profile_prompts.en.md) for field reference.
@@ -85,7 +85,7 @@ These features go beyond plain chat: the persona has **mood, stamina, long-term 
 
 ### Proactive speech (ASE)
 
-- **What it does**: Under silence, urgency, cooldown, and daily caps, the persona may **send a proactive line**. Can combine with tools/trends/VLM.
+- Under silence, urgency, cooldown, and daily caps, the persona may **send a proactive line**. It can draw on local topics, weather, and optional VLM context.
 - **Where**: ASE toggle and **mode** (low/medium/high/game/focus) in settings; timing thresholds largely in `config/app.yaml` → `ase.modes`; screenshot behavior with **VLM** options.
 
 **Tips**: Stabilize base persona before enabling ASE. If too chatty, raise urgency threshold or use **low** mode first.
@@ -142,9 +142,9 @@ More combinations at [pytorch.org](https://pytorch.org/). If you see `Torch not 
 
 Configure a multimodal model in the VLM settings to enable screenshot understanding in supported scenarios.
 
-### Ambient tools (weather / trends)
+### Weather awareness
 
-Enable and configure weather and trend tools (RSS / API) in the **Tools** tab. Once enabled, they inject context into prompts and influence proactive speech content.
+Enable and configure weather in the **Tools** tab to give the character local weather context.
 
 ---
 

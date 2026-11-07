@@ -208,23 +208,22 @@ class AppConfig:
             "sources": {},
         }
         source_defaults = {
-            "trend":               {"enabled": True},
+            "web_research":        {"enabled": False},
             "conversation_recall": {"enabled": True},
             "user_life":           {"enabled": True},
             "ai_self":             {"enabled": True},
             "random_api": {
                 "enabled": False,
-                "mode": "builtin",
                 "builtin_pool": "icebreaker",
-                "http_url": "",
-                "http_json_path": "",
             },
         }
         result = {**defaults, **self.topic_discovery}
         merged_sources = {}
         user_sources = self.topic_discovery.get("sources", {}) or {}
         for sid, sdef in source_defaults.items():
-            merged_sources[sid] = {**sdef, **(user_sources.get(sid) or {})}
+            entry = user_sources.get(sid) or {}
+            merged_sources[sid] = {key: entry.get(key, default) for key, default in sdef.items()}
+        merged_sources["web_research"]["enabled"] = merged_sources["web_research"]["enabled"] is True
         result["sources"] = merged_sources
         return result
 

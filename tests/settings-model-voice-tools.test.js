@@ -226,11 +226,25 @@ test('opening Tools while Models is loading still fetches runtime status', async
   assert.equal(model.agentRuntime.state, 'ready');
 });
 
-test('rejected trend source save preserves its draft for retry', async () => {
-  const { model } = settings(async () => response(422, { detail: 'Rejected' }));
-  model.selectedProfileId = 'fixture';
-  model.trendNewSource = { type: 'rss', label: 'Fixture', url: 'https://fixture.test', query: '' };
-  await model.addTrendSource({}, 'fixture');
-  assert.equal(model.trendNewSource.label, 'Fixture');
-  assert.equal(model.trendNewSource.url, 'https://fixture.test');
+test('web research uses reflection settings and drops retired source fields', async () => {
+  const requests = [];
+  const { model } = settings(async (url, options) => {
+    requests.push({ url, options });
+    if (options?.method === 'POST') return response(200, { ok: true });
+    return response(200, { topic_discovery: { sources: {
+      trend: { enabled: true },
+      user_life: { enabled: false },
+      random_api: { enabled: true, mode: 'http', http_url: 'https://old.invalid', builtin_pool: 'trivia' },
+    } } });
+  });
+  await model.loadReflectionConfig();
+  assert.equal(model.reflectionForm.topic_discovery.sources.web_research.enabled, false);
+  model.reflectionForm.topic_discovery.sources.web_research.enabled = true;
+  await model.saveReflectionConfig();
+  assert.deepEqual(requests.map(({ url }) => url), Array(2).fill('http://fixture.test/settings/reflection'));
+  const { topic_discovery } = JSON.parse(requests[1].options.body);
+  assert.deepEqual(topic_discovery.sources.web_research, { enabled: true });
+  assert.deepEqual(topic_discovery.sources.random_api, { enabled: true, builtin_pool: 'trivia' });
+  assert.equal(topic_discovery.sources.trend, undefined);
+  assert.equal(topic_discovery.sources.user_life, undefined);
 });

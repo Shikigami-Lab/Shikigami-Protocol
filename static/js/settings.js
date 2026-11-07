@@ -248,19 +248,7 @@ const SettingsMixin = {
       agentSettingsLoaded: false,
       agentSettingsBusy: false,
       agentSettingsError: '',
-      trendStatus: { unused_count: 0, total_count: 0, last_fetched_at: null },
-      trendFetching: false,
-      trendNewSource: { type: 'rss', label: '', url: '', query: '' },
       weatherStatus: { available: false },
-      trendPresetSourcesZh: [
-        { label: 'B站热搜', type: 'api', url: 'https://s.search.bilibili.com/main/hotword' },
-        { label: '少数派',  type: 'rss', url: 'https://sspai.com/feed' },
-      ],
-      trendPresetSourcesEn: [
-        { label: 'Hacker News',      type: 'rss', url: 'https://hnrss.org/frontpage' },
-        { label: 'Reddit Popular',   type: 'rss', url: 'https://www.reddit.com/r/popular/.rss' },
-        { label: 'Reddit WorldNews', type: 'rss', url: 'https://www.reddit.com/r/worldnews/.rss' },
-      ],
       profilePromptForm: {
         emotion_prompts: {},         // emotionKey → multiline string (array joined with \n)
         emotion_zh_descriptions: {}, // emotionKey → one-line description for TTS
@@ -548,13 +536,11 @@ const SettingsMixin = {
           recent_used_window: 10,
           chosen_topic_ttl:   1800,
           sources: {
-            trend:               { enabled: true },
+            web_research:        { enabled: false },
             conversation_recall: { enabled: true },
-            user_life:           { enabled: true },
             ai_self:             { enabled: true },
             random_api: {
-              enabled: false, mode: 'builtin', builtin_pool: 'icebreaker',
-              http_url: '', http_json_path: '',
+              enabled: false, builtin_pool: 'icebreaker',
             },
           },
         },
@@ -2220,7 +2206,6 @@ const SettingsMixin = {
         this.toolsLoadSequence++;
         this.toolsList = [];
         this.toolsLoading = false;
-        this.trendStatus = { unused_count: 0, total_count: 0, last_fetched_at: null };
         this.weatherStatus = { available: false };
       }
       this._profileFormLoaded = false;
@@ -5615,9 +5600,10 @@ const SettingsMixin = {
             if (topic_discovery[k] !== undefined) td[k] = topic_discovery[k];
           }
           const srcs = topic_discovery.sources || {};
-          for (const sid of Object.keys(srcs)) {
-            if (td.sources[sid]) Object.assign(td.sources[sid], srcs[sid]);
-            else td.sources[sid] = srcs[sid];
+          for (const [sid, source] of Object.entries(td.sources)) {
+            for (const key of Object.keys(source)) {
+              if (srcs[sid]?.[key] !== undefined) source[key] = srcs[sid][key];
+            }
           }
         }
         this._reflectionFormLoaded = true;
@@ -6272,11 +6258,7 @@ const SettingsMixin = {
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         if (sequence !== this.toolsLoadSequence || selected !== this.selectedProfileId || tab !== this.activeTab) return;
         this.toolsList = data.tools || [];
-        if (pid) {
-          await this.loadTrendStatus(pid);
-          if (sequence !== this.toolsLoadSequence || selected !== this.selectedProfileId || tab !== this.activeTab) return;
-          await this.loadWeatherStatus(pid);
-        }
+        if (pid) await this.loadWeatherStatus(pid);
       } catch (e) {
         if (sequence === this.toolsLoadSequence && selected === this.selectedProfileId && tab === this.activeTab) {
           this.toolsList = [];
@@ -6340,77 +6322,6 @@ const SettingsMixin = {
     getToolConfig(toolId) {
       const t = (this.toolsList || []).find(t => t.tool_id === toolId);
       return t ? t.config : {};
-    },
-
-    async loadTrendStatus(profileId) {
-      const pid = profileId || this.selectedProfileId;
-      if (!pid) return;
-      const sequence = this.toolsLoadSequence;
-      try {
-        const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/status`);
-        const data = await res.json();
-        if (res.ok && pid === this.selectedProfileId && sequence === this.toolsLoadSequence) this.trendStatus = data;
-      } catch (e) { /* silent */ }
-    },
-
-    async manualTrendFetch(profileId) {
-      const pid = profileId || this.selectedProfileId;
-      if (!pid || this.trendFetching) return;
-      this.trendFetching = true;
-      try {
-        const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/fetch`, { method: 'POST' });
-        const data = await this._readSettingsResult(res, true);
-        this.showToast(this.t('trendFetchDone').replace('{n}', data.added || 0), 'success');
-        await this.loadTrendStatus(pid);
-      } catch (e) {
-        this.showToast(this.t('errTrendFetch'), 'error');
-      } finally {
-        this.trendFetching = false;
-      }
-    },
-
-    async clearTrendCache(profileId) {
-      const pid = profileId || this.selectedProfileId;
-      if (!pid) return;
-      try {
-        const res = await fetch(getBaseUrl() + `/api/profiles/${pid}/trend/cache`, { method: 'DELETE' });
-        await this._readSettingsResult(res, true);
-        this.showToast(this.t('trendClearCacheDone'), 'success');
-        await this.loadTrendStatus(pid);
-      } catch (e) {
-        this.showToast('Error', 'error');
-      }
-    },
-
-    addPresetTrendSource(trendCfg, preset, profileId) {
-      const sources = [...(trendCfg.sources || [])];
-      if (sources.some(ss => ss.url === preset.url)) return;
-      sources.push({ type: preset.type, label: preset.label, url: preset.url });
-      this.saveToolConfig('trend', { sources }, profileId);
-    },
-
-    async addTrendSource(trendCfg, profileId) {
-      const pid = profileId || this.selectedProfileId;
-      const s = { ...this.trendNewSource };
-      if (!s.label) { this.showToast(this.t('errTrendSourceLabel'), 'error'); return; }
-      if ((s.type === 'rss' || s.type === 'api') && !s.url) { this.showToast(this.t('errTrendSourceUrl'), 'error'); return; }
-      if (s.type === 'websearch' && !s.query) { this.showToast(this.t('errTrendSourceQuery'), 'error'); return; }
-      const sources = [...(trendCfg.sources || [])];
-      const entry = { type: s.type, label: s.label };
-      if (s.type === 'rss' || s.type === 'api') entry.url = s.url;
-      if (s.type === 'websearch') entry.query = s.query;
-      sources.push(entry);
-      if (await this.saveToolConfig('trend', { sources }, pid)
-          && pid === this.selectedProfileId
-          && Object.keys(s).every(key => s[key] === this.trendNewSource[key])) {
-        this.trendNewSource = { type: 'rss', label: '', url: '', query: '' };
-      }
-    },
-
-    removeTrendSource(trendCfg, idx, profileId) {
-      const sources = [...(trendCfg.sources || [])];
-      sources.splice(idx, 1);
-      this.saveToolConfig('trend', { sources }, profileId);
     },
 
     async loadWeatherStatus(profileId) {

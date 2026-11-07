@@ -1462,7 +1462,13 @@ const App = {
             // Skip ASE new_message if we already rendered it token-by-token
             if (this._aseStreaming && data.client_id === '') {
               const last = this.messages[this.messages.length - 1];
-              if (last && last._streaming && data.message_id != null) last.id = data.message_id;
+              if (last && last._streaming && data.message_id != null) {
+                last.id = data.message_id;
+                if (data.agent_run_id) {
+                  last.agent_run_id = data.agent_run_id;
+                  last.session_id = sessionId;
+                }
+              }
               return;
             }
             const reconciled = this.reconcileChatMessage(message, true);

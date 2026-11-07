@@ -45,7 +45,7 @@ export function apply(ctx) {
           },
         });
         handle.agent.followup({ id: randomUUID(), role: 'user', content: [{ type: 'text', text: trigger }],
-          source: envelope.origin === 'user' ? { kind: 'user' } : { kind: 'shikigami-reflection' } });
+          source: { kind: envelope.origin === 'user' ? 'user' : `shikigami-${envelope.origin}` } });
         res.end('{"accepted":true}'); return;
       }
       if (!binding) throw new Error('No active request');

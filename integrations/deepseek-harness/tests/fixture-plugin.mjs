@@ -45,7 +45,7 @@ export function apply(ctx) {
   async function dispatch(path, body) {
     if (path === '/inspect') return { events, audit, tools: ctx.tools.schemas().map(t => t.name) };
     if (path === '/start') {
-      if (body.schema_version !== 1 || !['user', 'reflection'].includes(body.origin)
+      if (body.schema_version !== 1 || !['user', 'reflection', 'proactive'].includes(body.origin)
           || !Number.isSafeInteger(body.context_revision) || body.context_revision < 0
           || !['profile_id', 'request_id', 'session_id'].every(k => typeof body[k] === 'string' && body[k].length > 0 && body[k].length <= 256)) {
         throw new Error('invalid context envelope');
@@ -91,7 +91,7 @@ export function apply(ctx) {
       bindings.set(agent, { binding, terminal: false, setup });
       agent.followup({ id: randomUUID(), role: 'user',
         content: [{ type: 'text', text: trigger }],
-        source: body.origin === 'user' ? { kind: 'user' } : { kind: 'shikigami-reflection' } });
+        source: { kind: body.origin === 'user' ? 'user' : `shikigami-${body.origin}` } });
       return { accepted: true, ...binding };
     }
     if (path === '/roundtrip') {

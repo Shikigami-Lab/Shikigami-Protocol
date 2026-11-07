@@ -564,6 +564,8 @@ class ReflectionEngine:
             memory_manager=_mm,
             reflection_cfg=_ref_cfg,
             topic_discovery_cfg=_td_cfg,
+            session=session,
+            app=self._app,
         )
         messages = build_reflection_messages(session.id, ctx)
         messages[0]['content'] += plan_context

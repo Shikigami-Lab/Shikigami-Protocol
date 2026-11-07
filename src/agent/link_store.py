@@ -284,8 +284,8 @@ class LinkStore:
     def begin_run(self, run_id, profile_id, session_id, origin="user"):
         for name, value in (("run_id", run_id), ("profile_id", profile_id), ("session_id", session_id)):
             _id(value, name)
-        if origin not in ("user", "reflection"):
-            raise ValueError("origin must be user or reflection")
+        if origin not in ("user", "reflection", "proactive"):
+            raise ValueError("origin must be user, reflection, or proactive")
         with self._transaction(write=True) as db:
             db.execute("INSERT OR IGNORE INTO profiles(profile_id) VALUES (?)", (profile_id,))
             revision = self._revision(db, profile_id)
@@ -451,7 +451,7 @@ class LinkStore:
                 LEFT JOIN outbox o ON o.run_id=r.run_id AND o.event_key='task-finished'
                 WHERE r.profile_id=? AND r.stale=0 AND r.revision=p.revision
                     AND r.state IN ('completed','cancelled','failed')
-                    AND (r.origin='reflection' OR r.state IN ('cancelled','failed')
+                    AND (r.origin IN ('reflection','proactive') OR r.state IN ('cancelled','failed')
                         OR r.parent_run_id IS NOT NULL
                         OR EXISTS (SELECT 1 FROM actions a WHERE a.run_id=r.run_id)
                         OR EXISTS (SELECT 1 FROM events t WHERE t.run_id=r.run_id

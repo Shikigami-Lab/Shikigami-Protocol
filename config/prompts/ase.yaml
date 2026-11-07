@@ -81,13 +81,11 @@ ase:
   speak_reason_labels:
     zh:
       memory_recall:      "你想起了某件事"
-      trend_share:        "你看到了一些新鲜事"
       emotional_overflow: "你有些话憋着"
       silence_concern:    "你等了很久了"
       none:               ""
     en:
       memory_recall:      "something came to mind"
-      trend_share:        "you came across something new"
       emotional_overflow: "you have something pent up"
       silence_concern:    "you've been waiting a while"
       none:               ""

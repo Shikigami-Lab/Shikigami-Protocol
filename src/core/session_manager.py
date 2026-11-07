@@ -17,7 +17,18 @@ class SessionManager:
     def __init__(self, config):
         self.config = config
         self._sessions: Dict[str, Session] = {}
-        self._current_id: Optional[str] = None
+        self._selected_id: Optional[str] = None
+        self.view_revision = 0
+
+    @property
+    def _current_id(self):
+        return self._selected_id
+
+    @_current_id.setter
+    def _current_id(self, session_id):
+        if session_id != self._selected_id:
+            self._selected_id = session_id
+            self.view_revision += 1
 
     async def init(self):
         """Load sessions from profiles directory (1:1 profile-session binding)."""

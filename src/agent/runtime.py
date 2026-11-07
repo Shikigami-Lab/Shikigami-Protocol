@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 import shutil
 import subprocess
 import threading
@@ -58,6 +59,8 @@ class _Run:
     before_files: dict = field(default_factory=dict)
     workspace_warning: str = ''
     autonomy_summary: str = ''
+    research_sources: dict = field(default_factory=dict, repr=False)
+    research_fetch_urls: set = field(default_factory=set, repr=False)
     cancel_requested: bool = False
     model_preset: dict = field(default_factory=dict, repr=False)
 
@@ -123,6 +126,8 @@ class AgentRuntime:
             return False
         if run.envelope.get('origin') == 'reflection' and not self.autonomy_allowed(run.profile_id):
             return False
+        if run.envelope.get('origin') == 'proactive' and not self.autonomy.research_enabled(run.session):
+            return False
         current = self.access_for(run.profile_id)
         return not any(value and not current.get(key) for key, value in run.access.items())
 
@@ -156,8 +161,11 @@ class AgentRuntime:
             raise ValueError('Task permissions changed; start a new task')
 
     def context_valid(self, run):
-        return (not self._mutations.get(run.profile_id, 0) and not run.invalidate_after
+        return (not self.history_changing(run.profile_id) and not run.invalidate_after
                 and self.store.is_current(run.id, run.profile_id))
+
+    def history_changing(self, profile_id):
+        return bool(self._mutations.get(profile_id, 0))
 
     @staticmethod
     def _run_id_for_request(profile_id, request_id):
@@ -173,10 +181,14 @@ class AgentRuntime:
             raise ValueError('Harness group chat is not enabled in this phase')
         if not self.tools_allowed(session.profile_id):
             raise ValueError('AI tools are disabled for this character')
-        if origin not in ('user', 'reflection'):
+        if origin not in ('user', 'reflection', 'proactive'):
             raise ValueError('Invalid task origin')
         if origin == 'reflection' and not self.autonomy.enabled(session):
             raise ValueError('Autonomous activity is not enabled for this character')
+        if origin == 'proactive' and not self.autonomy.research_enabled(session):
+            raise ValueError('Proactive research is not enabled for this character')
+        if origin == 'proactive' and continue_run_id:
+            raise ValueError('Proactive research does not use prior task context')
         if request_id and (not isinstance(request_id, str) or len(request_id) > 128):
             raise ValueError("Invalid request id")
         run_id = self._run_id_for_request(session.profile_id, request_id) if request_id else str(uuid.uuid4())
@@ -187,7 +199,7 @@ class AgentRuntime:
             if sum(not r.terminal for r in self._runs.values()) >= 2:
                 raise ValueError("Two tasks are already running; wait or stop one")
             revision = self.store.revision(session.profile_id)
-            directory_context = self.workspace_context(session.profile_id)
+            directory_context = self.workspace_context(session.profile_id) if origin != 'proactive' else ''
             if directory_context:
                 messages = [copy(m) for m in messages]
                 next(m for m in messages if m['role'] == 'system')['content'] += directory_context
@@ -210,6 +222,8 @@ class AgentRuntime:
             run.model_preset = {key: preset.get(key) for key in ('base_url', 'model')}
             self._runs[run_id] = run
             run.access = self.access_for(session.profile_id)
+            if origin == 'proactive':
+                run.access = {key: value and key == 'web_enabled' for key, value in run.access.items()}
             run.session = session
         return run
 
@@ -270,7 +284,7 @@ class AgentRuntime:
             return
         kind = event.get("type")
         if kind == "reply_delta":
-            if run.envelope.get('origin') == 'reflection' and not run.stopped.is_set():
+            if run.envelope.get('origin') in ('reflection','proactive') and not run.stopped.is_set():
                 run.autonomy_summary = (run.autonomy_summary + event.get('text', ''))[:2000]
             return
         projected = {"type": kind}
@@ -335,11 +349,18 @@ class AgentRuntime:
             outcome = ({'summary': safe_text(run.autonomy_summary),
                         'artifacts': run.artifacts, 'artifacts_truncated': event.get('artifacts_truncated', False)}
                        if autonomous else None)
-            self.store.finish_run(run.id, kind, projected.get('error'), publish_result=autonomous or run.used_tools or kind != 'completed',
+            publish_result = run.envelope.get('origin') != 'proactive' and (autonomous or run.used_tools or kind != 'completed')
+            self.store.finish_run(run.id, kind, projected.get('error'), publish_result=publish_result,
                                   model_requests=run.gateway.requests, outcome=outcome)
             run.terminal = True
             run.pending_approvals.clear()
-        payload = {**event, "run_id": run.id, "request_id": run.id, "profile_id": run.profile_id,
+        visible = event
+        if run.envelope.get('origin') == 'proactive':
+            if kind in ('tool_call','tool_result'):
+                visible = projected
+            elif kind == 'failed':
+                visible = {"type":"failed","error":projected["error"]}
+        payload = {**visible, "run_id": run.id, "request_id": run.id, "profile_id": run.profile_id,
                    "session_id": run.session_id, "sequence": saved["seq"], 'origin': run.envelope['origin']}
         await run.queue.put({"agent_event": payload})
         from src.core.broadcast import broadcast
@@ -385,7 +406,7 @@ class AgentRuntime:
                 run.before_files = {f['path']: (f['size'], f['modified']) for f in inventory}
             from src.agent.mcp_server import create_timer_mcp_app
             adapter = create_timer_mcp_app(lambda name, args, rid: self.execute_tool(run.id, name, args, rid),
-                                           business_tools=tuple(business_tools(run.access)))
+                                           business_tools=tuple(self._business_tools(run)))
             async with adapter.lifespan(), httpx.AsyncClient(transport=httpx.ASGITransport(app=adapter.app),
                     base_url="http://localhost:8000", timeout=30) as mcp_client:
                 run.process = await asyncio.create_subprocess_exec(*self._command(run),
@@ -400,7 +421,7 @@ class AgentRuntime:
                 stderr_task = asyncio.create_task(drain_stderr())
                 route = {key: run.gateway.route[key] for key in ("provider", "model", "native_google")}
                 await self._send(run, {"route": route, "envelope": run.envelope, "timer_enabled": run.timer_enabled,
-                    'native_tools': native_tools(run.access), 'business_tools': business_tools(run.access)})
+                    'native_tools': native_tools(run.access), 'business_tools': self._business_tools(run)})
                 async def bridge(message):
                     rid = message["id"]
                     try:
@@ -410,8 +431,13 @@ class AgentRuntime:
                             self._authorize(run)
                             if not run.access.get('web_enabled') or message.get('path') != '/fetch' or message.get('method') != 'POST':
                                 raise ValueError('Web access is disabled')
+                            body = message.get('body')
+                            if run.envelope.get('origin') == 'proactive' and (
+                                not isinstance(body, dict) or body.get('url') not in run.research_fetch_urls
+                            ):
+                                raise ValueError('Proactive fetch requires a URL returned by search')
                             from src.agent.web_gateway import native_fetch
-                            result = await native_fetch(run, message.get('body'), self.bundle_root, HARNESS_IMAGE)
+                            result = await native_fetch(run, body, self.bundle_root, HARNESS_IMAGE)
                             self._authorize(run)
                             await respond(rid, 'start', status=200, content_type='application/json')
                             await respond(rid, 'chunk', data=json.dumps(result).encode())
@@ -672,6 +698,12 @@ class AgentRuntime:
     async def execute_timer(self, run_id, name, args, request_id):
         return await asyncio.to_thread(self._execute_timer, run_id, name, args, str(request_id))
 
+    @staticmethod
+    def _business_tools(run):
+        if run.envelope.get('origin') == 'proactive':
+            return ['web_search'] if run.access.get('web_enabled') else []
+        return business_tools(run.access)
+
     async def execute_tool(self, run_id, name, args, request_id):
         if name.startswith('timer_'):
             return await self.execute_timer(run_id, name, args, request_id)
@@ -679,8 +711,13 @@ class AgentRuntime:
         if run is None:
             raise ValueError('Unknown task')
         self._authorize(run)
-        if name not in business_tools(run.access):
+        if name not in self._business_tools(run):
             raise ValueError('Tool is disabled for this character')
+        if name == 'web_search' and run.envelope.get('origin') == 'proactive':
+            from src.agent.public_topics import is_public_query
+
+            if not is_public_query(args.get("query")):
+                raise ValueError('Proactive web search requires a short public query')
         if name == 'task_context':
             result = self.task_context(run.session, args.get('run_id', ''), access=run.access)
         elif name == 'task_search':
@@ -711,6 +748,19 @@ class AgentRuntime:
         if result.get('ok') is False:
             error = result.get('error') or {}
             raise ValueError(safe_text(error.get('message', 'Tool failed; no reliable results are available')))
+        if name == 'web_search' and run.envelope.get('origin') == 'proactive':
+            for row in result.get('results', []):
+                url = row.get('url', '')
+                try:
+                    parsed = urlsplit(url)
+                    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
+                        continue
+                except ValueError:
+                    continue
+                if len(run.research_fetch_urls) < 60:
+                    run.research_fetch_urls.add(url)
+                if len(run.research_sources) < 6 and row.get('title'):
+                    run.research_sources[url] = {"title":row["title"],"url":url,"snippet":row.get("snippet","")[:700]}
         if name == 'task_search' and run.envelope.get('origin') == 'user':
             run.task_matches.append(result)
             del run.task_matches[:-4]

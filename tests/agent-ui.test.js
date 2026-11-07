@@ -233,6 +233,15 @@ test('reflection event origin survives later events and never binds to a user st
   assert.equal(model.statusText, 'User reply');
 });
 
+test('proactive topic research has a task label in both locales', () => {
+  const { model } = harness();
+  const run = { origin: 'proactive', state: 'completed' };
+  for (const [locale, label] of [['zh', '主动找话题'], ['en', 'Proactive topic research']]) {
+    model.locale = locale;
+    assert.equal(model.agentRunLabel(run), label + ' · ' + model.agentStateLabel(run));
+  }
+});
+
 test('continuation waits for a confirmed user origin before passing a task to chat', () => {
   const { model } = harness();
   const run = { id: 'r1', profile_id: 'p1', session_id: 'p1', state: 'completed' };
@@ -581,18 +590,16 @@ test('late tool-load and save errors are silent after a character switch', async
   }
 });
 
-test('tool status responses cannot overwrite another character after switching away and back', async () => {
-  for (const [method, field] of [['loadTrendStatus', 'trendStatus'], ['loadWeatherStatus', 'weatherStatus']]) {
-    let resolve;
-    const { model } = harness(() => new Promise(r => { resolve = r; }));
-    model.selectedProfileId = 'p1'; model.profiles = [];
-    const loading = model[method]('p1');
-    model.selectProfile('p2'); model.selectProfile('p1');
-    model[field] = { current: true };
-    resolve({ ok: true, json: async () => ({ stale: true }) });
-    await loading;
-    assert.equal(model[field].current, true);
-  }
+test('weather status responses cannot overwrite another character after switching away and back', async () => {
+  let resolve;
+  const { model } = harness(() => new Promise(r => { resolve = r; }));
+  model.selectedProfileId = 'p1'; model.profiles = [];
+  const loading = model.loadWeatherStatus('p1');
+  model.selectProfile('p2'); model.selectProfile('p1');
+  model.weatherStatus = { current: true };
+  resolve({ ok: true, json: async () => ({ stale: true }) });
+  await loading;
+  assert.equal(model.weatherStatus.current, true);
 });
 
 test('autonomy controls reuse settings and continuation controls use the origin guard', () => {

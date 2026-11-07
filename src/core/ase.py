@@ -644,6 +644,7 @@ class AseEngine:
 
         from src.core.topics import get_source
         from src.core.topics.base import TopicSourceContext
+        from src.prompt.segments.reflection.topic_candidates import _recently_used_refs
 
         src = get_source(source_id)
         if src is None:
@@ -675,6 +676,7 @@ class AseEngine:
             storage_root=session.storage_root,
             profile=profile,
             config=td_cfg,
+            recently_used=_recently_used_refs(session.storage_root, td_cfg.get("recent_used_window", 10)),
             reflection_thought=rs.get("thought", ""),
             emotion=emotion,
             memory_manager=mm,
@@ -719,6 +721,29 @@ class AseEngine:
         config = app.state.config
         ase_cfg = config.get_ase_config()
         vlm_cfg = config.get_vlm_config()
+        runtime = getattr(app.state, "agent_runtime", None)
+        autonomy = getattr(runtime, "autonomy", None)
+        manager = getattr(app.state, "session_manager", None)
+        view_revision = getattr(manager, "view_revision", 0)
+        group_revision = getattr(autonomy, "view_revision", 0)
+        revision = getattr(getattr(runtime, "store", None), "revision", None)
+        history_changing = getattr(runtime, "history_changing", None)
+        history_revision = revision(session.profile_id) if callable(revision) else None
+
+        def last_activity():
+            return max(getattr(session, "last_user_message_time", 0) or 0,
+                       getattr(app.state, "last_user_message_time", 0.0))
+
+        last_activity_at_start = last_activity()
+
+        def turn_valid():
+            return (getattr(manager, "view_revision", 0) == view_revision
+                    and getattr(autonomy, "view_revision", 0) == group_revision
+                    and not getattr(autonomy, "group_view", False)
+                    and (not callable(history_changing) or not history_changing(session.profile_id))
+                    and (history_revision is None or revision(session.profile_id) == history_revision)
+                    and last_activity() <= last_activity_at_start
+                    and session.id not in getattr(app.state, "chat_streaming_sessions", set()))
 
         # ── Optional VLM screenshot ───────────────────────────────────────────
         vlm_description = ""
@@ -734,6 +759,8 @@ class AseEngine:
 
         if use_vlm:
             vlm_description = await self._request_screenshot_and_describe(session)
+        if not turn_valid():
+            return
 
         # ── Message config (game mode can override) ───────────────────────────
         from src.config.effective_config import get_effective_max_history_turns
@@ -814,6 +841,7 @@ class AseEngine:
                 "ase_greeting_hint": greeting_hint,
                 "ase_chosen_topic": chosen_topic,
                 "ase_silent_seconds": silent_seconds,
+                "ase_grounded_topics": True,
             },
         )
 
@@ -822,6 +850,11 @@ class AseEngine:
             m for m in messages
             if not (m["role"] == "user" and not m["content"].strip())
         ]
+
+        research_topic = {}
+
+        def research_valid():
+            return bool(turn_valid() and autonomy and autonomy.research_enabled(session))
 
         llm = get_provider(preset)
         gen_kwargs = {
@@ -846,7 +879,20 @@ class AseEngine:
             # so neither may ever be pushed. Ordinary replies are released after a few characters.
             holding = True
             late_error = ""
-            async for token in llm.stream_chat(messages):
+            if research_valid():
+                from src.core.proactive_research import stream_reply
+                from src.prompt.segments.reflection.topic_candidates import _recently_used_refs
+
+                recent = _recently_used_refs(session.storage_root, 10)
+                tokens = stream_reply(llm, messages, lambda query: autonomy.research(session, query, now),
+                                      research_valid, recent, research_topic)
+            else:
+                tokens = llm.stream_chat(messages)
+            async for token in tokens:
+                if not turn_valid():
+                    if not holding:
+                        await broadcast.push(session.id, {"type": "proactive_stream_discard"})
+                    return
                 if not holding and token.lstrip().startswith(_LLM_ERROR_PREFIX):
                     late_error = token
                     await broadcast.push(session.id, {"type": "proactive_stream_discard"})
@@ -859,6 +905,12 @@ class AseEngine:
                     token = full_response
                 await broadcast.push(session.id, {"token": token, "done": False})
 
+            if (not turn_valid() or (research_topic and not research_valid())
+                    or (chosen_topic and chosen_topic.get("source_id") == "conversation_recall"
+                        and not research_topic and not self._resolve_chosen_topic(session))):
+                if not holding:
+                    await broadcast.push(session.id, {"type": "proactive_stream_discard"})
+                return
             raw_response = full_response
             full_response = full_response.replace("**", "").strip()
 
@@ -903,7 +955,18 @@ class AseEngine:
                 await broadcast.push(session.id, {"token": raw_response, "done": False})
 
             # Save only the assistant response (no user trigger message)
-            assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
+            if research_topic:
+                run_id = research_topic["run_id"]
+                assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "",
+                                                    agent_run_id=run_id)
+                try:
+                    runtime.store.bind_messages(run_id, assistant_message_id=assistant_message_id)
+                except Exception:
+                    logger.warning("[ASE] Could not attach research task to proactive message")
+                chosen_topic = research_topic
+            else:
+                run_id = None
+                assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
             notice = {"message_id": assistant_message_id, "timestamp": time.time()}
             session.last_proactive_message = notice
 
@@ -915,6 +978,7 @@ class AseEngine:
                 "timestamp": time.time(),
                 "client_id": "",
                 "sender": session.display_name or "",
+                **({"agent_run_id":run_id} if run_id else {}),
             })
             await broadcast.push(session.id, {
                 "token": "", "done": True,
@@ -969,11 +1033,18 @@ class AseEngine:
             if chosen_topic:
                 log_entry["source"] = chosen_topic["source_id"]
                 log_entry["item_id"] = chosen_topic["item_id"]
-                try:
-                    chosen_topic["_source"].mark_used(
-                        chosen_topic["item_id"], chosen_topic["_tctx"])
-                except Exception as e:
-                    logger.debug("[ASE] topic mark_used 失败: %s", e)
+                if chosen_topic["source_id"] == "web_research":
+                    log_entry["speak_reason"] = "web_research"
+                if chosen_topic["source_id"] == "conversation_recall":
+                    from src.prompt.segments.reflection.topic_candidates import remember_recall_spoken
+
+                    remember_recall_spoken(state, chosen_topic["item_id"], log_entry["timestamp"])
+                if chosen_topic.get("_source"):
+                    try:
+                        chosen_topic["_source"].mark_used(
+                            chosen_topic["item_id"], chosen_topic["_tctx"])
+                    except Exception as e:
+                        logger.debug("[ASE] topic mark_used 失败: %s", e)
             proactive_log = state.get("proactive_log", [])
             proactive_log.append(log_entry)
             state["proactive_log"] = proactive_log[-15:]  # keep last 15
@@ -991,9 +1062,9 @@ class AseEngine:
         except Exception as e:
             logger.error("[ASE] session=%s speak error: %s", session.id, e)
             log_ase_error(session_id=session.id, error=str(e))
-            # Send done signal so frontend doesn't hang
             try:
-                await broadcast.push(session.id, {"token": "", "done": True})
+                if full_response:
+                    await broadcast.push(session.id, {"type": "proactive_stream_discard"})
             except Exception:
                 pass
 

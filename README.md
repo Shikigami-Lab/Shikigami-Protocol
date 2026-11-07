@@ -89,7 +89,7 @@ Shikigami bets on **state machines, reflection, proactivity, and an integrated m
 | **Silence & initiative** | Hear from your companion during quiet stretches of work or study. | **Reflection + urgency + ASE** — background monologue and urgency build up; **breaks the silence** when thresholds are met, not a dumb timer. |
 | **Memory & cognition** | Bring earlier experiences and topics into later conversations. | **Fact extraction + vector retrieval + daily summaries** — pipelines are **built in** and aligned with prompt segments and retrieval policy. |
 | **Persona growth** | Let shared memories help shape the character. | **Persona Evolution**: accumulated memories gradually reshape the persona. A *core anchor* guides evolution toward preserving the original traits; full changelog + one-click rollback built in. |
-| **World context** | Talk about the time, surroundings, or what is on screen. | **Time / lunar / solar terms, weather, trends** can be injected; optional **VLM** screen context for replies and pre-speech. |
+| **World context** | Talk about the time, surroundings, or what is on screen. | **Time / lunar / solar terms and weather** can be injected. Optional **VLM** adds screen context for replies and proactive speech. |
 | **Companion tools** | Look things up, keep todos, and set reminders as you chat. | **Todos, timers, web search** (`/todo`, `/timer`, `/search`) live in the chat flow — remember, nudge, look things up. |
 | **Multi-persona sessions** | Bring characters with different personalities into one conversation. | **Group chat** — multiple personas in one session, streamed output, per-character attribution. |
 | **Data & sovereignty** | Keep your own conversations and persona state, and choose your model provider. | **Local-first** for logs and state on disks you control; **AGPL** — no platform custody of your persona and history. Inference/embeddings follow *your* provider choice. |
@@ -224,7 +224,6 @@ They live in your world, not in a vacuum.
   - Feels the 3 AM quiet or a busy Monday morning.
   - Knows your weather, the change of seasons, and Chinese lunar solar terms.
   - Remembers your special dates — anniversaries, birthdays, custom milestones — and weaves them into conversation naturally.
-  - Global Pulse: through trend awareness, it knows what's happening on the internet.
 - **Shared Vision (VLM)**:
   - **Eyes on You**: Perceives your screen (gaming, coding, browsing).
   - **Live Commentary**: Like a friend sitting nearby, they comment on your screen content.
@@ -264,7 +263,7 @@ The character that comes back a month later is not the same one you met on day o
 - **Lorebook** — keyword-triggered world entries inject lore, setting facts, or scenario rules into the prompt at the right moment. Per-entry modes: `keyword`, `constant`, or `inherit`.
 - **AI persona autofill** — generates emotion descriptions, reflection config, memory config, and core anchor from `base_prompt` in one click.
 - **Group chat** — multiple personas in one session, streamed with per-character attribution.
-- **Commands** — `/fact`, `/recall`, `/memory`, `/search`, `/todo`, `/timer`, `/topic`, `/help`, plus natural language triggers that activate prompt segments by keyword matching. `/topic [trend|recall|life|self|random]` asks the character to bring up a fresh topic right away, optionally from a given source; bare requests like "change the topic" or "anything new?" trigger it too.
+- **Commands** — `/fact`, `/recall`, `/memory`, `/search`, `/todo`, `/timer`, `/topic`, `/help`, plus natural language triggers that activate prompt segments by keyword matching. `/topic [recall|life|self|random]` asks the character to bring up a fresh topic from a local source. Bare requests like "change the topic" or "anything new?" trigger it too.
 
 ### Core config (`config/app.yaml`)
 

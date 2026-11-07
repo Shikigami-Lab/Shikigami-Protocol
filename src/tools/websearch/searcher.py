@@ -1,4 +1,4 @@
-"""WebSearch 执行层 — 标准化搜索结果，供 command / TrendFetcher 调用。
+"""WebSearch 执行层 — 标准化搜索结果，供命令和 Harness 调用。
 
 数据源优先级：
   1. Serper.dev（需 WEBSEARCH_SERPER_API_KEY，结果最好）

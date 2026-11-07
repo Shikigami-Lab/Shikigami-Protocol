@@ -4,9 +4,8 @@ No extra LLM calls: collecting candidates, picking one and resolving the materia
 deterministic. The result is injected into this reply's prompt as context_for_llm, so the AI
 brings up the topic within the same generation.
 
-Preference: external sources (web trends / random topics) come first, since someone asking for
-a new topic wants something fresh; when they have nothing, fall back to the user's life /
-conversation recall / the AI itself.
+Prefer local random inspiration when enabled, then the user's life, conversation recall,
+and the AI's own state.
 """
 import logging
 import random
@@ -17,12 +16,10 @@ from src.config.prompt_loader import get_locale
 
 logger = logging.getLogger(__name__)
 
-_EXTERNAL_SOURCES = ["trend", "random_api"]
-_FALLBACK_SOURCES = ["user_life", "conversation_recall", "ai_self"]
+_SOURCE_ORDER = ["random_api", "user_life", "conversation_recall", "ai_self"]
 
 # /topic <sub> selects a source
 _SUB_TO_SOURCE = {
-    "trend": "trend", "趋势": "trend",
     "recall": "conversation_recall", "回忆": "conversation_recall",
     "life": "user_life", "生活": "user_life",
     "self": "ai_self", "自己": "ai_self",
@@ -91,7 +88,7 @@ def pick_topic_material(session, app, want_source: str = "") -> Optional[dict]:
     if want_source:
         order = [want_source]
     else:
-        order = _EXTERNAL_SOURCES + _FALLBACK_SOURCES
+        order = _SOURCE_ORDER
     # Candidates are shuffled within each source so repeated requests don't keep landing on the same item
     locale = get_locale()
 
@@ -133,14 +130,10 @@ def _format_context(picked: Optional[dict], trigger_text: str) -> str:
     if picked is None:
         if locale == "en":
             return (f"[Command result · {trigger_text}]\n"
-                    "The user asked you to bring up a new topic, but no fresh material is "
-                    "available right now (trends may be disabled, still fetching, or used up). "
-                    "Acknowledge that honestly, then start a topic of your own from your "
-                    "shared memories or your current state — don't pretend you found news.")
+                    "The user asked you to bring up a new topic. Start one of your own from "
+                    "your shared memories or your current state.")
         return (f"[命令执行结果 · {trigger_text}]\n"
-                "用户想让你起一个新话题，但素材库此刻没有新鲜内容（趋势可能未启用、"
-                "还没抓到或都聊过了）。请坦然说明，然后从你们的回忆或你自己的近况里"
-                "主动起一个话题——不要假装看到了新消息。")
+                "用户想让你起一个新话题。请从你们的回忆或你自己的近况里主动起一个话题。")
     if locale == "en":
         return (f"[Command result · {trigger_text}]\n"
                 f"The user asked you to bring up a new topic. Material picked for you "
@@ -156,7 +149,7 @@ def _format_context(picked: Optional[dict], trigger_text: str) -> str:
 
 
 async def handle_topic(sub: str, args: str, session, app) -> CommandResult:
-    """/topic [trend|回忆|生活|自己|随机] — have the AI bring up a new topic right away."""
+    """/topic [回忆|生活|自己|随机] — have the AI bring up a new topic right away."""
     want_source = _SUB_TO_SOURCE.get((sub or "").strip().lower(), "")
     picked = pick_topic_material(session, app, want_source=want_source)
     cmd_text = f"/topic {sub}".strip()

@@ -63,6 +63,55 @@ class AutonomyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runner._build_messages.call_args.args[2], selected)
         self.assertEqual(self.config.get_active_llm_preset()['model'], 'fake')
 
+    async def test_proactive_research_uses_only_public_query_and_web_tools(self):
+        self.config.agent.update(web_enabled=True, history_enabled=True, todo_enabled=True)
+        self.config.get_topic_discovery_config = lambda: {
+            "enabled": True, "sources": {"web_research": {"enabled": True}},
+        }
+
+        async def drive(run):
+            self.assertEqual(run.envelope["origin"], "proactive")
+            self.assertFalse(run.timer_enabled)
+            self.assertEqual([k for k,v in run.access.items() if v], ["web_enabled"])
+            self.assertEqual(self.runtime._business_tools(run), ["web_search"])
+            self.assertEqual(run.envelope["messages"][-1]["content"], "Public aquarium exhibits")
+            result = {"ok":True,"results":[{"title":"Aquarium exhibition","url":"https://example.test/exhibit",
+                                             "snippet":"A new public exhibition is open."}]}
+            with patch("src.agent.business_tools.call_business_tool", return_value=result) as search:
+                with self.assertRaisesRegex(ValueError, "public query"):
+                    await self.runtime.execute_tool(run.id,"web_search",{"query":"phone +1 234 567 8910"},"private")
+                search.assert_not_awaited()
+                await self.runtime.execute_tool(run.id,"web_search",{"query":"Public aquarium exhibits"},"search")
+                self.assertEqual(run.research_fetch_urls, {"https://example.test/exhibit"})
+            await self.runtime._publish(run, {"type":"reply_delta","text":"A new public exhibition opened."})
+            await self.runtime._publish(run, {"type":"completed"})
+            await run.queue.put(None)
+
+        with patch.object(self.runtime, "_drive", side_effect=drive):
+            result = await self.runner.research(self.current, "Public aquarium exhibits", "cycle")
+        self.assertEqual(result["sources"][0]["url"], "https://example.test/exhibit")
+        self.assertEqual(self.runtime.store.list_runs("a")[0]["origin"], "proactive")
+        self.assertEqual(self.runtime.reflection_results("a"), [])
+        self.runner._build_messages.assert_not_called()
+
+    async def test_proactive_budget_exhaustion_keeps_only_successful_web_sources(self):
+        self.config.agent["web_enabled"] = True
+        self.config.get_topic_discovery_config = lambda: {
+            "enabled": True, "sources": {"web_research": {"enabled": True}},
+        }
+        async def drive(run):
+            run.research_sources["https://example.test/exhibit"] = {
+                "url":"https://example.test/exhibit","title":"Aquarium exhibition","snippet":"Now open",
+            }
+            run.autonomy_summary = "Unfinished research summary"
+            run.gateway.limit_reached = True
+            await self.runtime._publish(run, {"type":"failed","error":"Model request limit reached"})
+            await run.queue.put(None)
+        with patch.object(self.runtime, "_drive", side_effect=drive):
+            result = await self.runner.research(self.current, "Public aquarium exhibits", "partial")
+        self.assertEqual(result["summary"], "")
+        self.assertEqual(result["sources"][0]["url"], "https://example.test/exhibit")
+
     async def test_default_off_and_strict_settings(self):
         self.assertFalse(normalize_settings()['autonomy_enabled'])
         for value in ({'autonomy_enabled': 1}, {'autonomy_interval_seconds': 0}, {'autonomy_max_requests_per_hour': True}):

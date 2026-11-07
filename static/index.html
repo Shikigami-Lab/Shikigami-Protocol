@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memoryConfirmReview"></script>
+  <script src="js/i18n.js?v=20261108topicResearch"></script>
 </head>
 <body>
 
@@ -3992,97 +3992,6 @@
                       </label>
                     </div>
 
-                    <!-- ── 趋势感知详细配置 ── -->
-                    <template v-if="tool.tool_id === 'trend' && tool.config.enabled">
-                      <p style="font-size:12px;margin:0 0 12px;padding:8px 10px;background:var(--bg-app);border-radius:6px;border-left:3px solid var(--accent);color:var(--text-secondary);line-height:1.6;">{{ t('trendHint') }}</p>
-
-                      <!-- 抓取间隔 + 最大缓存 + 立即抓取 + 清空 + 缓存状态 -->
-                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-                        <span style="font-size:12px;color:var(--text-secondary);">{{ t('trendFetchIntervalLabel') }}</span>
-                        <select class="form-input" style="font-size:12px;padding:3px 6px;width:auto;"
-                                :value="String(tool.config.fetch_interval_seconds || 7200)"
-                                @change="saveToolConfig('trend', {...tool.config, fetch_interval_seconds: +$event.target.value}, selectedProfileId)">
-                          <option value="3600">1h</option>
-                          <option value="7200">2h</option>
-                          <option value="21600">6h</option>
-                          <option value="43200">12h</option>
-                        </select>
-                        <span style="font-size:12px;color:var(--text-secondary);margin-left:4px;">{{ t('trendMaxCachedItems') }}</span>
-                        <select class="form-input" style="font-size:12px;padding:3px 6px;width:auto;"
-                                :value="String(tool.config.max_cached_items || 20)"
-                                @change="saveToolConfig('trend', {...tool.config, max_cached_items: +$event.target.value}, selectedProfileId)">
-                          <option value="10">10</option>
-                          <option value="20">20</option>
-                          <option value="50">50</option>
-                          <option value="100">100</option>
-                        </select>
-                        <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;padding:4px 10px;"
-                                :disabled="trendFetching" @click="manualTrendFetch(selectedProfileId)">
-                          {{ trendFetching ? t('trendFetching') : t('trendFetchNow') }}
-                        </button>
-                        <button type="button" class="s-btn s-btn-ghost" style="font-size:12px;padding:4px 10px;"
-                                :disabled="!trendStatus.total_count" @click="clearTrendCache(selectedProfileId)">
-                          {{ t('trendClearCache') }}
-                        </button>
-                        <span v-if="trendStatus.total_count" style="font-size:12px;color:var(--text-secondary);opacity:.8;">
-                          {{ trendStatus.total_count }} {{ t('trendStatusTotal') }}，{{ trendStatus.unused_count }} {{ t('trendStatusUnused') }}
-                        </span>
-                      </div>
-
-                      <!-- 当前数据源列表 -->
-                      <div class="section-divider" style="margin-bottom:8px;">{{ t('trendSources') }}</div>
-                      <div v-if="!(tool.config.sources || []).length" style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">{{ t('trendNoSources') }}</div>
-                      <div v-for="(src, idx) in (tool.config.sources || [])" :key="idx"
-                           style="display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:12px;">
-                        <span style="font-size:11px;padding:1px 5px;border-radius:4px;background:var(--bg-card);color:var(--text-secondary);flex-shrink:0;">{{ src.type === 'rss' ? 'RSS' : src.type === 'api' ? 'API' : t('trendTypeSearch') }}</span>
-                        <span style="font-weight:500;white-space:nowrap;">{{ src.label }}</span>
-                        <span style="flex:1;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.6;">{{ src.url || src.query }}</span>
-                        <button type="button" class="s-btn s-btn-ghost" style="padding:1px 6px;font-size:11px;flex-shrink:0;"
-                                :aria-label="t('trendRemoveSource').replace('{name}', src.label || src.url || src.query || '')"
-                                :title="t('trendRemoveSource').replace('{name}', src.label || src.url || src.query || '')"
-                                @click="removeTrendSource(tool.config, idx, selectedProfileId)"><app-icon name="x" :size="14"></app-icon></button>
-                      </div>
-
-                      <!-- 快速添加预置源 -->
-                      <div class="section-divider" style="margin-top:12px;margin-bottom:8px;">{{ t('trendPresetTitle') }}</div>
-                      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">{{ t('trendPresetZhGroup') }}</div>
-                      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
-                        <button v-for="p in trendPresetSourcesZh" :key="p.url" type="button"
-                                :class="['s-btn', (tool.config.sources||[]).some(ss => ss.url===p.url) ? 's-btn-primary' : 's-btn-secondary']"
-                                style="font-size:12px;padding:3px 10px;"
-                                :disabled="(tool.config.sources||[]).some(ss => ss.url===p.url)"
-                                @click="addPresetTrendSource(tool.config, p, selectedProfileId)">
-                          {{ p.label }} <app-icon :name="(tool.config.sources||[]).some(ss => ss.url===p.url) ? 'check' : 'plus'" :size="14"></app-icon>
-                        </button>
-                      </div>
-                      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">{{ t('trendPresetEnGroup') }}</div>
-                      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
-                        <button v-for="p in trendPresetSourcesEn" :key="p.url" type="button"
-                                :class="['s-btn', (tool.config.sources||[]).some(ss => ss.url===p.url) ? 's-btn-primary' : 's-btn-secondary']"
-                                style="font-size:12px;padding:3px 10px;"
-                                :disabled="(tool.config.sources||[]).some(ss => ss.url===p.url)"
-                                @click="addPresetTrendSource(tool.config, p, selectedProfileId)">
-                          {{ p.label }} <app-icon :name="(tool.config.sources||[]).some(ss => ss.url===p.url) ? 'check' : 'plus'" :size="14"></app-icon>
-                        </button>
-                      </div>
-
-                      <!-- 手动添加 -->
-                      <div class="section-divider" style="margin-bottom:8px;">{{ t('trendManualAdd') }}</div>
-                      <p style="font-size:11px;color:var(--text-secondary);margin:0 0 8px;line-height:1.5;">{{ t('trendManualAddHint') }}</p>
-                      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                        <select class="form-input" style="font-size:12px;padding:3px 6px;width:auto;" v-model="trendNewSource.type">
-                          <option value="rss">RSS</option>
-                          <option value="api">API (JSON)</option>
-                          <option value="websearch">{{ t('trendTypeSearch') }}</option>
-                        </select>
-                        <input class="form-input" style="font-size:12px;padding:3px 6px;width:110px;" v-model="trendNewSource.label" :placeholder="t('trendSourceLabelPh')">
-                        <input v-if="trendNewSource.type==='websearch'" class="form-input" style="font-size:12px;padding:3px 6px;flex:1;min-width:140px;" v-model="trendNewSource.query" :placeholder="t('trendSourceQuery')">
-                        <input v-else class="form-input" style="font-size:12px;padding:3px 6px;flex:1;min-width:140px;" v-model="trendNewSource.url" placeholder="https://...">
-                        <button type="button" class="s-btn s-btn-secondary" style="font-size:12px;padding:3px 10px;"
-                                @click="addTrendSource(tool.config, selectedProfileId)">{{ t('btnAdd') }}</button>
-                      </div>
-                    </template>
-
                     <!-- ── 天气感知详细配置 ── -->
                     <template v-if="tool.tool_id === 'weather' && tool.config.enabled">
                       <p style="font-size:12px;margin:0 0 10px;padding:8px 10px;background:var(--bg-app);border-radius:6px;border-left:3px solid var(--accent);color:var(--text-secondary);line-height:1.6;">{{ t('weatherHint') }}</p>
@@ -4406,7 +4315,7 @@
                         v-model="reflectionForm.topic_discovery.enabled"></toggle-row>
 
             <div class="section-divider" style="margin:10px 0 8px;font-size:11px;">{{ t('lblTopicSources') }}</div>
-            <toggle-row v-for="sid in ['trend','conversation_recall','user_life','ai_self']" :key="sid"
+            <toggle-row v-for="sid in ['conversation_recall','ai_self']" :key="sid"
                         :label="t('topicSrc_' + sid)"
                         v-model="reflectionForm.topic_discovery.sources[sid].enabled"
                         :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
@@ -4414,40 +4323,19 @@
                         v-model="reflectionForm.topic_discovery.sources.random_api.enabled"
                         :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
             <div v-if="reflectionForm.topic_discovery.sources.random_api.enabled"
-                 style="padding-left:12px;border-left:2px solid var(--border);margin:4px 0 4px 4px;">
-              <div class="form-field" style="margin-top:6px;">
-                <div class="form-label">{{ t('lblRandomApiMode') }}</div>
-                <select class="form-select" style="font-size:12px;padding:3px 6px;"
-                        v-model="reflectionForm.topic_discovery.sources.random_api.mode">
-                  <option value="builtin">{{ t('optRandomApiBuiltin') }}</option>
-                  <option value="http">{{ t('optRandomApiHttp') }}</option>
-                </select>
-              </div>
-              <div v-if="reflectionForm.topic_discovery.sources.random_api.mode === 'builtin'"
-                   class="form-field" style="margin-top:6px;">
-                <div class="form-label">{{ t('lblRandomApiPool') }}</div>
-                <select class="form-select" style="font-size:12px;padding:3px 6px;"
-                        v-model="reflectionForm.topic_discovery.sources.random_api.builtin_pool">
-                  <option value="icebreaker">{{ t('optPoolIcebreaker') }}</option>
-                  <option value="trivia">{{ t('optPoolTrivia') }}</option>
-                  <option value="would_you_rather">{{ t('optPoolWyr') }}</option>
-                </select>
-              </div>
-              <template v-else>
-                <div class="form-field" style="margin-top:6px;">
-                  <div class="form-label">{{ t('lblRandomApiUrl') }}</div>
-                  <input type="text" class="form-input"
-                         v-model="reflectionForm.topic_discovery.sources.random_api.http_url"
-                         placeholder="https://api.example.com/random" />
-                </div>
-                <div class="form-field" style="margin-top:6px;">
-                  <div class="form-label">{{ t('lblRandomApiJsonPath') }}</div>
-                  <input type="text" class="form-input"
-                         v-model="reflectionForm.topic_discovery.sources.random_api.http_json_path"
-                         placeholder="slip.advice" />
-                </div>
-              </template>
+                 class="form-field" style="padding-left:12px;border-left:2px solid var(--border);margin:4px 0 4px 4px;">
+              <div class="form-label">{{ t('lblRandomApiPool') }}</div>
+              <select class="form-select" style="font-size:12px;padding:3px 6px;"
+                      v-model="reflectionForm.topic_discovery.sources.random_api.builtin_pool">
+                <option value="icebreaker">{{ t('optPoolIcebreaker') }}</option>
+                <option value="trivia">{{ t('optPoolTrivia') }}</option>
+                <option value="would_you_rather">{{ t('optPoolWyr') }}</option>
+              </select>
             </div>
+            <toggle-row :label="t('topicSrc_web_research')"
+                        v-model="reflectionForm.topic_discovery.sources.web_research.enabled"
+                        :disabled="!reflectionForm.topic_discovery.enabled"></toggle-row>
+            <div class="form-hint">{{ t('hintTopicWebResearch') }}</div>
 
             <button type="button" class="section-divider settings-disclosure-btn" style="margin:10px 0 4px;font-size:11px;"
                     :aria-expanded="topicDiscoveryAdvancedOpen" @click="topicDiscoveryAdvancedOpen = !topicDiscoveryAdvancedOpen">
@@ -5992,9 +5880,9 @@
 <script src="js/api-paths.js?v=20261107tasksearch"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memoryConfirmReview"></script>
-<script src="js/agent-ui.js?v=20261107workspaceProactive"></script>
+<script src="js/settings.js?v=20261108topicResearch"></script>
+<script src="js/agent-ui.js?v=20261108topicResearch"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
-<script src="js/app.js?v=20261107workspaceProactive"></script>
+<script src="js/app.js?v=20261108topicResearch"></script>
 </body>
 </html>

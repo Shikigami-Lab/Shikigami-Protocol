@@ -110,6 +110,10 @@ class LongTermFactsSegment(PromptSegment):
         def select_slots(pool):
             active = [fact for fact in pool.active.values() if fact.id != current_address]
             pinned = [fact for fact in active if fact.pinned]
+            if ctx.extras.get("ase_grounded_topics"):
+                stable = [fact for fact in active if not fact.pinned and fact.kind == "stable"
+                          and fact.category in ("habit", "preference", "taboo")]
+                return pinned, rank_related(stable, query, min(recent_quota, max_k)), 0, {}
             recent = rank_related(
                 [fact for fact in active if not fact.pinned and pool.now - fact.updated_at < recent_cutoff],
                 query, min(recent_quota, max_k),

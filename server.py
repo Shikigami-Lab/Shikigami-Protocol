@@ -251,12 +251,10 @@ async def lifespan(app: FastAPI):
     from src.tools.todo import register as register_todo
     from src.tools.timer import register as register_timer_tool
     from src.tools.websearch import register as register_websearch
-    from src.tools.trends import register as register_trend
     from src.tools.weather import register as register_weather
     register_todo(app)
     register_timer_tool(app)
     register_websearch(app)
-    register_trend(app)
     register_weather(app)
 
     # ── 计时器到期：后端直接触发 system_trigger ─────────────────────────────────
@@ -299,9 +297,7 @@ async def lifespan(app: FastAPI):
     logger.info("[server] 每日记忆/遗忘循环已启动")
 
     # ── 趋势感知 + 天气 后台抓取循环 ─────────────────────────────────────────
-    from src.tools.trends.fetcher import trend_fetcher_loop
     from src.tools.weather.fetcher import weather_fetcher_loop
-    app.state.trend_fetcher_task = asyncio.create_task(trend_fetcher_loop(app))
     app.state.weather_fetcher_task = asyncio.create_task(weather_fetcher_loop(app))
     logger.info("[server] 趋势感知/天气抓取循环已启动")
 
@@ -342,7 +338,7 @@ async def lifespan(app: FastAPI):
     async with app.state.agent_runtime.reminders.running(publish_reminder_expiry):
         yield
 
-    for _task_attr in ("daily_memory_task", "trend_fetcher_task", "weather_fetcher_task"):
+    for _task_attr in ("daily_memory_task", "weather_fetcher_task"):
         _t = getattr(app.state, _task_attr, None)
         if _t:
             _t.cancel()

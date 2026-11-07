@@ -478,7 +478,7 @@ class SettingsIntegrityTests(unittest.TestCase):
             ("PATCH", "/api/agent/settings"),
             ("GET", "/api/tools"),
             ("PATCH", "/api/profiles/example/tool_configs"),
-            ("POST", "/api/profiles/example/trend/fetch"),
+            ("POST", "/settings/reflection"),
             ("POST", "/api/preferences"),
             ("POST", "/api/setup/pip-install"),
         ):
@@ -488,6 +488,43 @@ class SettingsIntegrityTests(unittest.TestCase):
         same = {"Origin": "http://127.0.0.1:7788"}
         self.assertEqual(200, self.client.post("/api/preferences", headers=same, json={"theme": "test"}).status_code)
         self.assertEqual("test", self.client.get("/api/preferences", headers=same).json()["theme"])
+
+    def test_proactive_web_research_setting_round_trips_independently_of_permissions(self):
+        path = "/settings/reflection"
+        legacy_random = {"enabled": True, "mode": "http", "http_url": "https://old.invalid",
+                         "http_json_path": "topic", "builtin_pool": "trivia"}
+        self.config.topic_discovery = {"sources": {
+            "trend": {"enabled": True}, "random_api": legacy_random, "user_life": {"enabled": False},
+        }}
+        self.yaml.write_text(json.dumps({"topic_discovery": self.config.topic_discovery}), encoding="utf-8")
+
+        sources = self.client.get(path).json()["topic_discovery"]["sources"]
+        self.assertEqual({"enabled": False}, sources["web_research"])
+        self.assertNotIn("trend", sources)
+        self.assertEqual({"enabled": True, "builtin_pool": "trivia"}, sources["random_api"])
+        self.assertEqual(422, self.client.post(path, json={
+            "topic_discovery": {"sources": {"web_research": {"enabled": "false"}}},
+        }).status_code)
+
+        self.assertEqual(200, self.client.post(path, json={
+            "topic_discovery": {"sources": {"web_research": {"enabled": True}}},
+        }).status_code)
+        sources = self.client.get(path).json()["topic_discovery"]["sources"]
+        self.assertEqual({"enabled": True}, sources["web_research"])
+        self.assertEqual({"enabled": False}, sources["user_life"])
+        self.assertEqual(legacy_random, self.config.topic_discovery["sources"]["random_api"])
+        self.assertFalse(self.config.agent)
+
+        reloaded = AppConfig(topic_discovery=settings_ext._load_yaml()[1]["topic_discovery"])
+        self.assertEqual(sources, reloaded.get_topic_discovery_config()["sources"])
+
+    def test_trend_routes_are_removed_and_weather_status_is_available(self):
+        for method, action in (("POST", "fetch"), ("GET", "status"), ("DELETE", "cache")):
+            response = self.client.request(method, f"/api/profiles/example/trend/{action}")
+            self.assertEqual(404, response.status_code)
+        with patch.object(tools, "_PROFILES_DIR", str(self.profiles)):
+            response = self.client.get("/api/profiles/example/weather/status")
+        self.assertEqual({"available": False}, response.json())
 
     def test_cross_origin_memory_and_session_delete_cannot_reach_stores(self):
         clear = Mock()

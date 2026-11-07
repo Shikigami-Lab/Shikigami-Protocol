@@ -44,8 +44,8 @@ export function buildHistorySeed(envelope, { now = Date.now() } = {}) {
   if (!Number.isSafeInteger(envelope.context_revision) || envelope.context_revision < 0) {
     throw new TypeError('context_revision must be a nonnegative safe integer');
   }
-  if (!['user', 'reflection'].includes(envelope.origin)) {
-    throw new TypeError('origin must be user or reflection');
+  if (!['user', 'reflection', 'proactive'].includes(envelope.origin)) {
+    throw new TypeError('origin must be user, reflection, or proactive');
   }
   if (!Number.isSafeInteger(now) || now < 0 || Object.is(now, -0)) {
     throw new TypeError('now must be a nonnegative safe integer import timestamp');

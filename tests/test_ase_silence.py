@@ -98,7 +98,7 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
             save_runtime_state=lambda: None,
         )
 
-    def _append_message(self, role, content, sender=""):
+    def _append_message(self, role, content, sender="", **metadata):
         """Like ConversationStore.append, persist a row and return its integer ID."""
         message_id = self._next_message_id
         self._next_message_id += 1
@@ -106,7 +106,7 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         self.stored_ids.append(message_id)
         return message_id
 
-    async def _speak(self, tokens):
+    async def _speak(self, tokens=(), *, provider=None, build=None):
         async def push(session_id, data, exclude=None):
             self.pushed.append(data)
 
@@ -115,8 +115,9 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
 
         mode_cfg = {"message_config": {"n_history_turns": 4, "extra_behavior": "-"}}
         with mock.patch("src.core.broadcast.broadcast", SimpleNamespace(push=push, push_all=push_all)), \
-                mock.patch("src.prompt.pipeline.build_messages", return_value=[{"role": "system", "content": "-"}]), \
-                mock.patch("src.llm.registry.get_provider", return_value=_FakeProvider(tokens)), \
+                mock.patch("src.prompt.pipeline.build_messages", side_effect=build,
+                           return_value=[{"role": "system", "content": "Full proactive context"}]), \
+                mock.patch("src.llm.registry.get_provider", return_value=provider or _FakeProvider(tokens)), \
                 mock.patch("src.api.memory.get_or_create_manager_for_session"), \
                 mock.patch("src.core.ase._get_reflection_config_for_profile", return_value={}), \
                 mock.patch("src.core.ase._compute_ase_segment_injections", return_value=([], [])), \
@@ -126,6 +127,136 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
                     log_ase_speak=mock.DEFAULT, log_ase_error=mock.DEFAULT,
                 ):
             await self.engine._speak(self.session, self.session.reflection_state, "medium", mode_cfg)
+
+    async def test_proactive_chat_selects_query_and_writes_only_the_grounded_final_reply(self):
+        runtime = SimpleNamespace(
+            autonomy=SimpleNamespace(research_enabled=lambda _: True, research=mock.AsyncMock(
+                return_value={"run_id":"web-run", "summary":"An exhibit opened.",
+                              "sources":[{"title":"Aquarium exhibit","url":"https://example.test/a",
+                                          "snippet":"A new aquarium exhibit opened today."}]})),
+            store=SimpleNamespace(bind_messages=mock.Mock()),
+        )
+        self.engine._app.state.agent_runtime = runtime
+        calls = []
+        spoken = "发现了个新水族展。[展览介绍](https://example.test/a)"
+
+        class Provider:
+            async def stream_chat(_self, messages):
+                calls.append(messages)
+                if len(calls) == 1:
+                    yield '<shikigami-task>{"goal":"new public aquarium exhibits"}</shikigami-task>'
+                else:
+                    yield spoken
+
+        await self._speak(provider=Provider())
+        self.assertEqual(len(calls),2)
+        self.assertIn("Full proactive context",calls[0][0]["content"])
+        self.assertIn("https://example.test/a",calls[1][0]["content"])
+        runtime.autonomy.research.assert_awaited_once()
+        self.assertEqual(runtime.autonomy.research.call_args.args[1],"new public aquarium exhibits")
+        self.assertEqual(self.stored,[("assistant",spoken)])
+        self.assertEqual(self._streamed_text(),spoken)
+        runtime.store.bind_messages.assert_called_once_with("web-run",assistant_message_id=41)
+        self.assertEqual(self.engine._state["p1"]["proactive_log"][-1]["source"],"web_research")
+
+    async def test_proactive_web_search_failure_does_not_turn_into_a_fabricated_topic(self):
+        self.engine._app.state.agent_runtime = SimpleNamespace(
+            autonomy=SimpleNamespace(research_enabled=lambda _:True,research=mock.AsyncMock(return_value=None)))
+        await self._speak(['<shikigami-task>{"goal":"public aquarium exhibits"}</shikigami-task>'])
+        self.assertEqual(self.stored,[])
+        self.assertEqual(self._streamed_text(),"")
+
+    async def test_proactive_search_rejects_private_queries_before_harness(self):
+        research = mock.AsyncMock()
+        self.engine._app.state.agent_runtime = SimpleNamespace(
+            autonomy=SimpleNamespace(research_enabled=lambda _:True,research=research))
+        for query in ("查一下手机号13812345678", "Morgan Example 42 Oak Lane"):
+            await self._speak(['<shikigami-task>{"goal":"' + query + '"}</shikigami-task>'])
+        research.assert_not_awaited()
+        self.assertEqual(self.stored,[])
+
+    async def test_researched_message_with_a_price_absent_from_sources_is_not_sent(self):
+        self.engine._app.state.agent_runtime = SimpleNamespace(
+            autonomy=SimpleNamespace(research_enabled=lambda _:True,research=mock.AsyncMock(
+                return_value={"run_id":"fixture","sources":[{"title":"Aquarium","url":"https://example.test/a",
+                                                            "snippet":"An exhibit has opened."}]})))
+        class Provider:
+            count = 0
+            async def stream_chat(inner, messages):
+                inner.count += 1
+                yield ('<shikigami-task>{"goal":"new aquarium exhibits"}</shikigami-task>' if inner.count==1
+                       else "票价30元。[展览](https://example.test/a)")
+        await self._speak(provider=Provider())
+        self.assertEqual(self.stored,[])
+        self.assertEqual(self._streamed_text(),"")
+
+    async def test_history_revision_change_discards_a_partial_proactive_bubble(self):
+        revision = 0
+        self.engine._app.state.agent_runtime = SimpleNamespace(store=SimpleNamespace(revision=lambda _:revision))
+        class Provider:
+            async def stream_chat(inner, messages):
+                nonlocal revision
+                yield "正在生成的消息"
+                revision += 1
+                yield "已经过时的尾段"
+        await self._speak(provider=Provider())
+        self.assertEqual(self.stored,[])
+        self.assertTrue(any(p.get("type")=="proactive_stream_discard" for p in self.pushed))
+
+    async def test_history_mutation_barrier_discards_before_revision_is_written(self):
+        busy = False
+        self.engine._app.state.agent_runtime = SimpleNamespace(
+            store=SimpleNamespace(revision=lambda _:0), history_changing=lambda _:busy)
+        class Provider:
+            async def stream_chat(inner, messages):
+                nonlocal busy
+                yield "正在生成的消息"
+                busy = True
+                yield "不要发布"
+        await self._speak(provider=Provider())
+        self.assertEqual(self.stored,[])
+        self.assertTrue(any(p.get("type")=="proactive_stream_discard" for p in self.pushed))
+
+    async def test_web_enabled_does_not_force_an_extra_request_on_normal_proactive_speech(self):
+        research = mock.AsyncMock()
+        self.engine._app.state.agent_runtime = SimpleNamespace(
+            autonomy=SimpleNamespace(research_enabled=lambda _:True,research=research))
+        await self._speak(["今天想和你聊聊音乐。"])
+        research.assert_not_awaited()
+        self.assertEqual(self.stored,[("assistant","今天想和你聊聊音乐。")])
+
+    async def test_old_story_uses_original_user_text_and_is_excluded_after_speaking(self):
+        import time
+        from src.core.topics.base import TopicSourceContext
+        from src.core.topics.sources.conversation_recall import ConversationRecallTopicSource
+        from src.memory.conversation_store import ConversationStore
+
+        history = ConversationStore(self.storage_root, max_turns=0)
+        self.addCleanup(history.close)
+        self.session._store = history
+        event = history.append("user","我修好了阳台门。")
+        countdown = history.append("user","我订好了新住处，酒店还剩三天。")
+        fabricated = history.append("assistant","你终于修好了阳台门。")
+        with history._conn:
+            history._conn.execute("UPDATE messages SET timestamp=? WHERE id IN (?,?,?)",
+                                  (time.time()-10*86400,event,countdown,fabricated))
+        source = ConversationRecallTopicSource()
+        candidates = source.get_candidates(TopicSourceContext("p1", self.storage_root, session=self.session))
+        self.assertEqual(len(candidates), 1)
+        self.session.reflection_state["chosen_topic"] = {
+            "source":"conversation_recall","item_id":candidates[0].item_id,"picked_at":time.time(),
+        }
+
+        def prompt(*_args, **kwargs):
+            material = kwargs["extra_context"]["ase_chosen_topic"]["material"]
+            self.assertIn("我修好了阳台门。", material)
+            self.assertNotIn("酒店还剩三天", material)
+            return [{"role":"system","content":material}]
+
+        await self._speak(["想起你前阵子说修好了阳台门，现在开关顺手吗？"],build=prompt)
+        self.assertEqual(len(self.stored),1)
+        self.assertIn(candidates[0].item_id,self.engine._state["p1"]["recall_spoken"])
+        self.assertIsNone(self.engine._resolve_chosen_topic(self.session))
 
     def _streamed_text(self):
         return "".join(p["token"] for p in self.pushed if "token" in p and not p["done"])

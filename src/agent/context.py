@@ -28,8 +28,8 @@ def build_turn_context(
     if (isinstance(context_revision, bool) or not isinstance(context_revision, int)
             or not 0 <= context_revision <= 2**53 - 1):
         raise ValueError("context_revision must be a nonnegative JavaScript-safe integer, not bool")
-    if not isinstance(origin, str) or origin not in ("user", "reflection"):
-        raise ValueError("origin must be user or reflection")
+    if not isinstance(origin, str) or origin not in ("user", "reflection", "proactive"):
+        raise ValueError("origin must be user, reflection, or proactive")
     if not isinstance(messages, list) or not messages:
         raise ValueError("messages must be a nonempty list")
 

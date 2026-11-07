@@ -85,8 +85,8 @@ test('system text is exact including literal braces/time index; native timestamp
   assert.ok(seed.every(event => Number.isSafeInteger(event.time) && event.time === now));
 });
 
-test('fresh system/user returns an empty seed and untrimmed final trigger for both origins', () => {
-  for (const origin of ['user', 'reflection']) {
+test('fresh system/user returns an empty seed and untrimmed final trigger for each origin', () => {
+  for (const origin of ['user', 'reflection', 'proactive']) {
     for (const text of ['', system]) {
       const input = { ...envelope([message('system', text), message('user', '  current\n')]), origin };
       assert.deepEqual(build(input), { seed: [], trigger: '  current\n' });

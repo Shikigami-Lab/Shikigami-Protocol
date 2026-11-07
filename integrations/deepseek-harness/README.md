@@ -59,6 +59,8 @@ The existing Stop control targets the current character's active tasks, includin
 
 With effective tools and autonomy enabled, the existing reflection cycle may propose a concrete action or choose no action. Only the selected single-chat character can start new autonomous work; admitted tasks keep their captured character and continue after switching views, subject to permissions and limits. They can use enabled research, history, workspace and character-plan tools, but cannot mutate user todos or use timers. Results appear in task records/workspace files and return to that character's own reflection; autonomous tasks do not post background chat messages.
 
+**Behavior → Proactive Topics → Web research** lets the proactive chat model choose whether to look up a public topic after its ordinary speaking checks. This requires effective tools, autonomy and web permission for the selected character. The Harness task receives the public query and can use only web search and fetch. Successful results go back to the same proactive turn, and the chat model writes a reply tied to the observed links. If it chooses to speak without research, it uses the ordinary chat call.
+
 ### Source updates and rollback
 
 1. Stop the application and its workers. Back up the source/dependency versions together with configuration, profiles, chat/memory databases, agent records, workspaces and snapshot databases. Preserve SQLite WAL/SHM sidecars where present; copying only a live main database is insufficient.

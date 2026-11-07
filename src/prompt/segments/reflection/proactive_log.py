@@ -19,6 +19,7 @@ from src.utils.paths import get_project_root
 _REASON_LABELS_ZH = {
     "memory_recall":      "回忆往事",
     "trend_share":        "分享热点",
+    "web_research":       "分享联网找到的话题",
     "emotional_overflow": "情绪流露",
     "silence_concern":    "确认沉默",
     "none":               "无特别理由",
@@ -26,6 +27,7 @@ _REASON_LABELS_ZH = {
 _REASON_LABELS_EN = {
     "memory_recall":      "memory recall",
     "trend_share":        "trend share",
+    "web_research":       "public web research",
     "emotional_overflow": "emotional overflow",
     "silence_concern":    "silence concern",
     "none":               "no reason",

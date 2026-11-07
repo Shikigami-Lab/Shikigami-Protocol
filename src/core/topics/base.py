@@ -29,7 +29,7 @@ class TopicCandidate:
 
     @property
     def ref(self) -> str:
-        """复合 ID，形如 'trend:a3f1'，自省 LLM 的 topic_pick 即填此值。"""
+        """复合 ID，形如 'user_life:a3f1'，自省 LLM 的 topic_pick 即填此值。"""
         return f"{self.source_id}:{self.item_id}"
 
 

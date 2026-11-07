@@ -5,7 +5,7 @@ target="user" — this segment's content goes into the final user message
 now" rather than "what the user said to me".
 
 Includes: style_hint, continuation of last speech, time notes, VLM,
-thought, topic_anchor, speak_reason, trend items.
+thought, topic_anchor, and speak_reason.
 """
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
@@ -52,7 +52,6 @@ class AseSceneContextSegment(PromptSegment):
         locale = get_locale()
 
         thought = reflection_state.get("thought", "")
-        topic_anchor = reflection_state.get("topic_anchor", "")
         style_hint = (reflection_state.get("style_hint") or "").strip()
         speak_reason = reflection_state.get("speak_reason", "none")
         vlm_description = extras.get("ase_vlm_description", "")
@@ -65,7 +64,15 @@ class AseSceneContextSegment(PromptSegment):
         hour = datetime.now().hour
         time_ctx = _get_time_ctx(hour, locale)
 
-        parts = []
+        parts = [(
+            "Only proactively bring up a past event when a Conversation Recall source is supplied. "
+            "Base it on what the user said in the original conversation, and keep its original date and meaning. "
+            "Stay with that one event. Do not add unrelated old details or progress from the dialogue history. "
+            "Thoughts, plans, and an old countdown do not establish that an event happened."
+            if locale == "en" else
+            "主动提起旧事要有已选定的「对话回忆」原话素材。按当时的日期和意思来聊。"
+            "只聊这件旧事，别从对话历史带入无关细节或旧进度。自省联想、计划或旧倒计时都不能当作已发生的事实。"
+        )]
 
         # Style tendency (first, sets the tone)
         if style_hint:
@@ -193,15 +200,6 @@ class AseSceneContextSegment(PromptSegment):
                 if framing:
                     block.append(framing)
             parts.append("\n".join(block))
-        elif topic_anchor:
-            # 无 chosen_topic 时（兜底路径）仍可用 topic_anchor 作弱提示
-            has_scene_content = True
-            parts.append(render("ase.topic_alone", locale=locale,
-                                default=("You recall a previous conversation about \"$topic_anchor\"."
-                                         if locale == "en"
-                                         else "你想起了之前关于「$topic_anchor」的对话。"),
-                                topic_anchor=topic_anchor))
-
         # 兜底：什么场景信息都没有时
         if not has_scene_content:
             parts.append(render("ase.silence_generic", locale=locale,

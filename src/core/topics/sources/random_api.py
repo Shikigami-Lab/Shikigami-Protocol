@@ -1,21 +1,9 @@
-"""random_api —— 随机话题来源（默认关闭，可插拔的第五来源）。
-
-两种模式：
-  - builtin：从内置题库随机取（破冰题 / 冷知识 / 二选一），无网络。
-  - http：GET 配置的 URL，按 JSON 取值路径提取一句话。
-
-拉取到的条目写入 profiles/<id>/topic_random_cache.json（带生成 ID + 时间戳），
-resolve 读缓存。builtin 无网络、零成本，每次缺候选即时补；http 的同步请求会阻塞
-事件循环，故放到后台线程拉取、写缓存，本轮先用旧缓存，下个自省周期再取到新内容。
-已用话题正文保存在同一缓存中，按 recent_used_window 去重；内置小题库至少保留一条可抽。
-"""
-import asyncio
+"""内置随机灵感。保留 random_api 来源 ID，以兼容现有设置和话题引用。"""
 import json
 import logging
 import os
 import random
 import time
-import urllib.request
 from typing import Optional
 
 from src.core.topics.base import (TopicCandidate, TopicMaterial, TopicSource,
@@ -25,9 +13,7 @@ from src.core.topics.registry import register_topic_source
 logger = logging.getLogger(__name__)
 
 _CACHE_FILE = "topic_random_cache.json"
-_REFRESH_SECS = 3600          # http 模式：距上次拉取超过此秒数才重新请求
-_MAX_CACHED = 6               # 缓存条目上限
-_HTTP_TIMEOUT = 3.0
+_MAX_CACHED = 6
 
 _BUILTIN_POOLS = {
     "icebreaker": [
@@ -105,23 +91,23 @@ _BUILTIN_POOLS = {
 }
 
 
-def _builtin_pool(src_cfg: dict) -> list[str]:
-    pool_name = (src_cfg.get("builtin_pool") or "icebreaker").strip()
+def _builtin_pool(ctx: TopicSourceContext) -> list[str]:
+    config = (ctx.config.get("sources") or {}).get("random_api") or {}
+    pool_name = (config.get("builtin_pool") or "icebreaker").strip()
     return _BUILTIN_POOLS.get(pool_name) or _BUILTIN_POOLS["icebreaker"]
 
 
 @register_topic_source
 class RandomApiTopicSource(TopicSource):
     source_id = "random_api"
-    label = "随机话题 API"
-    label_en = "Random Topic API"
+    label = "本地随机灵感"
+    label_en = "Local Random Inspiration"
     enabled_by_default = False
     framing_hint = ("用“突然想问你”“忽然有点好奇”这种玩心十足的口吻抛出这个话题，"
                     "轻松、不正经一点也无妨。")
     framing_hint_en = ("Throw this out playfully — 'random question for you...' — "
                        "keep it light and fun.")
 
-    # ── cache helpers（按 storage_root 操作，后台线程也能调用）────────────────
     def _cache_path(self, storage_root: str) -> str:
         return os.path.join(storage_root, _CACHE_FILE)
 
@@ -130,11 +116,10 @@ class RandomApiTopicSource(TopicSource):
             with open(self._cache_path(storage_root), encoding="utf-8") as f:
                 data = json.load(f)
             data.setdefault("items", {})
-            data.setdefault("last_fetch_at", 0.0)
             data.setdefault("recent_texts", [])
             return data
         except Exception:
-            return {"items": {}, "last_fetch_at": 0.0, "recent_texts": []}
+            return {"items": {}, "recent_texts": []}
 
     def _save_cache(self, storage_root: str, cache: dict) -> None:
         path = self._cache_path(storage_root)
@@ -147,90 +132,40 @@ class RandomApiTopicSource(TopicSource):
         except Exception as e:
             logger.debug("[topics.random_api] 缓存写入失败: %s", e)
 
-    def _cache_add(self, storage_root: str, text: str) -> str:
+    def _cache_add(self, storage_root: str, text: str, pool: list[str]) -> str:
         """把一条话题写入缓存（带生成 ID），裁剪到 _MAX_CACHED，返回 item_id。"""
         cache = self._load_cache(storage_root)
         now = time.time()
         iid = topic_id_hash(text + str(now))
         items = cache["items"]
         items[iid] = {"text": text, "fetched_at": now}
-        cache["last_fetch_at"] = now
-        if len(items) > _MAX_CACHED:
-            oldest = sorted(items.items(), key=lambda kv: kv[1].get("fetched_at", 0))
-            for old_id, _ in oldest[:len(items) - _MAX_CACHED]:
-                items.pop(old_id, None)
+        # Bound local candidates while preserving older entries outside the pool.
+        pool_items = [(item_id, entry) for item_id, entry in items.items() if entry.get("text") in pool]
+        pool_items.sort(key=lambda pair: pair[1].get("fetched_at", 0), reverse=True)
+        for old_id, _ in pool_items[_MAX_CACHED:]:
+            items.pop(old_id)
         self._save_cache(storage_root, cache)
         return iid
 
-    # ── fetch ────────────────────────────────────────────────────────────────
-    def _fetch_builtin(self, src_cfg: dict, recent_texts: Optional[list[str]] = None) -> str:
-        """从内置题库随机取一条，避开近期已经使用的正文。"""
-        pool = _builtin_pool(src_cfg)
-        available = [text for text in pool if text not in (recent_texts or [])]
-        return random.choice(available or pool)
-
-    def _schedule_http_fetch(self, storage_root: str, src_cfg: dict) -> None:
-        """把同步 http 拉取丢到后台线程，避免阻塞自省所在的事件循环。"""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return  # 不在异步上下文，跳过（http 候选下次再补）
-
-        def _work():
-            text = self._fetch_http(src_cfg)
-            if text:
-                self._cache_add(storage_root, text)
-
-        loop.run_in_executor(None, _work)
-
-    def _fetch_http(self, src_cfg: dict) -> Optional[str]:
-        url = (src_cfg.get("http_url") or "").strip()
-        if not url:
-            return None
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Shikigami/1.0"})
-            with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-            data = json.loads(raw)
-        except Exception as e:
-            logger.debug("[topics.random_api] http 拉取失败: %s", e)
-            return None
-        path = (src_cfg.get("http_json_path") or "").strip()
-        text = _extract_json_path(data, path) if path else data
-        if isinstance(text, str) and text.strip():
-            return text.strip()
-        logger.debug("[topics.random_api] http 返回无法按路径取到字符串: path=%r", path)
-        return None
-
     # ── TopicSource API ──────────────────────────────────────────────────────
     def get_candidates(self, ctx: TopicSourceContext) -> list[TopicCandidate]:
-        src_cfg = ((ctx.config.get("sources") or {}).get("random_api") or {})
         storage_root = ctx.storage_root
         cache = self._load_cache(storage_root)
         items: dict = cache["items"]
-        mode = (src_cfg.get("mode") or "builtin").strip()
-        window = max(0, int(ctx.config.get("recent_used_window", 10)))
-        recent_texts = cache["recent_texts"]
-        pool = None if mode == "http" else _builtin_pool(src_cfg)
-        if pool is not None:
-            recent_texts = [text for text in recent_texts if text in pool]
-            window = min(window, len(pool) - 1)
+        pool = _builtin_pool(ctx)
+        window = min(max(0, int(ctx.config.get("recent_used_window", 10))), len(pool) - 1)
+        recent_texts = [text for text in cache["recent_texts"] if text in pool]
         recent_texts = recent_texts[-window:] if window else []
         usable = [
             iid for iid, entry in items.items()
             if f"random_api:{iid}" not in ctx.recently_used
             and (entry.get("text") or "").strip() not in recent_texts
-            and (pool is None or (entry.get("text") or "").strip() in pool)
+            and (entry.get("text") or "").strip() in pool
         ]
 
-        if mode == "http":
-            # http：同步请求会阻塞事件循环 —— 缺候选或缓存过期时后台线程补，本轮先用旧缓存
-            stale = (time.time() - cache.get("last_fetch_at", 0.0)) > _REFRESH_SECS
-            if not usable or stale:
-                self._schedule_http_fetch(storage_root, src_cfg)
-        elif not usable:
-            # builtin：本地题库零成本，缺候选就即时补一条
-            iid = self._cache_add(storage_root, self._fetch_builtin(src_cfg, recent_texts))
+        if not usable:
+            text = random.choice([text for text in pool if text not in recent_texts])
+            iid = self._cache_add(storage_root, text, pool)
             items = self._load_cache(storage_root)["items"]
             usable.append(iid)
 
@@ -245,37 +180,18 @@ class RandomApiTopicSource(TopicSource):
     def resolve(self, item_id: str, ctx: TopicSourceContext) -> Optional[TopicMaterial]:
         entry = self._load_cache(ctx.storage_root)["items"].get(item_id)
         text = (entry.get("text") or "").strip() if entry else ""
-        if not text:
+        if text not in _builtin_pool(ctx):
             return None
         return TopicMaterial("random_api", item_id, text)
 
     def mark_used(self, item_id: str, ctx: TopicSourceContext) -> None:
         cache = self._load_cache(ctx.storage_root)
-        entry = cache["items"].pop(item_id, None)
-        if entry is not None:
-            text = (entry.get("text") or "").strip()
+        entry = cache["items"].get(item_id) or {}
+        text = (entry.get("text") or "").strip()
+        if text in _builtin_pool(ctx):
+            cache["items"].pop(item_id)
             window = max(0, int(ctx.config.get("recent_used_window", 10)))
             recent_texts = [previous for previous in cache["recent_texts"] if previous != text]
-            if text:
-                recent_texts.append(text)
+            recent_texts.append(text)
             cache["recent_texts"] = recent_texts[-window:] if window else []
             self._save_cache(ctx.storage_root, cache)
-
-
-def _extract_json_path(data, path: str):
-    """按点分路径从 JSON 取值，支持 list 下标。如 'slip.advice'、'0.text'。"""
-    cur = data
-    for part in path.split("."):
-        part = part.strip()
-        if part == "":
-            continue
-        try:
-            if isinstance(cur, list):
-                cur = cur[int(part)]
-            elif isinstance(cur, dict):
-                cur = cur[part]
-            else:
-                return None
-        except (KeyError, IndexError, ValueError, TypeError):
-            return None
-    return cur

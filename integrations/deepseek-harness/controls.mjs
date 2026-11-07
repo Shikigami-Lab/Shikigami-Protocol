@@ -61,6 +61,7 @@ export function installControls(ctx, { owner, publish, approvalTimeoutMs = 30_00
     const kinds = state.sources;
     return { kind: kinds.has('project-reflection') ? 'project-reflection'
       : kinds.has('shikigami-reflection') ? 'shikigami-reflection'
+      : kinds.has('shikigami-proactive') ? 'shikigami-proactive'
       : kinds.has('user') ? 'user' : kinds.values().next().value ?? 'unknown' };
   }
   function send(state, type, data, onFailure = () => {}) {

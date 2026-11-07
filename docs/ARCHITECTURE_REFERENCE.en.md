@@ -52,7 +52,7 @@ Missing any of these may cause startup failure or break core functionality:
 | **Memory system** | `src/memory/` | SQLite conversations (WAL), long-term facts (JSON), ChromaDB vectors, daily summaries; **no cross-module transactions** |
 | **LLM layer** | `src/llm/` | Only `OpenAICompatProvider`; all LLM calls go through this single entry point |
 | **TTS layer** | `src/tts/` | 4 providers: Edge / GPT-SoVITS / Qwen3-TTS / Kokoro |
-| **Tool plugins** | `src/tools/` | Todos, timers, weather, trends, web search; registered via `registry.py` |
+| **Tool plugins** | `src/tools/` | Todos, timers, weather, and web search, registered via `registry.py` |
 | **Dual-track commands** | `src/commands/` | NL triggers + `/commands` dispatch; does not modify the main chat flow |
 | **Frontend** | `static/` | Vue 3 SPA (CDN, non-module); receives realtime events via SSE |
 

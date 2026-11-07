@@ -3426,6 +3426,11 @@ class ReflectionConfigBody(BaseModel):
 async def save_reflection_config(request: Request, body: ReflectionConfigBody):
     """Persist reflection/ASE/VLM config to app.yaml and hot-reload."""
     config = request.app.state.config
+    source_updates = (body.topic_discovery or {}).get("sources")
+    if isinstance(source_updates, dict):
+        web = source_updates.get("web_research")
+        if isinstance(web, dict) and "enabled" in web and type(web["enabled"]) is not bool:
+            raise HTTPException(status_code=422, detail="Web research enabled must be a boolean")
 
     y, data = _load_yaml()
 
@@ -3505,11 +3510,12 @@ async def save_reflection_config(request: Request, body: ReflectionConfigBody):
                             ("recent_used_window", int), ("chosen_topic_ttl", int)):
             if key in bt and bt[key] is not None:
                 td[key] = caster(bt[key])
-        if isinstance(bt.get("sources"), dict):
+        if isinstance(source_updates, dict):
             td_sources = td.setdefault("sources", {})
-            for sid, sval in bt["sources"].items():
+            for sid, fields in config.get_topic_discovery_config()["sources"].items():
+                sval = source_updates.get(sid)
                 if isinstance(sval, dict):
-                    td_sources.setdefault(sid, {}).update(sval)
+                    td_sources.setdefault(sid, {}).update({key: sval[key] for key in fields if key in sval})
 
     _save_yaml(y, data)
 

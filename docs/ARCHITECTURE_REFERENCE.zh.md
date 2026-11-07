@@ -52,7 +52,7 @@
 | **记忆系统** | `src/memory/` | SQLite 对话（WAL）、长期事实（JSON）、ChromaDB 向量、日摘要；**无跨模块事务** |
 | **LLM 层** | `src/llm/` | 仅 `OpenAICompatProvider`；所有 LLM 调用统一走此入口 |
 | **TTS 层** | `src/tts/` | 4 个提供商：Edge / GPT-SoVITS / Qwen3-TTS / Kokoro |
-| **工具插件** | `src/tools/` | 待办、计时器、天气、趋势、网页搜索；通过 `registry.py` 注册 |
+| **工具插件** | `src/tools/` | 待办、计时器、天气和网页搜索，通过 `registry.py` 注册 |
 | **双轨命令** | `src/commands/` | NL triggers + `/commands` 分发；不修改主对话流 |
 | **前端** | `static/` | Vue 3 SPA（CDN，非模块）；SSE 接收实时事件 |
 

@@ -46,11 +46,12 @@ class ReflectionMemoryFactsSegment(PromptSegment):
 
         if locale == "en":
             header = "[Past Memories Available for Reference — use selectively, don't force]"
-            footer = "If any of the above contains a detail worth naturally bringing up right now, use it as a conversation starting point."
+            footer = ("Use these notes to understand the user. For an unsolicited recollection of a past event, "
+                      "choose an evidence-backed Conversation Recall candidate instead.")
             weight_label = "weight"
         else:
             header = "【可供引用的过往记忆（选择性使用，不要强行提及）】"
-            footer = "如果以上记忆中有值得在此刻自然提起的细节，可将其作为话题出发点，以 memory_recall 为动机开口。"
+            footer = "这些事实用于理解用户。想主动提起一件旧事时，请选择有原话依据的「对话回忆」候选。"
             weight_label = "权重"
 
         lines = [header, read_time_notice(locale)]

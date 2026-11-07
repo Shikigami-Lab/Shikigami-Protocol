@@ -29,7 +29,7 @@
       session_id: event.session_id, created_at: event.created_at || new Date().toISOString(),
       state: 'running', events: [], approval: null, ...old, sequence: event.sequence,
       request_id: old?.request_id || event.request_id };
-    if (event.origin === 'reflection' || event.origin === 'user') run.origin = event.origin;
+    if (['reflection', 'proactive', 'user'].includes(event.origin)) run.origin = event.origin;
     run.events = [...run.events, event];
     if (typeof event.workspace_warning === 'string') run.workspace_warning = event.workspace_warning;
     if (Array.isArray(event.artifacts)) run.artifacts = event.artifacts;
@@ -127,7 +127,7 @@
       currentAgentRuns() {
         // Presentation only: retain every run in agentRuns for stop ownership/status.
         return this.currentGroupId ? [] : visibleRuns(this.agentRuns, this.currentSessionId, this.currentSessionId)
-          .filter(run => run.origin === 'reflection' || (!terminal(run.state) && !this.agentRunIsAttached(run)) || run.state === 'failed' || (run.state === 'cancelled' && run.user_message_id != null) || run.artifacts?.length || run.parent_run_id || run.workspace_warning || run.error || (run.events || [])
+          .filter(run => ['reflection', 'proactive'].includes(run.origin) || (!terminal(run.state) && !this.agentRunIsAttached(run)) || run.state === 'failed' || (run.state === 'cancelled' && run.user_message_id != null) || run.artifacts?.length || run.parent_run_id || run.workspace_warning || run.error || (run.events || [])
             .some(event => ['tool_call', 'approval_requested', 'failed'].includes(event.type)));
       },
     },
@@ -255,7 +255,7 @@
         } finally { state.busy = false; }
       },
       agentMessageOwner(run) {
-        if (run.origin === 'reflection' || this.currentGroupId || run.profile_id !== this.currentSessionId || run.session_id !== this.currentSessionId) return null;
+        if (['reflection', 'proactive'].includes(run.origin) || this.currentGroupId || run.profile_id !== this.currentSessionId || run.session_id !== this.currentSessionId) return null;
         const id = run.run_id || run.id;
         const messages = this.messages.filter(message => message.session_id === run.profile_id);
         const assistant = (run.assistant_message_id != null && messages.find(message =>
@@ -310,7 +310,7 @@
       agentRunIsAttached(run) {
         const context = this.agentChatContext;
         // A detached run needs its own Stop control, even before its first tool call.
-        return !!(run.origin !== 'reflection' && this.isStreaming && context && this.agentChatIsVisible(context) &&
+        return !!(!['reflection', 'proactive'].includes(run.origin) && this.isStreaming && context && this.agentChatIsVisible(context) &&
           ((context.boundRunKey === keyOf(run) && context.boundRequestId === context.requestId) ||
             (typeof run.request_id === 'string' && run.request_id === context.requestId)) &&
           run.session_id === context.sessionId && run.profile_id === context.sessionId);
@@ -358,7 +358,7 @@
           if (timerAction(call?.tool_name) === 'schedule') this.refreshTimers();
         }
         this.agentRuns = updatedRuns;
-        if (context && event.run_id && this.agentRuns[keyOf(event)]?.origin !== 'reflection') {
+        if (context && event.run_id && !['reflection', 'proactive'].includes(this.agentRuns[keyOf(event)]?.origin)) {
           context.runKey = keyOf(event);
           // Only a context from the owning HTTP stream has a client nonce.
           // Native event request_id may instead be the server's run UUID.
@@ -400,6 +400,7 @@
         return this.t(key) === key ? (name || '') : this.t(key);
       },
       agentRunLabel(run) {
+        if (run.origin === 'proactive') return this.t('agentProactiveTask') + ' · ' + this.agentStateLabel(run);
         if (run.origin === 'reflection') return this.t('agentReflectionTask') + ' · ' + this.agentStateLabel(run);
         const fallback = this.agentStateLabel(run);
         if (run.state !== 'completed' || this.agentRunHadToolError(run)) return fallback;

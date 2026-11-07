@@ -148,6 +148,13 @@ def main():
             assert 'shikigami-reflection' in sources and 'user' not in sources, sources
             CHECKS.append('reflection native source remains distinct from human input')
 
+            proactive = start('proactive', origin='proactive')
+            wait_event(proactive, {'completed'})
+            sources = [e['data']['source']['kind'] for e in control('/inspect')['audit']
+                       if e['session_id'] == proactive['session_id'] and e['type'] == 'user/message']
+            assert 'shikigami-proactive' in sources and 'user' not in sources, sources
+            CHECKS.append('proactive research keeps its own native provenance')
+
             for decision in ('allowed-once', 'rejected', 'timeout'):
                 run = start('read-' + decision, 'read')
                 approval = wait_event(run, {'approval_requested'})

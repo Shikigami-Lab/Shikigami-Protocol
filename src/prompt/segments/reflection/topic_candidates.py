@@ -1,6 +1,6 @@
 """reflection_topic_candidates —— 主动话题候选注入（自省）。
 
-替换旧的 reflection/trend_context.py。遍历所有启用的 TopicSource 收集候选，
+遍历启用的主动话题来源收集候选，
 跨来源轮转取样保证「平等」，注入自省 prompt 供 LLM 用 topic_pick 选定一个。
 候选连同复合 ID 一并暴露在 ctx.topic_candidates，供 _reflect() 解析 topic_pick。
 
@@ -8,6 +8,7 @@ inject_into="reflection"，priority=56（persona 类段落之后）。
 """
 import logging
 import os
+import time
 
 from src.prompt.base import PromptSegment, ReflectionBuildContext, SegmentResult
 from src.prompt.registry import register
@@ -17,33 +18,31 @@ from src.utils.paths import get_project_root
 logger = logging.getLogger(__name__)
 
 
+_RECALL_COOLDOWN = 14 * 86400
+
+
 def _recently_used_refs(storage_root: str, window: int) -> set:
-    """从 ase_state.json 的 proactive_log 取最近 window 条已发话题的复合 ID。"""
     from src.core.ase import _load_ase_state
-    refs: set = set()
-    for entry in (_load_ase_state(storage_root).get("proactive_log") or [])[-window:]:
-        s = entry.get("source")
-        i = entry.get("item_id")
-        if s and i:
-            refs.add(f"{s}:{i}")
+
+    state = _load_ase_state(storage_root)
+    refs = {
+        f"{entry['source']}:{entry['item_id']}"
+        for entry in (state.get("proactive_log") or [])[-max(1, window):]
+        if entry.get("source") and entry.get("item_id")
+    }
+    cutoff = time.time() - _RECALL_COOLDOWN
+    refs.update(f"conversation_recall:{i}" for i, ts in (state.get("recall_spoken") or {}).items()
+                if isinstance(ts, (int, float)) and ts > cutoff)
     return refs
 
 
-def _recent_spoken_sources(storage_root: str, n: int) -> list:
-    """Topic sources of the last n proactive messages actually sent (newest first), skipping messages without a topic."""
-    from src.core.ase import _load_ase_state
-    out: list = []
-    for entry in reversed(_load_ase_state(storage_root).get("proactive_log") or []):
-        s = entry.get("source")
-        if s:
-            out.append(s)
-        if len(out) >= n:
-            break
-    return out
-
-
-# "Inward" sources: memories and the AI's own state. When recent messages all came from these, suggest a change.
-_INWARD_SOURCES = {"conversation_recall", "user_life", "ai_self"}
+def remember_recall_spoken(state, item_id, now):
+    cutoff = now - _RECALL_COOLDOWN
+    state["recall_spoken"] = {
+        i:ts for i,ts in (state.get("recall_spoken") or {}).items()
+        if isinstance(ts, (int,float)) and ts > cutoff
+    }
+    state["recall_spoken"][item_id] = now
 
 
 @register
@@ -69,7 +68,7 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
         from src.core.topics import get_enabled_sources
         from src.core.topics.base import TopicSourceContext
 
-        sources = get_enabled_sources(td_cfg)
+        sources = [source for source in get_enabled_sources(td_cfg) if source.source_id != "user_life"]
         if not sources:
             return SegmentResult(messages=[])
 
@@ -86,6 +85,8 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
             reflection_thought=(prev.get("thought") or ""),
             emotion=ctx.emotion,
             memory_manager=ctx.memory_manager,
+            session=ctx.session,
+            app=ctx.app,
         )
 
         # ai_self pick cooldown: once it was picked ≥2 rounds in a row (picked but never actually spoken),
@@ -128,18 +129,14 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
         if locale == "en":
             header = ("[Proactive Topic Candidates] Pick the one most worth raising right "
                       "now and put its id in topic_pick; if none is worth it, set topic_pick to null.")
-            footer = ("If you picked a topic you genuinely want to share, that itself is grounds "
-                      "to raise urgency. Put how you'd naturally bring it up in topic_angle. "
-                      "Fresh outside topics (trends) are worth picking now and then even if they "
-                      "differ from what you usually talk about — sharing news is its own kind of "
-                      "closeness; don't dwell only on memories.")
+            footer = ("Use topic_angle for how to bring it up. For a previous event, "
+                      "only use a Conversation Recall candidate. Treat its quotation as evidence of what "
+                      "the user said; never treat a plan as a completed event.")
         else:
             header = ("【可主动发起的话题候选】从中挑一个此刻最值得聊的，把它的 id 填进 topic_pick；"
                       "若都不值得提，topic_pick 填 null。")
-            footer = ("如果你挑中了一个真心想分享的话题，这本身就是抬高 urgency 的理由。"
-                      "topic_angle 里写你打算怎样自然切入。"
-                      "外界的新鲜见闻（趋势类候选）即使和你们平时聊的不同，偶尔分享也是一种亲近，"
-                      "不必总停留在回忆里。")
+            footer = ("topic_angle 写打算怎样自然切入。想主动回忆过去的事，只选「对话回忆」候选。"
+                      "原话只证明用户当时说了什么，不能把计划说成已经发生。")
 
         lines = [header]
         for c in candidates:
@@ -147,16 +144,4 @@ class ReflectionTopicCandidatesSegment(PromptSegment):
         lines.append("")
         lines.append(footer)
 
-        # Rotation hint: when the last few messages all used inward topics and this round has external
-        # candidates, explicitly encourage a change
-        recent_sources = _recent_spoken_sources(storage_root, 2)
-        has_external = any(not c.ref.startswith(tuple(f"{s}:" for s in _INWARD_SOURCES))
-                           for c in candidates)
-        if has_external and len(recent_sources) >= 2 and all(
-                s in _INWARD_SOURCES for s in recent_sources):
-            lines.append("")
-            lines.append("Note: your last few initiations all drew on memories or your own state — "
-                         "favor a fresh external topic this time."
-                         if locale == "en" else
-                         "提示：你最近几次主动开口都围绕回忆或你自己的状态，这次优先考虑新鲜的外部话题。")
         return SegmentResult(messages=[{"role": "system", "content": "\n".join(lines)}])

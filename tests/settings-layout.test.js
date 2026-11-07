@@ -13,11 +13,15 @@ const panel = (name, next) => html.slice(
 test('proactive topic sources and screenshot controls live together in Behavior', () => {
   const models = panel('llm', 'tts');
   const behavior = panel('behavior', 'system');
-  for (const field of ['topic_discovery.enabled', 'vlm_for_ase', 'vlm_ase_wait_seconds', 'ase_vlm_mode']) {
+  for (const field of ['topic_discovery.enabled', 'topic_discovery.sources.web_research.enabled',
+    'vlm_for_ase', 'vlm_ase_wait_seconds', 'ase_vlm_mode']) {
     assert.ok(behavior.includes(`reflectionForm.${field}`), field);
     assert.ok(!models.includes(`reflectionForm.${field}`), field);
   }
   assert.ok(models.includes('reflectionForm.vlm_model_preset'));
+  assert.ok(!behavior.includes('sources.random_api.http_url'));
+  assert.ok(!behavior.includes("'user_life'"));
+  assert.ok(!panel('tools', 'behavior').includes('manualTrendFetch'));
 });
 
 test('Models links to the persona memory extraction editor without changing persona selection', () => {
