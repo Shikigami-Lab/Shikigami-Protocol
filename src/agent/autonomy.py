@@ -32,10 +32,14 @@ class AutonomyRunner:
         from src.config.effective_config import get_effective_max_history_turns
         from src.prompt.pipeline import build_messages
         runtime = self.runtime
+        access = runtime.access_for(session.profile_id)
+        if access.get('memory_enabled'):
+            from src.api.memory import get_or_create_manager_for_session
+            get_or_create_manager_for_session(runtime.app, session)
         return build_messages(session, goal, session.conversation_store,
             n_history_turns=get_effective_max_history_turns(runtime.app, session.profile_id),
             preset=preset, app=runtime.app,
-            extra_system=capability_context(runtime.access_for(session.profile_id), origin='reflection'))
+            extra_system=capability_context(access, origin='reflection'))
 
     async def start(self, session, goal, cycle_id, *, from_tool_results=False):
         runtime = self.runtime

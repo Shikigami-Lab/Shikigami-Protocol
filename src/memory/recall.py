@@ -7,6 +7,7 @@ import math
 import time
 from datetime import datetime
 
+from src.memory.fact_operations import rank_related
 from src.memory.long_term_store import LongTermFact, LongTermStore
 
 logger = logging.getLogger(__name__)
@@ -120,3 +121,51 @@ def search_vectors(vectors, query, limit):
     except Exception as error:
         logger.debug("Fact vector search failed: %s", error)
         return []
+
+
+def _rrf_merge(bm25_ranked, vec_ranked, k=60):
+    """Reciprocal Rank Fusion：合并 BM25 和向量两路检索结果。
+
+    Args:
+        bm25_ranked: BM25 结果 ID，已按 score 降序
+        vec_ranked: 向量结果 ID，已按 distance 升序（dist 越小越相关）
+        k: RRF 平滑参数（默认 60，数值越大对头部排名越不敏感）
+
+    Returns:
+        List[fact_id]，按 RRF 融合分数降序排列。
+        同时出现在两路结果中的 fact 得到双重加分（混合命中奖励）。
+    """
+    scores = {}
+    for rank, fid in enumerate(bm25_ranked):
+        scores[fid] = scores.get(fid, 0.0) + 1.0 / (k + rank + 1)
+    for rank, fid in enumerate(vec_ranked):
+        scores[fid] = scores.get(fid, 0.0) + 1.0 / (k + rank + 1)
+    return sorted(scores, key=lambda fid: scores[fid], reverse=True)
+
+
+def rank_query_facts(manager, pool, sources, query, limit, vector_rows, max_distance,
+                     *, keyword_with_vectors=False):
+    """Rank eligible facts using the same BM25, lexical and vector paths."""
+    if not sources:
+        return []
+    candidates = list(sources.values())
+    related = rank_related(candidates, query, len(candidates))
+    lexical_ranked = list(dict.fromkeys(pool.resolve(fact.id).id for fact in related))
+    lexical_ids = {fact.id for fact in related}
+    bm25_ranked = []
+    bm25 = getattr(manager, "bm25", None)
+    if bm25 and bm25.is_available():
+        try:
+            bm25_ranked = list(dict.fromkeys(
+                pool.resolve(fid).id for fid, _ in bm25.search(candidates, query, limit=limit * 4)
+                if fid in lexical_ids
+            ))
+        except Exception as error:
+            logger.debug("Fact BM25 search failed: %s", error)
+    vec_ranked = [fact.id for fact, _ in pool.vector_hits(
+        sources, vector_rows, manager.fact_vector_matches, max_distance,
+    )] if vector_rows else []
+    if keyword_with_vectors and not bm25_ranked:
+        bm25_ranked = lexical_ranked
+    ranked = _rrf_merge(bm25_ranked, vec_ranked) or lexical_ranked
+    return [pool.resolve(fid) for fid in ranked[:limit]]

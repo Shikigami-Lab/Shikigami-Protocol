@@ -57,7 +57,7 @@ const PRESET_TEMPLATES = {
 };
 
 const AGENT_SETTINGS_DEFAULTS = {
-  workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, todo_enabled: false,
+  workspace_enabled: false, code_enabled: false, web_enabled: false, history_enabled: false, memory_enabled: false, todo_enabled: false,
   enabled: false, max_model_requests: null, timeout_seconds: null, autonomy_enabled: false,
   autonomy_interval_seconds: 900, autonomy_max_requests_per_hour: 12, model_preset: '',
 };

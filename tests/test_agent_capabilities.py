@@ -26,6 +26,15 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn('use mcp__shikigami__task_context before acting', prompt)
         self.assertNotIn('use task_context before acting', prompt)
 
+    def test_memory_search_permission_is_separate_from_original_history(self):
+        settings = normalize_settings({"enabled": True, "history_enabled": True})
+        self.assertNotIn("memory_search", business_tools(capabilities(settings, {})))
+        profile = {"tool_configs": {"agent": {"memory_enabled": True, "history_enabled": False}}}
+        access = capabilities(settings, profile)
+        self.assertIn("memory_search", business_tools(access))
+        self.assertNotIn("history_search", business_tools(access))
+        self.assertIn("mcp__shikigami__memory_search", capability_context(access))
+
     def test_new_access_is_opt_in_and_code_requires_workspace(self):
         settings = normalize_settings({'enabled': True})
         self.assertFalse(settings['workspace_enabled'])

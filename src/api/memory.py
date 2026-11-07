@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from src.memory.curation import CurationConflict, curation_for, curation_preset, request_suggestions
 from src.memory.recall import RecallCandidates, experience_links_by_day
-from src.memory.extraction_batches import is_memory_turn, message_hash
+from src.memory.extraction_batches import memory_source_excerpt
 from src.memory.long_term_store import fact_action_revision
 from src.utils.debug_logger import (
     log_app_event,
@@ -173,15 +173,10 @@ async def get_fact_evidence(profile_id: str, fact_id: str, request: Request):
             stores[source] = groups.get_conversation_store(source[6:])
         store = stores.get(source)
         row = store.get_memory_source_message(id) if store else None
-        if (row is None or not is_memory_turn(row) or row["timestamp"] != ref.get("timestamp")
-                or row["role"] != ref.get("speaker_role", ref.get("role", "user"))):
+        excerpt = memory_source_excerpt(row, ref)
+        if excerpt is None:
             continue
-        content = row["content"]
-        if ref.get("content_hash") and message_hash(content) != ref["content_hash"]:
-            continue
-        start, end = ref.get("start_char", 0), ref.get("end_char", len(content))
-        if type(start) is not int or type(end) is not int or not 0 <= start <= end <= len(content):
-            continue
+        content, start, end = excerpt
         item.update(available=True, role=row["role"], content=content[start:min(end, start + 16000)],
                     truncated=end - start > 16000)
     return {"profile_id": profile_id, "fact_id": fact_id, "items": items}

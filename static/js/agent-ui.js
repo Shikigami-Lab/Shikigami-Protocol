@@ -7,7 +7,7 @@
     const nativeName = String(name || '').replace(/^mcp__shikigami__/, '');
     return Object.prototype.hasOwnProperty.call(actions, nativeName) ? actions[nativeName] : '';
   };
-  const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled'];
+  const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'memory_enabled', 'todo_enabled'];
   const workspaceTabs = ['files', 'plans', 'tasks'];
   const workspaceWidthKey = 'agentWorkspaceWidth';
   const minWorkspaceWidth = 320;

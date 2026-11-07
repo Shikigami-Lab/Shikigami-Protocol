@@ -19,6 +19,21 @@ def message_hash(content):
     return sha256(content.encode("utf-8")).hexdigest()
 
 
+def memory_source_excerpt(row, reference):
+    """Resolve a stored reference against the current message and its original span."""
+    if (row is None or not is_memory_turn(row) or row["timestamp"] != reference.get("timestamp")
+            or row["role"] != reference.get("speaker_role", reference.get("role", "user"))):
+        return None
+    content = row["content"]
+    if reference.get("content_hash") and message_hash(content) != reference["content_hash"]:
+        return None
+    start = reference.get("start_char", 0)
+    end = reference.get("end_char", len(content))
+    if type(start) is not int or type(end) is not int or not 0 <= start <= end <= len(content):
+        return None
+    return content, start, end
+
+
 def plan_batch(streams, cursors, offsets, *, limit=MAX_DIALOGUE_CHARS):
     """Select a bounded prefix from each source and record exactly what was covered.
 

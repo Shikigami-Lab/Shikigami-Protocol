@@ -9,7 +9,6 @@
 情感注记：与当前情绪匹配或带 emotional_note 的 fact 在槽内优先；并在 block 前加一句显式强调。
 """
 import json
-import logging
 import os
 from collections import defaultdict
 from typing import Any, Dict, List
@@ -18,10 +17,8 @@ from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 from src.utils.paths import get_project_root
 from src.memory.fact_operations import normalize, rank_related
-from src.memory.recall import RecallCandidates, search_vectors
+from src.memory.recall import RecallCandidates, rank_query_facts, search_vectors
 from src.utils.memory_time import read_time_notice, source_time
-
-logger = logging.getLogger(__name__)
 
 # 当前情绪（英文）-> 可能出现在 emotional_note 中的中文关键词，用于检索时加权
 _EMOTION_NOTE_KEYWORDS: Dict[str, List[str]] = {
@@ -81,26 +78,6 @@ def _emotional_note_matches_current(fact: Any, current_emotion: str) -> bool:
     return any(kw in note for kw in keywords)
 
 
-def _rrf_merge(bm25_ranked, vec_ranked, k=60):
-    """Reciprocal Rank Fusion：合并 BM25 和向量两路检索结果。
-
-    Args:
-        bm25_ranked: BM25 结果 ID，已按 score 降序
-        vec_ranked: 向量结果 ID，已按 distance 升序（dist 越小越相关）
-        k: RRF 平滑参数（默认 60，数值越大对头部排名越不敏感）
-
-    Returns:
-        List[fact_id]，按 RRF 融合分数降序排列。
-        同时出现在两路结果中的 fact 得到双重加分（混合命中奖励）。
-    """
-    scores = {}
-    for rank, fid in enumerate(bm25_ranked):
-        scores[fid] = scores.get(fid, 0.0) + 1.0 / (k + rank + 1)
-    for rank, fid in enumerate(vec_ranked):
-        scores[fid] = scores.get(fid, 0.0) + 1.0 / (k + rank + 1)
-    return sorted(scores, key=lambda fid: scores[fid], reverse=True)
-
-
 @register
 class LongTermFactsSegment(PromptSegment):
     segment_id = "long_term_facts"
@@ -150,30 +127,7 @@ class LongTermFactsSegment(PromptSegment):
             pool = RecallCandidates(mgr.facts)
             pinned, recent, slot3_cap, sources = select_slots(pool)
 
-        semantic = []
-        if sources:
-            candidates = list(sources.values())
-            related = rank_related(candidates, query, len(candidates))
-            lexical_ids = {fact.id for fact in related}
-            bm25_ranked = []
-            bm25 = getattr(mgr, "bm25", None)
-            if bm25 and bm25.is_available():
-                try:
-                    bm25_ranked = list(dict.fromkeys(
-                        pool.resolve(fid).id for fid, _ in bm25.search(candidates, query, limit=slot3_cap * 4)
-                        if fid in lexical_ids
-                    ))
-                except Exception as e:
-                    logger.debug("[LongTermFactsSegment] BM25 search 失败: %s", e)
-            vec_ranked = []
-            if vector_rows:
-                vec_ranked = [fact.id for fact, _ in pool.vector_hits(
-                    sources, vector_rows, mgr.fact_vector_matches, semantic_dist,
-                )]
-            ranked = _rrf_merge(bm25_ranked, vec_ranked)
-            if not ranked:
-                ranked = list(dict.fromkeys(pool.resolve(fact.id).id for fact in related))
-            semantic = [pool.resolve(fid) for fid in ranked[:slot3_cap]]
+        semantic = rank_query_facts(mgr, pool, sources, query, slot3_cap, vector_rows, semantic_dist)
 
         # 槽内二次排序：与当前情绪匹配的 emotional_note 最优先，其次有 emotional_note 的优先
         current_emotion = _get_current_emotion(ctx.session.profile_id)

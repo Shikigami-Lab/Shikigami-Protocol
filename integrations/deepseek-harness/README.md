@@ -38,6 +38,7 @@ Enable only the capabilities needed for a task, through application defaults in 
 | `code_enabled` | Native `bash`, `job_output`, `job_kill`; requires `workspace_enabled` |
 | `web_enabled` | Native `web_fetch` through the controlled helper, plus free DDGS or optionally Serper-backed `web_search` |
 | `history_enabled` | `history_search` by keyword/local date range, with newest/oldest ordering and paged original messages; `history_context` around an original message ID |
+| `memory_enabled` | `memory_search` looks up recallable facts and experiences in the bound character's enabled memory. Uses the existing keyword and optional vector search; returns stored notes and available single-chat source IDs, read-only. |
 | `todo_enabled` | `todo_list`, `todo_add`, `todo_update`, `todo_delete` for user todos and character plans; also requires the profile's existing todo permission |
 
 Application `enabled`, `autonomy_enabled` and capability booleans are defaults. Under a character's `tool_configs.agent`, `true` or `false` explicitly overrides the matching default; missing or `null` inherits it. A character can therefore opt in while the global default is off. Effective `enabled` must be on for tool use; autonomous tasks additionally require effective `autonomy_enabled`. Code still requires effective workspace access. `task_context` is available when any capability is enabled, and `workspace_describe` accompanies workspace access. Existing timer and todo permissions remain separate gates.

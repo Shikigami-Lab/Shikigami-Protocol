@@ -90,6 +90,32 @@ class ChatTaskModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(history[-1]["agent_run_id"])
         self.assertEqual(history[0]["agent_run_id"], history[-1]["agent_run_id"])
 
+    async def test_memory_lookup_passes_structured_results_to_chat_model(self):
+        from src.memory.long_term_store import LongTermStore
+
+        self.app.state.config.agent["memory_enabled"] = True
+        facts = LongTermStore(self.temp.name)
+        facts.add("Agreed wording " + "a" * 1000 + " first ending")
+        facts.add("Agreed wording " + "b" * 1000 + " second ending")
+        self.app.state.memory_managers = {
+            "fixture": SimpleNamespace(facts=facts, _cfg={"enabled": True}, vectors=None),
+        }
+        self.chat_replies = [[HANDOFF], ["I found both agreements."]]
+
+        async def drive(run):
+            await self.runtime._publish(run, {"type": "tool_call", "tool_name": "memory_search"})
+            result = await self.runtime.execute_tool(run.id, "memory_search", {"query": "wording"}, "1")
+            await self.runtime._publish(run, {"type": "tool_result", "tool_name": "memory_search",
+                "content": [{"type": "text", "text": json.dumps(result)}]})
+            await self.runtime._publish(run, {"type": "completed"})
+            await run.queue.put(None)
+
+        with patch.object(self.runtime, "_drive", side_effect=drive):
+            frames = await self.send()
+        self.assertEqual("".join(frame.get("token", "") for frame in frames), "I found both agreements.")
+        self.assertIn("first ending", self.calls[-1][1])
+        self.assertIn("second ending", self.calls[-1][1])
+
     async def test_failed_task_explanation_is_written_by_chat_model(self):
         self.worker_state = "failed"
         self.chat_replies = [[HANDOFF], ["I could only finish part of the work."]]

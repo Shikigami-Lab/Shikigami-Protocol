@@ -51,6 +51,7 @@ class _Run:
     access: dict = field(default_factory=dict)
     session: object = None
     artifacts: list = field(default_factory=list)
+    memory_matches: dict = field(default_factory=dict, repr=False)
     cleanup_failed: bool = False
     before_files: dict = field(default_factory=dict)
     workspace_warning: str = ''
@@ -691,6 +692,12 @@ class AgentRuntime:
         if result.get('ok') is False:
             error = result.get('error') or {}
             raise ValueError(safe_text(error.get('message', 'Tool failed; no reliable results are available')))
+        if name == 'memory_search' and run.envelope.get('origin') == 'user':
+            for fact in result['facts']:
+                run.memory_matches.pop(fact['id'], None)
+                run.memory_matches[fact['id']] = fact
+            while len(run.memory_matches) > 10:
+                del run.memory_matches[next(iter(run.memory_matches))]
         return result
 
     def task_context(self, session, run_id=''):

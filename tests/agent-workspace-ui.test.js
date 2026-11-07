@@ -457,7 +457,7 @@ test('settings omitted capability flags default to false', async () => {
   const { model } = harness();
   model.agentFetch = async () => ({ enabled: true, max_model_requests: 8, timeout_seconds: 60 });
   await model.loadAgentSettings();
-  for (const key of ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled']) assert.equal(model.agentSettingsForm[key], false);
+  for (const key of ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'memory_enabled']) assert.equal(model.agentSettingsForm[key], false);
 });
 
 test('detached final response has its own bubble even without a broadcast and never overwrites foreground text', () => {

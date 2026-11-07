@@ -239,7 +239,6 @@ test('successful own todo tool results refresh an open popup through existing ev
 test('todo capability defaults off through older load/save responses and respects profile restrictions', async () => {
   const { model } = harness();
   assert.ok(model.agentCapabilities.includes('todo_enabled'));
-  assert.equal(model.agentCapabilities.length, 5);
   assert.equal(model.agentSettingsForm.todo_enabled, false);
   model.agentFetch = async () => ({});
   await model.loadAgentSettings(); assert.equal(model.agentSettingsForm.todo_enabled, false);

@@ -350,7 +350,8 @@ test('profile permission truth table preserves overrides independently of global
   const { model } = harness();
   model.selectedProfileId = 'p1';
   const keys = ['enabled', 'autonomy_enabled', ...model.agentCapabilities];
-  assert.equal(keys.length, 7);
+  assert.equal(keys.length, 8);
+  assert.ok(keys.includes('memory_enabled'));
   for (const globalDefault of [false, true]) {
     Object.assign(model.agentSettingsForm, Object.fromEntries(keys.map(key => [key, globalDefault])));
     for (const key of keys) {
@@ -488,7 +489,7 @@ test('rendered persona controls show raw states and emit on/off/inherit even wit
         app.mount(root);
         const descendants = el => [el, ...el.children.flatMap(descendants)];
         const fieldsets = descendants(root).filter(el => el.type === 'fieldset');
-        assert.equal(fieldsets.length, 7);
+        assert.equal(fieldsets.length, keys.length);
         fieldsets.forEach((fieldset, index) => {
           assert.equal(Boolean(fieldset.props.disabled), lock !== 'none');
           const buttons = descendants(fieldset).filter(el => el.type === 'button');

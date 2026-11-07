@@ -31,6 +31,7 @@ class SettingsPatch(BaseModel):
     code_enabled: Optional[bool] = Field(default=None, strict=True)
     web_enabled: Optional[bool] = Field(default=None, strict=True)
     history_enabled: Optional[bool] = Field(default=None, strict=True)
+    memory_enabled: Optional[bool] = Field(default=None, strict=True)
     todo_enabled: Optional[bool] = Field(default=None, strict=True)
     autonomy_enabled: Optional[bool] = Field(default=None, strict=True)
     autonomy_interval_seconds: Optional[int] = Field(default=None, strict=True, ge=60, le=86400)

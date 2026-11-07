@@ -23,6 +23,7 @@ MAX_CONTEXT = 10
 MAX_CONTENT = 4000
 MAX_QUERY = 500
 MAX_SEARCH_RESULTS = 5
+MEMORY_VECTOR_TIMEOUT = 3
 MAX_METADATA_READ = 65536
 _METADATA_FIELDS = ("metadata", "run_id", "status", "generation_status", "agent_run_id")
 
@@ -37,6 +38,7 @@ Query = Annotated[str, Field(strict=True, max_length=MAX_QUERY)]
 SearchQuery = Annotated[str, Field(strict=True, min_length=1, max_length=MAX_QUERY)]
 DateText = Annotated[str, Field(strict=True, pattern=r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})?$"), AfterValidator(_date_text)]
 HistoryLimit = Annotated[int, Field(strict=True, ge=1, le=MAX_MESSAGES)]
+MemoryLimit = Annotated[int, Field(strict=True, ge=1, le=10)]
 HistoryOffset = Annotated[int, Field(strict=True, ge=0, le=MAX_HISTORY_OFFSET)]
 HistoryOrder = Literal["newest", "oldest"]
 MessageId = Annotated[int, Field(strict=True, ge=1, le=9223372036854775807)]
@@ -88,7 +90,7 @@ class HistoryContextArgs(_Arguments):
     after: ContextCount = 3
 
 
-class WebSearchArgs(_Arguments):
+class _SearchArgs(_Arguments):
     query: SearchQuery
 
     @model_validator(mode="after")
@@ -96,6 +98,14 @@ class WebSearchArgs(_Arguments):
         if not self.query.strip():
             raise ValueError("query must not be blank")
         return self
+
+
+class WebSearchArgs(_SearchArgs):
+    pass
+
+
+class MemorySearchArgs(_SearchArgs):
+    limit: MemoryLimit = 5
 
 
 def _error(code: str, message: str) -> dict:
@@ -308,14 +318,65 @@ async def _web_search(args: WebSearchArgs) -> dict:
         return _error("search_failed", "Web search failed; no reliable search results are available")
 
 
-async def call_business_tool(app, session, name: str, args: dict) -> dict:
-    """Return JSON dictionaries for history/search; task_context stays in runtime.
+async def _memory_search(app, session, args: MemorySearchArgs) -> dict:
+    from src.memory.recall import RecallCandidates, search_vectors
 
-    ``app`` is reserved for host integration; no global app/profile lookup is
-    performed. All errors are explicit and contain no raw database/provider text.
-    """
+    # The chat/reflection pipeline owns initialization. This tool only reads the
+    # existing manager for the profile already bound and authorized by runtime.
+    managers = getattr(getattr(app, "state", None), "memory_managers", {})
+    manager = managers.get(session.profile_id)
+    if manager is None or not manager._cfg.get("enabled"):
+        return _error("memory_unavailable", "Fact memory is unavailable for this character")
+
+    query = args.query.strip()
+    pool = await asyncio.to_thread(RecallCandidates, manager.facts)
+    vectors = []
+    if (pool.indexable or pool.aliases) and manager.vectors and manager.vectors.is_available():
+        try:
+            vectors = await asyncio.wait_for(
+                asyncio.to_thread(search_vectors, manager.vectors, query, args.limit * 4),
+                timeout=MEMORY_VECTOR_TIMEOUT,
+            )
+        except TimeoutError:
+            pass  # A slow embedding provider must leave time for keyword recall.
+        pool = await asyncio.to_thread(RecallCandidates, manager.facts)
+    return await asyncio.to_thread(_memory_search_results, manager, session, pool, query, args.limit, vectors)
+
+
+def _memory_search_results(manager, session, pool, query, limit, vectors):
+    from src.memory.extraction_batches import memory_source_excerpt
+    from src.memory.recall import rank_query_facts
+
+    facts = rank_query_facts(manager, pool, pool.ranked_sources(), query, limit, vectors,
+                            float(manager._cfg.get("semantic_distance", 0.45)), keyword_with_vectors=True)
+    store = getattr(session, "_store", None)
+    rows = []
+    for fact in facts:
+        content = fact.content
+        message_ids = []
+        for ref in fact.evidence if store else ():
+            if not isinstance(ref, dict) or ref.get("source") != "single":
+                continue
+            message_id = ref.get("id")
+            if type(message_id) is not int or not 0 < message_id <= 9223372036854775807 or message_id in message_ids:
+                continue
+            if memory_source_excerpt(store.get_memory_source_message(message_id), ref) is not None:
+                message_ids.append(message_id)
+                if len(message_ids) == 6:
+                    break
+        rows.append({
+            "id": fact.id, "content": content[:1200], "truncated": len(content) > 1200,
+            "kind": fact.kind or None, "category": fact.category,
+            "event_date": fact.event_date, "occurred_from": fact.occurred_from,
+            "occurred_to": fact.occurred_to, "source_message_ids": message_ids,
+        })
+    return {"ok": True, "source": "fact_memory", "facts": rows}
+
+
+async def call_business_tool(app, session, name: str, args: dict) -> dict:
+    """Read history, facts or web results under the runtime-bound session."""
     models = {"history_search": HistorySearchArgs, "history_context": HistoryContextArgs,
-              "web_search": WebSearchArgs}
+              "web_search": WebSearchArgs, "memory_search": MemorySearchArgs}
     if name not in models:
         return _error("unknown_tool", "Unknown business tool")
     try:
@@ -326,6 +387,11 @@ async def call_business_tool(app, session, name: str, args: dict) -> dict:
         return _error("invalid_session", "Tool requires a host-bound profile session")
     if name == "web_search":
         return await _web_search(parsed)
+    if name == "memory_search":
+        try:
+            return await _memory_search(app, session, parsed)
+        except (sqlite3.Error, OSError, ValueError, AttributeError):
+            return _error("memory_unavailable", "Fact memory is unavailable for this character")
     try:
         action = _history_search if name == "history_search" else _history_context
         return await asyncio.to_thread(action, session, parsed)

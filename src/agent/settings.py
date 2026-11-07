@@ -3,16 +3,18 @@ from pathlib import Path
 import os
 import tempfile
 
+from src.agent.capabilities import KEYS
+
 DEFAULTS = {"enabled": False, "max_model_requests": 6, "timeout_seconds": 120, "model_preset": ""}
 DEFAULTS.update(autonomy_enabled=False, autonomy_interval_seconds=900, autonomy_max_requests_per_hour=12)
-DEFAULTS.update({key: False for key in ('workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled')})
+DEFAULTS.update({key: False for key in KEYS})
 
 
 def normalize_settings(raw=None):
     value = {**DEFAULTS, **(raw or {})}
     if not isinstance(value['model_preset'], str):
         raise ValueError('model_preset must be a preset name or an empty string')
-    for key in ('enabled', 'workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'todo_enabled', 'autonomy_enabled'):
+    for key in ('enabled', 'autonomy_enabled', *KEYS):
         if type(value[key]) is not bool:
             raise ValueError(f"{key} must be a boolean")
     if value['code_enabled'] and not value['workspace_enabled']:

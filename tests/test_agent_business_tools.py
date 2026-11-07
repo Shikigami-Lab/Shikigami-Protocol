@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -53,6 +54,89 @@ class BusinessToolsTests(unittest.IsolatedAsyncioTestCase):
         result = await self.call_business_tool(self.app, self.session, name, args)
         json.dumps(result, allow_nan=False)
         return result
+
+    async def test_memory_search_mcp_reads_only_eligible_facts_in_bound_profile(self):
+        from src.memory.long_term_store import LongTermFact, LongTermStore
+
+        facts = LongTermStore(str(Path(self.tmp.name) / "facts"))
+        when = datetime(2025, 6, 1, 12).timestamp()
+        original_id = self.add("开玩笑也请避免攻击性言语", when)
+        fact = LongTermFact("用户约定开玩笑也避免攻击性言语", evidence=[
+            {"source": "single", "id": original_id, "timestamp": when},
+            {"source": "single", "id": 44, "timestamp": when},
+            {"source": "single", "id": original_id, "timestamp": when - 1},
+            {"source": "group:example", "id": 99},
+        ])
+        fact_id = fact.id
+        revision, cursors, _ = facts.extraction_snapshot()
+        self.assertTrue(facts.apply_extraction(revision, [
+            fact,
+            LongTermFact("约定已经归档", archived=True),
+            LongTermFact("约定已经到期", expires_at=1),
+        ], cursors))
+        other = LongTermStore(str(Path(self.tmp.name) / "other-facts"))
+        other.add("约定来自其他角色")
+        self.app.state = SimpleNamespace(memory_managers={
+            "alpha": SimpleNamespace(facts=facts, _cfg={"enabled": True}, vectors=None),
+            "beta": SimpleNamespace(facts=other, _cfg={"enabled": True}, vectors=None),
+        })
+
+        async def callback(name, args, request_id):
+            return await self.call(name, **args)
+
+        async with business_client(callback, ("memory_search",)) as client:
+            catalog = {tool.name: tool for tool in (await client.list_tools()).tools}
+            self.assertTrue(catalog["memory_search"].annotations.readOnlyHint)
+            result = await client.call_tool("memory_search", {"query": "约定"})
+            self.assertFalse(result.isError)
+            payload = result.structuredContent
+            self.assertEqual([row["id"] for row in payload["facts"]], [fact_id])
+            self.assertEqual(payload["facts"][0]["source_message_ids"], [original_id])
+            self.assertEqual(payload["source"], "fact_memory")
+            missing = await client.call_tool("memory_search", {"query": "unrelated"})
+            self.assertEqual(missing.structuredContent["facts"], [])
+            for invalid in ({"query": "  "}, {"query": "约定", "limit": 11},
+                            {"query": "约定", "profile_id": "beta"}):
+                self.assertTrue((await client.call_tool("memory_search", invalid)).isError)
+
+    async def test_memory_search_rechecks_index_hits_and_falls_back_to_keywords(self):
+        from src.memory.long_term_store import LongTermStore
+
+        facts = LongTermStore(str(Path(self.tmp.name) / "facts"))
+        keyword = facts.add("用户喜欢吃红枣")
+        stale = facts.add("用户睡前喝牛奶")
+        semantic = facts.add("用户喜欢普洱茶")
+
+        def vector_search(query, limit):
+            facts.update(stale.id, content="用户改喝柠檬水")
+            return [
+                {"metadata": {"fact_id": stale.id}, "content": stale.content, "distance": 0.05},
+                {"metadata": {"fact_id": semantic.id}, "content": semantic.content, "distance": 0.10},
+            ]
+
+        vectors = SimpleNamespace(is_available=lambda: True, search=MagicMock(side_effect=vector_search))
+        manager = SimpleNamespace(facts=facts, _cfg={"enabled": True}, vectors=vectors,
+                                  fact_vector_matches=lambda fact, row: fact.content == row["content"])
+        self.app.state = SimpleNamespace(memory_managers={"alpha": manager})
+        result = await self.call("memory_search", query="红枣")
+        self.assertIn(semantic.id, {row["id"] for row in result["facts"]})
+        self.assertNotIn(stale.id, {row["id"] for row in result["facts"]})
+        vectors.search.assert_called_once()
+        vectors.search.side_effect = RuntimeError("synthetic provider failure")
+        result = await self.call("memory_search", query="红枣")
+        self.assertEqual([row["id"] for row in result["facts"]], [keyword.id])
+        release = threading.Event()
+        vectors.search.side_effect = lambda *args, **kwargs: release.wait(2)
+        try:
+            with patch("src.agent.business_tools.MEMORY_VECTOR_TIMEOUT", 0.05):
+                result = await self.call("memory_search", query="红枣")
+                self.assertEqual([row["id"] for row in result["facts"]], [keyword.id])
+                self.assertEqual(vectors.search.call_count, 3)
+        finally:
+            release.set()
+        manager._cfg["enabled"] = False
+        self.assertEqual((await self.call("memory_search", query="红枣"))["error"]["code"], "memory_unavailable")
+        self.assertEqual(vectors.search.call_count, 3)
 
     async def test_date_range_includes_both_local_days_with_stable_sources(self):
         start = datetime(2025, 2, 3)
