@@ -38,7 +38,7 @@
   --settings-palette-nav: #161322;
   --settings-palette-border: #403653;
   --settings-palette-primary: #ede8f7;
-  --settings-palette-secondary: #b5a8ca;
+  --settings-palette-secondary: #c5b8da;
   --settings-palette-accent: #a291d6;
 }
 
@@ -49,7 +49,7 @@
   --settings-palette-nav: #ebe6dd;
   --settings-palette-border: #d6cec0;
   --settings-palette-primary: #252520;
-  --settings-palette-secondary: #645d53;
+  --settings-palette-secondary: #565149;
   --settings-palette-accent: #376b94;
 }
 
@@ -60,7 +60,7 @@
   --settings-palette-nav: #111017;
   --settings-palette-border: #383343;
   --settings-palette-primary: #efe8db;
-  --settings-palette-secondary: #b2a9b7;
+  --settings-palette-secondary: #c5bbc9;
   --settings-palette-accent: #c6a46a;
 }
 
@@ -71,7 +71,7 @@
   --settings-palette-nav: #191a1d;
   --settings-palette-border: #3d4147;
   --settings-palette-primary: #eceef0;
-  --settings-palette-secondary: #a7adb5;
+  --settings-palette-secondary: #bec4cb;
   --settings-palette-accent: #6a9bc1;
 }
 
@@ -82,7 +82,7 @@
   --settings-palette-nav: #0e1723;
   --settings-palette-border: #2b425b;
   --settings-palette-primary: #e1ebf5;
-  --settings-palette-secondary: #9cb4cc;
+  --settings-palette-secondary: #b5c7db;
   --settings-palette-accent: #679fd0;
 }
 
@@ -93,7 +93,7 @@
   --settings-palette-nav: #29323e;
   --settings-palette-border: #505c6c;
   --settings-palette-primary: #edf2f6;
-  --settings-palette-secondary: #bac8d4;
+  --settings-palette-secondary: #cdd8e2;
   --settings-palette-accent: #8cbec5;
 }
 
@@ -104,7 +104,7 @@
   --settings-palette-nav: #101b16;
   --settings-palette-border: #34473a;
   --settings-palette-primary: #e4ebdf;
-  --settings-palette-secondary: #a7b8ab;
+  --settings-palette-secondary: #bac9be;
   --settings-palette-accent: #8daa96;
 }
 
@@ -115,7 +115,7 @@
   --settings-palette-nav: #1b1512;
   --settings-palette-border: #49362a;
   --settings-palette-primary: #efe5d7;
-  --settings-palette-secondary: #bba690;
+  --settings-palette-secondary: #ccb9a6;
   --settings-palette-accent: #ca965d;
 }
 
@@ -126,7 +126,7 @@
   --settings-palette-nav: #1d141a;
   --settings-palette-border: #503546;
   --settings-palette-primary: #f3e7ee;
-  --settings-palette-secondary: #c2a8b8;
+  --settings-palette-secondary: #d2b9c8;
   --settings-palette-accent: #c982a1;
 }
 
@@ -137,7 +137,7 @@
   --settings-palette-nav: #130e1e;
   --settings-palette-border: #433452;
   --settings-palette-primary: #f0e7f8;
-  --settings-palette-secondary: #bca8cc;
+  --settings-palette-secondary: #d0badc;
   --settings-palette-accent: #ea82b9;
 }
 
@@ -147,8 +147,8 @@
   --settings-palette-card: #222222;
   --settings-palette-nav: #111111;
   --settings-palette-border: #383838;
-  --settings-palette-primary: #ededec;
-  --settings-palette-secondary: #aaaaaa;
+  --settings-palette-primary: #f2f2ef;
+  --settings-palette-secondary: #c3c3c1;
   --settings-palette-accent: #bfbfbf;
 }
 
@@ -159,6 +159,7 @@
   --border: var(--settings-palette-border);
   --text-primary: var(--settings-palette-primary);
   --text-secondary: var(--settings-palette-secondary);
+  --text-tertiary: color-mix(in srgb, var(--text-secondary) 78%, var(--bg-app));
   --accent: var(--settings-palette-accent);
   --accent-hover: color-mix(in srgb, var(--accent) 83%, var(--settings-palette-hover-tint, #fff));
   --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -2268,6 +2269,9 @@ textarea.form-input {
   margin: 0 0 14px 0;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
+}
+.settings-drawer :is(.s-card-title, .form-label) {
+  color: var(--text-primary);
 }
 /* settings-param-block inside s-card: becomes a flat sub-section, not a nested card */
 .s-card .settings-param-block {

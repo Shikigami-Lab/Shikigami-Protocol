@@ -37,3 +37,9 @@ test('the settings drawer consumes palette roles through its scoped theme variab
     assert.match(block, new RegExp(`--${token}: var\\(--settings-palette-${role}\\)`));
   }
 });
+
+test('settings headings and field labels use the primary color, with drawer-local tertiary text', () => {
+  assert.match(css, /\.settings-drawer :is\(\.s-card-title, \.form-label\)\s*\{\s*color: var\(--text-primary\)/);
+  const block = css.match(/(?:^|\n)\.settings-drawer\s*\{([^}]+)\}/)[1];
+  assert.match(block, /--text-tertiary: color-mix\(in srgb, var\(--text-secondary\) \d+%, var\(--bg-app\)\)/);
+});
