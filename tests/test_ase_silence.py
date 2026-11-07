@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from src.core.ase import AseEngine, could_be_llm_error, could_become_silence_reply, is_silence_reply
+from src.prompt.segments.ase.scene_context import AseSceneContextSegment
 
 SILENCE_REPLIES = (
     "静默", "（静默）", "(静默)", "[静默]", "【静默】",
@@ -58,6 +59,31 @@ class CouldBeLlmErrorTests(unittest.TestCase):
         for prefix in ("早", "Sure", "[smiles]", "[LL M", "(silence)"):
             with self.subTest(prefix=prefix):
                 self.assertFalse(could_be_llm_error(prefix))
+
+
+class ProactiveTopicSceneTests(unittest.TestCase):
+    def test_local_topic_is_optional_in_both_languages(self):
+        ctx = SimpleNamespace(session=SimpleNamespace(), extras={"ase_chosen_topic": {
+            "source_id": "random_api",
+            "material": "给月亮寄一张明信片，你会画什么？",
+            "angle": "上一轮自省拟好的开场",
+            "framing_hint": "用「突然想问你」开场",
+        }})
+        for locale, optional, committed, recent, silence in (
+            ("zh", "【可选的本地灵感】", "【你想说的事】", "最近的对话", "（静默）"),
+            ("en", "[Optional Local Inspiration]", "[What You Want to Say]", "recent conversation", "(silence)"),
+        ):
+            with self.subTest(locale=locale), mock.patch(
+                "src.prompt.segments.ase.scene_context.get_locale", return_value=locale
+            ):
+                content = AseSceneContextSegment().build(ctx).messages[0]["content"]
+                self.assertIn(optional, content)
+                self.assertIn("给月亮寄一张明信片，你会画什么？", content)
+                self.assertIn(recent, content)
+                self.assertIn(silence, content)
+                self.assertNotIn(committed, content)
+                self.assertNotIn("上一轮自省拟好的开场", content)
+                self.assertNotIn("用「突然想问你」开场", content)
 
 
 class _FakeProvider:

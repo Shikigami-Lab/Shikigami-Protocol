@@ -176,13 +176,25 @@ class AseSceneContextSegment(PromptSegment):
                                              else "你一直留意着：$thought"),
                                     thought=thought))
 
-        # 主动话题发现：自省选定的话题（已决策块）——「你已经决定要说」，无 opt-out
+        # 本地题是可选灵感，发言时根据最新情境重新判断。
         if chosen_topic:
             has_scene_content = True
             material = (chosen_topic.get("material") or "").strip()
             angle = (chosen_topic.get("angle") or "").strip()
             framing = (chosen_topic.get("framing_hint") or "").strip()
-            if locale == "en":
+            if chosen_topic.get("source_id") == "random_api":
+                guidance = (
+                    "[Optional Local Inspiration] Consider the recent conversation and how the user seems to feel. "
+                    "Bring this up in your own words only if it fits this moment. If it feels out of place, "
+                    "skip the question. Continue the current conversation if there is something worth saying, "
+                    'or reply only "(silence)".'
+                    if locale == "en" else
+                    "【可选的本地灵感】先看最近的对话和对方当下的感受。合适才用自己的话聊起这道题。"
+                    "如果会打断正在聊的事，或此刻不适合抛出新问题，就略过。"
+                    "有合适的话就顺着当下的话题说，没什么要说就只回复「（静默）」。"
+                )
+                block = [guidance, material]
+            elif locale == "en":
                 block = [f"[What You Want to Say] You've been thinking, and you want to "
                          f"bring this up with {user_name} on your own initiative:"]
                 if material:
