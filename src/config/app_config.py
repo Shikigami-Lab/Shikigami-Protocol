@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_CURATION_ACTIVE_LIMIT = 500
+DEFAULT_CURATION_BATCH_SIZE = 30
+MAX_CURATION_BATCH_SIZE = 100
 
 
 @dataclass
@@ -134,6 +136,7 @@ class AppConfig:
             "curation_run_at_hour": None,
             "curation_run_at_minute": None,
             "curation_active_limit": DEFAULT_CURATION_ACTIVE_LIMIT,
+            "curation_batch_size": DEFAULT_CURATION_BATCH_SIZE,
             "daily_decay_factor": 0.998,
             "daily_decay_min_weight": 0.1,
             "daily_reinforcement_enabled": False,

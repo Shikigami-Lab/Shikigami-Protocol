@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT
+from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT, DEFAULT_CURATION_BATCH_SIZE, MAX_CURATION_BATCH_SIZE
 from src.config.emotion_keys import emotion_keys_csv_for_wizard
 from src.config.memory_prompts import memory_prompt_settings
 from src.llm.registry import get_provider
@@ -2968,6 +2968,7 @@ class MemoryConfigBody(BaseModel):
     curation_run_at_hour: Optional[int] = Field(default=None, ge=0, le=23, strict=True)
     curation_run_at_minute: Optional[int] = Field(default=None, ge=0, le=59, strict=True)
     curation_active_limit: int = Field(default=DEFAULT_CURATION_ACTIVE_LIMIT, ge=1, le=1_000_000, strict=True)
+    curation_batch_size: int = Field(default=DEFAULT_CURATION_BATCH_SIZE, ge=1, le=MAX_CURATION_BATCH_SIZE, strict=True)
     daily_decay_factor: float = 0.998
     daily_decay_min_weight: float = 0.1
     daily_reinforcement_enabled: bool = False
@@ -2983,46 +2984,32 @@ async def save_memory_config(request: Request, body: MemoryConfigBody):
     config = request.app.state.config
 
     y, data = _load_yaml()
-    if "memory" not in data:
+    if not isinstance(data.get("memory"), dict):
         data["memory"] = {}
     m = data["memory"]
-    m["enabled"] = body.enabled
-    m["vector_enabled"] = body.vector_enabled
-    m["extraction_frequency"] = body.extraction_frequency
-    m["extraction_weight_threshold"] = max(0.0, min(1.0, float(body.extraction_weight_threshold)))
-    m["max_facts_in_prompt"] = body.max_facts_in_prompt
-    m["max_history_turns"] = max(1, min(200, body.max_history_turns))
-    m["day_summary_enabled"] = body.day_summary_enabled
-    m["day_summary_keep_days"] = body.day_summary_keep_days
-    m["day_summary_max_messages"] = max(10, min(500, body.day_summary_max_messages))
-    m["day_summary_max_conv_chars"] = max(2000, min(100000, body.day_summary_max_conv_chars))
-    # 槽位配额
-    m["recent_fact_quota"] = body.recent_fact_quota
-    m["semantic_fact_quota"] = body.semantic_fact_quota
-    m["recent_days"] = body.recent_days
-    m["semantic_distance"] = body.semantic_distance
-    m["vector_dedup_distance_threshold"] = max(0.01, min(0.5, float(body.vector_dedup_distance_threshold)))
-    m["daily_run_at_hour"] = max(0, min(23, body.daily_run_at_hour))
-    m["daily_run_at_minute"] = max(0, min(59, body.daily_run_at_minute))
-    m["daily_forgetting_enabled"] = body.daily_forgetting_enabled
-    if body.daily_curation_enabled is not None:
-        m["daily_curation_enabled"] = body.daily_curation_enabled
-    for key in ("curation_interval_days", "curation_run_at_hour", "curation_run_at_minute"):
-        if key in body.model_fields_set:
-            value = getattr(body, key)
-            if value is None:
+    bounds = {
+        "extraction_weight_threshold": (0.0, 1.0),
+        "max_history_turns": (1, 200),
+        "day_summary_max_messages": (10, 500),
+        "day_summary_max_conv_chars": (2_000, 100_000),
+        "vector_dedup_distance_threshold": (0.01, 0.5),
+        "daily_run_at_hour": (0, 23),
+        "daily_run_at_minute": (0, 59),
+        "daily_decay_factor": (0.9, 1.0),
+        "daily_decay_min_weight": (0.0, 1.0),
+        "daily_consolidation_after_days": (7, 365),
+        "daily_consolidation_weight_below": (0.0, 1.0),
+        "daily_consolidation_batch_max": (5, 30),
+    }
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if value is None:
+            if key in {"curation_interval_days", "curation_run_at_hour", "curation_run_at_minute"}:
                 m.pop(key, None)
-            else:
-                m[key] = value
-    if "curation_active_limit" in body.model_fields_set:
-        m["curation_active_limit"] = body.curation_active_limit
-    m["daily_decay_factor"] = max(0.9, min(1.0, float(body.daily_decay_factor)))
-    m["daily_decay_min_weight"] = max(0.0, min(1.0, float(body.daily_decay_min_weight)))
-    m["daily_reinforcement_enabled"] = body.daily_reinforcement_enabled
-    m["daily_consolidation_enabled"] = body.daily_consolidation_enabled
-    m["daily_consolidation_after_days"] = max(7, min(365, body.daily_consolidation_after_days))
-    m["daily_consolidation_weight_below"] = max(0.0, min(1.0, float(body.daily_consolidation_weight_below)))
-    m["daily_consolidation_batch_max"] = max(5, min(30, body.daily_consolidation_batch_max))
+            continue
+        if key in bounds:
+            low, high = bounds[key]
+            value = max(low, min(high, value))
+        m[key] = value
     _save_yaml(y, data)
 
     # Hot-reload
@@ -3304,6 +3291,7 @@ class ProfileMemoryConfigBody(BaseModel):
     curation_run_at_hour: Optional[int] = Field(default=None, ge=0, le=23, strict=True)
     curation_run_at_minute: Optional[int] = Field(default=None, ge=0, le=59, strict=True)
     curation_active_limit: Optional[int] = Field(default=None, ge=1, le=1_000_000, strict=True)
+    curation_batch_size: Optional[int] = Field(default=None, ge=1, le=MAX_CURATION_BATCH_SIZE, strict=True)
     daily_decay_factor: Optional[float] = None
     daily_decay_min_weight: Optional[float] = None
     daily_reinforcement_enabled: Optional[bool] = None

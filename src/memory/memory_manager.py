@@ -127,12 +127,13 @@ class MemoryManager:
         self.day_store = DaySummaryStore(storage_root)
 
         # Search is optional. The old index can still be migrated and cleaned locally.
+        memory_enabled = self._cfg.get("enabled")
         self.vectors: Optional[VectorMemoryStore] = None
-        if self._cfg.get("vector_enabled"):
+        if memory_enabled and self._cfg.get("vector_enabled"):
             embed_cfg = self._cfg.get("embedding", {})
             self.vectors = VectorMemoryStore(storage_root, embed_cfg)
         self._offline_index: Optional[VectorMemoryStore] = None
-        if not (self.vectors and self.vectors.is_available()) and os.path.isfile(
+        if memory_enabled and not (self.vectors and self.vectors.is_available()) and os.path.isfile(
             os.path.join(storage_root, "chroma_db", "chroma.sqlite3"),
         ):
             self._offline_index = VectorMemoryStore(storage_root, {}, existing_only=True)
@@ -198,7 +199,7 @@ class MemoryManager:
             "vector_count": vec_count,
             "vector_provider": vec_provider,
             "summary_count": self.day_store.count(),
-            "day_summary_enabled": bool(self._cfg.get("day_summary_enabled")),
+            "day_summary_enabled": bool(self._cfg.get("enabled") and self._cfg.get("day_summary_enabled")),
         }
 
     def get_reflection_context_facts(
@@ -212,6 +213,8 @@ class MemoryManager:
         筛选：weight >= min_weight，优先 emotional_note 非空（情感相关），
         按 weight 降序再按 updated_at 降序。只返回 content/weight/updated_at 字段。
         """
+        if not self._cfg.get("enabled"):
+            return []
         from datetime import datetime
         if query and max_count > 0:
             pool = RecallCandidates(self.facts)
@@ -545,7 +548,7 @@ class MemoryManager:
         quiet=True: 当日无对话时仍生成一篇安静日记。
         day_msgs_override: 若传入（如按日合并的单聊+群聊消息列表），则不再从 store 读取，直接用该列表。
         """
-        if not ignore_enabled and not self._cfg.get("day_summary_enabled"):
+        if not self._cfg.get("enabled") or (not ignore_enabled and not self._cfg.get("day_summary_enabled")):
             return None
         if not force and self.day_store.has_summary_for(date_str):
             return None

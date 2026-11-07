@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memorycapacity"></script>
+  <script src="js/i18n.js?v=20261107memorybatch"></script>
 </head>
 <body>
 
@@ -5414,7 +5414,7 @@
           </div>
           <div v-show="memorySettingsScope === 'global'">
 
-          <!-- ── Card 1: 长期记忆 ── -->
+          <!-- ── Memory and extraction ── -->
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectLtm') }}</div>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableLtm') }}</p>
@@ -5492,7 +5492,7 @@
                     <div class="param-row" style="margin-top:8px;">
                       <span class="param-label">{{ t('lblSemanticDistance') }}</span>
                       <input type="number" class="seg-num-input" min="0" max="1" step="0.05"
-                             v-model.number="memoryGlobalForm.semantic_distance" style="width:64px;" :disabled="!memoryGlobalForm.vector_enabled" />
+                             v-model.number="memoryGlobalForm.semantic_distance" style="width:64px;" :disabled="!memoryGlobalForm.enabled || !memoryGlobalForm.vector_enabled" />
                     </div>
                     <div class="form-hint">{{ t('hintSemanticDistance') }}</div>
                   </div>
@@ -5505,20 +5505,21 @@
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectDaySummary') }}</div>
             <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableDaySummary') }}</p>
-            <toggle-row :label="t('lblEnableDaySummary')" v-model="memoryGlobalForm.day_summary_enabled"></toggle-row>
+            <toggle-row :label="t('lblEnableDaySummary')" v-model="memoryGlobalForm.day_summary_enabled"
+                        :disabled="!memoryGlobalForm.enabled"></toggle-row>
             <p class="form-hint">{{ t('hintDaySummarySchedule') }}</p>
 
-            <div class="settings-param-block" :class="{ disabled: !memoryGlobalForm.day_summary_enabled }">
+            <div class="settings-param-block" :class="{ disabled: !memoryGlobalEffectiveDaySummaryEnabled }">
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblDaySummaryKeepDays') }}</span>
                 <input type="number" class="seg-num-input" min="3" max="60"
-                       v-model.number="memoryGlobalForm.day_summary_keep_days" style="width:64px;" :disabled="!memoryGlobalForm.day_summary_enabled" />
+                       v-model.number="memoryGlobalForm.day_summary_keep_days" style="width:64px;" :disabled="!memoryGlobalEffectiveDaySummaryEnabled" />
               </div>
               <div class="form-hint">{{ t('hintDaySummaryKeepDays') }}</div>
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblDaySummaryMaxMessages') }}</span>
                 <input type="number" class="seg-num-input" min="10" max="500"
-                       v-model.number="memoryGlobalForm.day_summary_max_messages" style="width:64px;" :disabled="!memoryGlobalForm.day_summary_enabled" />
+                       v-model.number="memoryGlobalForm.day_summary_max_messages" style="width:64px;" :disabled="!memoryGlobalEffectiveDaySummaryEnabled" />
               </div>
               <div class="form-hint">{{ t('hintDaySummaryMaxMessages') }}</div>
 
@@ -5530,19 +5531,16 @@
                 <div class="param-row" style="margin-top:8px;">
                   <span class="param-label">{{ t('lblDaySummaryMaxConvChars') }}</span>
                   <input type="number" class="seg-num-input" min="2000" max="100000" step="1000"
-                         v-model.number="memoryGlobalForm.day_summary_max_conv_chars" style="width:80px;" :disabled="!memoryGlobalForm.day_summary_enabled" />
+                         v-model.number="memoryGlobalForm.day_summary_max_conv_chars" style="width:80px;" :disabled="!memoryGlobalEffectiveDaySummaryEnabled" />
                 </div>
                 <div class="form-hint">{{ t('hintDaySummaryMaxConvChars') }}</div>
               </div>
             </div>
           </div><!-- end Day Summary card -->
 
-          <!-- ── Card 3: 每日记忆维护 ── -->
+          <!-- ── Shared daily clock ── -->
           <div class="s-card">
-            <div class="s-card-title">{{ t('memSectDailyMaintenance') }}</div>
-            <p class="form-hint" style="margin-bottom:12px;">{{ t('hintDailyMaintenanceDesc') }}</p>
-
-            <!-- 执行时间（始终显示，不依附任何开关） -->
+            <div class="s-card-title">{{ t('memSectSharedDailyClock') }}</div>
             <div class="param-row param-row-time">
               <span class="param-label">{{ t('lblDailyRunAt') }}</span>
               <select class="form-select mem-time-select" v-model.number="memoryGlobalForm.daily_run_at_hour" :title="t('lblHour')">
@@ -5554,36 +5552,36 @@
               </select>
             </div>
             <div class="form-hint" style="margin-bottom:10px;">{{ t('hintDailyRunAt') }}</div>
+          </div>
 
+          <fieldset id="memory-forgetting-global" class="s-card" aria-labelledby="memory-forgetting-global-title"
+                    :disabled="!memoryGlobalFormLoaded || !memoryGlobalForm.enabled" style="min-width:0;margin-inline:0;">
+            <div id="memory-forgetting-global-title" class="s-card-title">{{ t('memSectDailyForgetting') }}</div>
             <div class="param-row" style="margin-top:10px;">
               <span class="param-label">{{ t('lblEnableDailyCuration') }}</span>
               <label class="toggle-switch">
                 <input id="memory-daily-curation-global" type="checkbox" v-model="memoryGlobalForm.daily_curation_enabled"
-                       :aria-label="t('lblEnableDailyCuration')" aria-describedby="memory-daily-curation-global-hint"
-                       :disabled="!memoryGlobalFormLoaded" />
+                       :aria-label="t('lblEnableDailyCuration')" aria-describedby="memory-daily-curation-global-hint" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
             <div id="memory-daily-curation-global-hint" class="form-hint">{{ t('hintDailyCuration') }}</div>
             <div class="param-row" style="margin-top:8px;">
               <label for="memory-curation-global-interval" class="param-label">{{ t('lblCurationIntervalDays') }}</label>
-              <select id="memory-curation-global-interval" class="form-select" v-model="memoryGlobalForm.curation_interval_days"
-                      :disabled="!memoryGlobalFormLoaded">
+              <select id="memory-curation-global-interval" class="form-select" v-model="memoryGlobalForm.curation_interval_days">
                 <option v-for="days in 30" :key="days" :value="days">{{ days }}</option>
               </select>
             </div>
             <div class="param-row">
               <label for="memory-curation-global-hour" class="param-label">{{ t('lblCurationRunHour') }}</label>
-              <select id="memory-curation-global-hour" class="form-select" v-model="memoryGlobalForm.curation_run_at_hour"
-                      :disabled="!memoryGlobalFormLoaded">
+              <select id="memory-curation-global-hour" class="form-select" v-model="memoryGlobalForm.curation_run_at_hour">
                 <option :value="null">{{ t('optCurationDailyClock') }}</option>
                 <option v-for="hour in 24" :key="hour" :value="hour - 1">{{ String(hour - 1).padStart(2, '0') }}</option>
               </select>
             </div>
             <div class="param-row">
               <label for="memory-curation-global-minute" class="param-label">{{ t('lblCurationRunMinute') }}</label>
-              <select id="memory-curation-global-minute" class="form-select" v-model="memoryGlobalForm.curation_run_at_minute"
-                      :disabled="!memoryGlobalFormLoaded">
+              <select id="memory-curation-global-minute" class="form-select" v-model="memoryGlobalForm.curation_run_at_minute">
                 <option :value="null">{{ t('optCurationDailyClock') }}</option>
                 <option v-for="minute in 60" :key="minute" :value="minute - 1">{{ String(minute - 1).padStart(2, '0') }}</option>
               </select>
@@ -5592,12 +5590,20 @@
             <div class="param-row">
               <label for="memory-curation-global-active-limit" class="param-label">{{ t('lblCurationActiveLimit') }}</label>
               <input id="memory-curation-global-active-limit" class="form-input" type="number" min="1" max="1000000" step="1" required
-                     :value="memoryGlobalForm.curation_active_limit" :disabled="!memoryGlobalFormLoaded"
-                     @change="setMemoryCurationActiveLimit(memoryGlobalForm, $event.target)"
+                     :value="memoryGlobalForm.curation_active_limit"
+                     @change="setMemoryCurationNumber(memoryGlobalForm, 'curation_active_limit', $event.target)"
                      aria-describedby="memory-curation-global-active-limit-hint" />
             </div>
             <p id="memory-curation-global-active-limit-hint" class="form-hint">{{ t('hintCurationActiveLimit') }}</p>
-          </div><!-- end Maintenance card -->
+            <div class="param-row">
+              <label for="memory-curation-global-batch-size" class="param-label">{{ t('lblCurationBatchSize') }}</label>
+              <input id="memory-curation-global-batch-size" class="form-input" type="number" min="1" max="100" step="1" required
+                     :value="memoryGlobalForm.curation_batch_size"
+                     @change="setMemoryCurationNumber(memoryGlobalForm, 'curation_batch_size', $event.target)"
+                     aria-describedby="memory-curation-global-batch-size-hint" />
+            </div>
+            <p id="memory-curation-global-batch-size-hint" class="form-hint">{{ t('hintCurationBatchSize') }}</p>
+          </fieldset>
 
           <!-- Global auto-save indicator -->
           <div style="margin-bottom:4px;padding:0 2px;">
@@ -5637,21 +5643,8 @@
 
             <fieldset :disabled="!memoryTabProfileLoaded" style="border:0;margin:0;padding:0;min-width:0;">
             <p v-if="memoryProfileId && !memoryTabProfileLoaded" class="form-hint" role="status">{{ t('memoryProfileNotLoaded') }}</p>
-              <div class="form-field">
-                <label class="form-label" for="memory-extraction-model">{{ t('lblExtractionModel') }}</label>
-                <select id="memory-extraction-model" class="form-select" v-model="memoryTabProfileForm.extraction_llm_preset"
-                        :disabled="!memoryProfileId">
-                  <option :value="null">{{ t('optInheritGlobal') }}</option>
-                  <option value="__none__">{{ t('optNotSet') }}</option>
-                  <option value="">{{ t('optActiveModel') }}</option>
-                  <option v-if="isMissingModelPreset(memoryTabProfileForm.extraction_llm_preset)"
-                          :value="memoryTabProfileForm.extraction_llm_preset" disabled>{{ t('missingModelPreset').replace('{name}', memoryTabProfileForm.extraction_llm_preset) }}</option>
-                  <option v-for="(_, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
-                </select>
-                <p class="form-hint">{{ t('hintExtractionModel') }}</p>
-              </div>
 
-            <!-- Master switches (inherit / on / off) -->
+            <!-- Memory switch (inherit / on / off) -->
             <div class="block-header" style="margin-bottom:8px;">{{ t('memSectProfileMasterSwitch') }}</div>
             <div class="mem-cfg-item">
               <div class="param-row">
@@ -5676,7 +5669,7 @@
             <div class="mem-cfg-item">
               <div class="param-row">
                 <span class="param-label">{{ t('lblProfileDaySummary') }}</span>
-                <select class="form-select" v-model="memoryTabProfileForm.day_summary_enabled" style="min-width:120px;">
+                <select class="form-select" v-model="memoryTabProfileForm.day_summary_enabled" style="min-width:120px;" :disabled="!memoryProfileEffectiveEnabled">
                   <option :value="null">{{ t('optInheritGlobal') }}</option>
                   <option :value="true">{{ t('optOn') }}</option>
                   <option :value="false">{{ t('optOff') }}</option>
@@ -5694,6 +5687,19 @@
             <div class="settings-param-block" style="margin-top:14px;" :class="{ disabled: !memoryProfileEffectiveEnabled }">
               <div class="block-header">{{ t('memSectProfileExtract') }}</div>
               <p v-if="!memoryProfileEffectiveEnabled" class="mem-cfg-hint mem-cfg-block-hint">{{ t('hintProfileLtmDisabled') }}</p>
+              <div class="form-field" style="margin-top:8px;">
+                <label class="form-label" for="memory-extraction-model">{{ t('lblExtractionModel') }}</label>
+                <select id="memory-extraction-model" class="form-select" v-model="memoryTabProfileForm.extraction_llm_preset"
+                        :disabled="!memoryProfileEffectiveEnabled">
+                  <option :value="null">{{ t('optInheritGlobal') }}</option>
+                  <option value="__none__">{{ t('optNotSet') }}</option>
+                  <option value="">{{ t('optActiveModel') }}</option>
+                  <option v-if="isMissingModelPreset(memoryTabProfileForm.extraction_llm_preset)"
+                          :value="memoryTabProfileForm.extraction_llm_preset" disabled>{{ t('missingModelPreset').replace('{name}', memoryTabProfileForm.extraction_llm_preset) }}</option>
+                  <option v-for="(_, name) in llmPresets" :key="name" :value="name">{{ name }}</option>
+                </select>
+                <p class="form-hint">{{ t('hintExtractionModel') }}</p>
+              </div>
               <div class="param-row" style="margin-top:8px;">
                 <span class="param-label">{{ t('lblProfileExtractionFreq') }}</span>
                 <input type="number" class="seg-num-input" min="1" max="50"
@@ -5751,9 +5757,9 @@
               </div>
             </div>
 
-            <!-- Review schedule (profile) -->
-            <div style="margin-top:14px;">
-              <div class="block-header" style="margin-bottom:8px;">{{ t('memSectCurationSchedule') }}</div>
+            <fieldset id="memory-forgetting-profile" aria-labelledby="memory-forgetting-profile-title"
+                      :disabled="!memoryProfileEffectiveEnabled" style="border:0;margin:14px 0 0;padding:0;min-width:0;">
+              <div id="memory-forgetting-profile-title" class="block-header" style="margin-bottom:8px;">{{ t('memSectDailyForgetting') }}</div>
               <div class="mem-cfg-item">
                 <div class="param-row">
                   <label for="memory-daily-curation-profile" class="param-label">{{ t('lblEnableDailyCuration') }}</label>
@@ -5791,13 +5797,23 @@
                 <label for="memory-curation-profile-active-limit" class="param-label">{{ t('lblCurationActiveLimit') }}</label>
                 <input id="memory-curation-profile-active-limit" class="form-input" type="number" min="1" max="1000000" step="1"
                        :value="memoryTabProfileForm.curation_active_limit ?? ''" :placeholder="t('optInheritGlobal')"
-                       @change="setMemoryCurationActiveLimit(memoryTabProfileForm, $event.target)"
+                       @change="setMemoryCurationNumber(memoryTabProfileForm, 'curation_active_limit', $event.target)"
                        aria-describedby="memory-curation-profile-active-limit-hint" />
               </div>
               <p id="memory-curation-profile-active-limit-hint" class="mem-cfg-hint">
                 {{ t('hintCurationActiveLimitInherit') }} {{ t('hintCurationActiveLimit') }}
               </p>
-            </div>
+              <div class="param-row">
+                <label for="memory-curation-profile-batch-size" class="param-label">{{ t('lblCurationBatchSize') }}</label>
+                <input id="memory-curation-profile-batch-size" class="form-input" type="number" min="1" max="100" step="1"
+                       :value="memoryTabProfileForm.curation_batch_size ?? ''" :placeholder="memoryGlobalForm.curation_batch_size"
+                       @change="setMemoryCurationNumber(memoryTabProfileForm, 'curation_batch_size', $event.target)"
+                       aria-describedby="memory-curation-profile-batch-size-hint" />
+              </div>
+              <p id="memory-curation-profile-batch-size-hint" class="mem-cfg-hint">
+                {{ t('hintCurationBatchSizeInherit') }} {{ t('hintCurationBatchSize') }}
+              </p>
+            </fieldset>
 
             <!-- Group Recap -->
             <div style="margin-top:14px;">
@@ -5967,7 +5983,7 @@
 <script src="js/api-paths.js?v=20261107tasksearch"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memorycapacity"></script>
+<script src="js/settings.js?v=20261107memorybatch"></script>
 <script src="js/agent-ui.js?v=20261107workspaceProactive"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107workspaceProactive"></script>

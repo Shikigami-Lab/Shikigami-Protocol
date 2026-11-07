@@ -6,7 +6,7 @@ import os
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Optional
 
-from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT
+from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT, DEFAULT_CURATION_BATCH_SIZE, MAX_CURATION_BATCH_SIZE
 from src.memory.curation import (
     CurationConflict, DailyDialogue, curation_for, curation_preset, request_batch_review, request_daily_extraction,
 )
@@ -96,15 +96,14 @@ async def run_day_summary_for_profile(profile_id: str, date_str: str, app) -> bo
         logger.debug("[daily_memory_job] profile %s 未加载，跳过日摘要", profile_id)
         return False
 
-    store = session.conversation_store
-    has_conv = _has_conversation_on_date(store, date_str)
-
     mgr = _get_manager_for_session(session, app)
-    if not mgr or not mgr._cfg.get("day_summary_enabled"):
+    if not mgr or not mgr._cfg.get("enabled") or not mgr._cfg.get("day_summary_enabled"):
         return False
     if mgr.day_store.has_summary_for(date_str):
         return False
 
+    store = session.conversation_store
+    has_conv = _has_conversation_on_date(store, date_str)
     from src.config.profile_loader import ProfileLoader
     try:
         profile = ProfileLoader().load(profile_id)
@@ -321,11 +320,16 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
             )
 
         def review_is_current():
-            return fixed_review_prompt(app) == review_prompt and current_limit() == active_limit
+            return fixed_review_prompt(app) == review_prompt and review_options() == (active_limit, batch_size)
 
-        def current_limit():
-            value = manager._cfg.get("curation_active_limit")
-            return value if type(value) is int and 1 <= value <= 1_000_000 else DEFAULT_CURATION_ACTIVE_LIMIT
+        def review_options():
+            limit = manager._cfg.get("curation_active_limit")
+            size = manager._cfg.get("curation_batch_size")
+            if type(limit) is not int or not 1 <= limit <= 1_000_000:
+                limit = DEFAULT_CURATION_ACTIVE_LIMIT
+            if type(size) is not int or not 1 <= size <= MAX_CURATION_BATCH_SIZE:
+                size = DEFAULT_CURATION_BATCH_SIZE
+            return limit, size
 
         async def decide(batch):
             if active_manager() is not manager or not review_is_current():
@@ -356,13 +360,14 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
 
             preset = curation_preset(manager, app)
             review_prompt = fixed_review_prompt(app)
-            active_limit = current_limit()
+            active_limit, batch_size = review_options()
             changed = await curation_for(manager).run_daily(
                 today, decide, enabled=lambda: active_manager() is manager,
                 prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue,
                 review_is_current=review_is_current,
                 review_limit=active_limit,
-                review_comparison=lambda fact, facts: find_review_comparison(fact, facts, manager.fact_index),
+                review_batch_size=batch_size,
+                review_comparison=lambda fact, facts: find_review_comparison(fact, facts, manager.vectors),
             )
             if scheduled and active_manager() is manager:
                 revision, cursors, facts, state = manager.facts.curation_snapshot()

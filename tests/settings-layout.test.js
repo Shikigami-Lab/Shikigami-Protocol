@@ -158,7 +158,7 @@ test('review scheduling has separate bounded controls and leaves summaries on th
   runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
   assert.match(window.LOCALES.en.hintDailyCuration, /at most one model request.*schedule/i);
   assert.match(window.LOCALES.zh.hintDailyCuration, /计划日.*最多一次模型请求/);
-  assert.match(window.LOCALES.en.hintDaySummarySchedule, /daily.*daily job time/i);
+  assert.match(window.LOCALES.en.hintDaySummarySchedule, /shared daily clock/i);
 });
 
 test('active fact limits have bounded inputs and localized review guidance', () => {
@@ -169,7 +169,7 @@ test('active fact limits have bounded inputs and localized review guidance', () 
     assert.ok(control.includes('aria-describedby="' + id + '-hint"'));
     assert.match(control, /type="number" min="1" max="1000000" step="1"/);
     assert.ok(control.includes(':value="' + form + '.curation_active_limit'));
-    assert.ok(control.includes('@change="setMemoryCurationActiveLimit(' + form + ', $event.target)"'));
+    assert.ok(control.includes(`@change="setMemoryCurationNumber(${form}, 'curation_active_limit', $event.target)"`));
     assert.equal(control.includes(' required'), scope === 'global');
     assert.equal(control.includes("t('optInheritGlobal')"), scope === 'profile');
   }
@@ -179,12 +179,68 @@ test('active fact limits have bounded inputs and localized review guidance', () 
   assert.match(window.LOCALES.zh.hintCurationActiveLimit, /最旧.*受保护.*档案/);
 });
 
+test('Daily Forgetting groups the toggle, schedule and limits under the memory switch in both scopes', () => {
+  for (const [scope, form, disabled] of [
+    ['global', 'memoryGlobalForm', '!memoryGlobalFormLoaded || !memoryGlobalForm.enabled'],
+    ['profile', 'memoryTabProfileForm', '!memoryProfileEffectiveEnabled'],
+  ]) {
+    const group = html.match(new RegExp('<fieldset id="memory-forgetting-' + scope + '"[\\s\\S]*?</fieldset>'))?.[0] || '';
+    assert.ok(group.includes('t(\'memSectDailyForgetting\')'), scope);
+    assert.ok(group.includes(':disabled="' + disabled + '"'), scope);
+    for (const key of ['daily_curation_enabled', 'curation_interval_days', 'curation_run_at_hour',
+      'curation_run_at_minute', 'curation_active_limit', 'curation_batch_size']) {
+      assert.ok(group.includes(form + '.' + key), scope + ' ' + key);
+    }
+    const id = 'memory-curation-' + scope + '-batch-size';
+    const batch = group.match(new RegExp('<input id="' + id + '"[^>]*>'))?.[0] || '';
+    assert.ok(group.includes('for="' + id + '"'));
+    assert.ok(batch.includes('aria-describedby="' + id + '-hint"'));
+    assert.match(batch, /type="number" min="1" max="100" step="1"/);
+    assert.equal(batch.includes(' required'), scope === 'global');
+    assert.equal(batch.includes(':placeholder="memoryGlobalForm.curation_batch_size"'), scope === 'profile');
+    assert.doesNotMatch(group, /memoryGlobalForm\.daily_run_at_|\.max_history_turns/);
+  }
+  const window = {};
+  runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
+  assert.equal(window.LOCALES.en.memSectDailyForgetting, 'Daily Forgetting');
+  assert.equal(window.LOCALES.zh.memSectDailyForgetting, '每日遗忘');
+  assert.match(window.LOCALES.en.hintCurationBatchSize, /1–100/);
+  assert.match(window.LOCALES.zh.hintCurationBatchSize, /1–100/);
+});
+
+test('memory comes first, with separate summary and vector switches and independent history limits', () => {
+  const global = html.slice(html.indexOf('<div v-show="memorySettingsScope === \'global\'">'),
+    html.indexOf('<!-- Global auto-save indicator -->'));
+  const profile = html.slice(html.indexOf('id="memory-extraction-settings"'), html.indexOf('<!-- Profile auto-save indicator -->'));
+  for (const [section, form, parent] of [
+    [global, 'memoryGlobalForm', 'memoryGlobalForm.enabled'],
+    [profile, 'memoryTabProfileForm', 'memoryProfileEffectiveEnabled'],
+  ]) {
+    const master = section.indexOf('v-model="' + form + '.enabled"');
+    assert.ok(master >= 0);
+    for (const field of ['vector_enabled', 'day_summary_enabled', 'daily_curation_enabled']) {
+      assert.ok(section.indexOf('v-model="' + form + '.' + field + '"') > master);
+    }
+    const control = field => section.match(new RegExp('<[^<>]+v-model(?:\\.number)?="' + form + '\\.' + field + '"[^>]*>'))?.[0] || '';
+    for (const field of ['vector_enabled', 'day_summary_enabled']) {
+      assert.ok(control(field).includes(':disabled="!' + parent + '"'), field);
+    }
+    assert.ok(control('max_history_turns'));
+    assert.ok(!control('max_history_turns').includes(':disabled='));
+  }
+  assert.ok(profile.indexOf('v-model="memoryTabProfileForm.enabled"') < profile.indexOf('id="memory-extraction-model"'));
+  assert.match(global, /v-model\.number="memoryGlobalForm\.semantic_distance"[^>]*:disabled="!memoryGlobalForm\.enabled \|\| !memoryGlobalForm\.vector_enabled"/);
+  assert.match(profile, /v-model="memoryTabProfileForm\.semantic_distance"[^>]*:disabled="!memoryProfileEffectiveVectorEnabled"/);
+  for (const key of ['keep_days', 'max_messages', 'max_conv_chars']) {
+    assert.match(global, new RegExp('v-model\\.number="memoryGlobalForm\\.day_summary_' + key + '"[^>]*:disabled="!memoryGlobalEffectiveDaySummaryEnabled"'));
+  }
+});
+
 test('daily curation controls are independently addressable and Maintenance renders durable and session results', () => {
   assert.doesNotMatch(html, /v-model="memory(?:GlobalForm|TabProfileForm)\.daily_forgetting_enabled"/);
   assert.match(html, /t\('memIndexMaintenanceTitle'\)/);
   const toggle = html.match(/<input id="memory-daily-curation-global"[^>]*>/)?.[0] || '';
   assert.match(toggle, /v-model="memoryGlobalForm.daily_curation_enabled"/);
-  assert.match(toggle, /:disabled="!memoryGlobalFormLoaded"/);
   const select = html.match(/<select id="memory-daily-curation-profile"[\s\S]*?<\/select>/)?.[0];
   assert.match(select || '', /v-model="memoryTabProfileForm.daily_curation_enabled"/);
   for (const value of ['null', 'true', 'false']) assert.ok(select.includes(':value="' + value + '"'));

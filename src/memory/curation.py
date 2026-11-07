@@ -13,6 +13,7 @@ import time
 import uuid
 
 from src.config.memory_prompts import memory_task_prompt
+from src.config.app_config import DEFAULT_CURATION_BATCH_SIZE
 from src.memory.fact_operations import apply_operations, normalize, rank_related
 from src.memory.long_term_store import LongTermFact, LongTermStore, fact_action_revision
 from src.memory.recall import semantic_version
@@ -622,7 +623,8 @@ class MemoryCuration:
     async def run_daily(self, day: str, decide: Decide, *, enabled: Callable[[], bool] = lambda: True,
                         prepare_dialogue=None, decide_combined=None, decide_dialogue=None, model_key="",
                         review_is_current: Callable[[], bool] = lambda: True,
-                        review_limit: int | None = None, review_comparison=None):
+                        review_limit: int | None = None, review_comparison=None,
+                        review_batch_size: int = DEFAULT_CURATION_BATCH_SIZE):
         """Reserve one attempt and commit its validated outputs together."""
         fixed = decide_dialogue is not None
         async with self._in_flight:
@@ -650,7 +652,9 @@ class MemoryCuration:
             if review_limit is not None:
                 from src.memory.batch_curation import select_review_subjects
 
-                rows, active = select_review_subjects(facts, state.get("batch_reviewed", {}), review_limit)
+                rows, active = select_review_subjects(
+                    facts, state.get("batch_reviewed", {}), review_limit, review_batch_size,
+                )
                 previous_job = state.get("daily", {}).get("job")
                 if (dialogue is not None and rows and
                         (previous_job == "dialogue" or (not previous_job and active > review_limit))):

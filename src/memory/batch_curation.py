@@ -8,9 +8,9 @@ import re
 from src.memory.curation import _archive_review_reason, _curation_keep_reason, _item
 from src.memory.curation_plan import _boundary, _can_merge, _dated_fact, _payload
 from src.memory.long_term_store import LongTermFact
+from src.config.app_config import DEFAULT_CURATION_BATCH_SIZE
 
 
-REVIEW_BATCH_SIZE = 30
 _PROTECTED_CATEGORIES = {"habit", "preference", "taboo", "location"}
 _REPORTED_USER_FACT = re.compile(
     r"(?:得知|了解到|确认|获悉|听说|听到|记下|记得)[：:\s]*(?:用户|主人|对方|你)"
@@ -76,8 +76,8 @@ def batch_review_key(fact: LongTermFact) -> str:
     return hashlib.sha256(json.dumps(fields, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def select_review_subjects(facts, reviewed, limit):
-    """Select at most 30 untouched versions, oldest first for this profile."""
+def select_review_subjects(facts, reviewed, limit, batch_size=DEFAULT_CURATION_BATCH_SIZE):
+    """Select the configured number of untouched versions, oldest first."""
     active = sum(fact.is_active() for fact in facts)
     over_limit = active > limit
 
@@ -88,7 +88,7 @@ def select_review_subjects(facts, reviewed, limit):
 
     eligible = sorted((fact for fact in facts if not _curation_keep_reason(fact) and pending(fact)),
                       key=lambda fact: (fact.updated_at, fact.id))
-    return eligible[:REVIEW_BATCH_SIZE], active
+    return eligible[:batch_size], active
 
 
 def merge_representatives(facts):

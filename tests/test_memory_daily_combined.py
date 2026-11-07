@@ -161,6 +161,47 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
                          ["old-1", "old-2", "old-3"])
         self.assertEqual(store.curation_status()["daily"]["excess_after"], 0)
 
+    async def test_character_batch_override_sends_one_hundred_in_one_request(self):
+        self.seed(registered=False, old=False)
+        self.manager._cfg["curation_batch_size"] = 100
+        revision, cursors, _, state = self.manager.facts.curation_snapshot()
+        facts = [LongTermFact("Waved once", id=f"old-{i}", source="auto", is_manual=False,
+                              updated_at=i) for i in range(105)]
+        self.assertTrue(self.manager.facts.apply_curation(revision, facts, cursors, state))
+        self.reply(self.review)
+        await self.run_job()
+        self.assertEqual(len(self.calls), 1)
+        records = json.loads(self.calls[0][-1]["content"])["records"]
+        self.assertEqual([row["subject"]["fact_id"] for row in records], [f"old-{i}" for i in range(100)])
+        self.assertEqual(self.manager.facts.curation_status()["daily"]["requests"], 1)
+
+    async def test_parent_memory_off_skips_daily_summary_and_forgetting(self):
+        self.seed(registered=False)
+        self.manager._cfg.update(enabled=False, day_summary_enabled=True, daily_curation_enabled=True)
+        with patch.object(self.manager, "generate_day_summary", AsyncMock()) as summary:
+            self.assertFalse(await job.run_day_summary_for_profile(PROFILE, DAY, self.app))
+            summary.assert_not_awaited()
+        await self.run_job()
+        self.get_provider.assert_not_called()
+
+    async def test_parent_memory_off_skips_vector_startup_and_respects_role_override(self):
+        from pathlib import Path
+
+        index_dir = Path(self.root) / "chroma_db"
+        index_dir.mkdir()
+        (index_dir / "chroma.sqlite3").touch()
+        global_config = {"enabled":False, "vector_enabled":True}
+        with patch("src.memory.memory_manager.VectorMemoryStore") as vector, \
+             patch.object(MemoryManager, "import_legacy_vectors"):
+            disabled = MemoryManager(PROFILE, self.root, app_memory_cfg=global_config)
+            self.assertIsNone(disabled.fact_index)
+            self.assertTrue(disabled._cfg["vector_enabled"])
+            vector.assert_not_called()
+            enabled = MemoryManager(PROFILE, self.root, app_memory_cfg=global_config,
+                                    profile_memory_cfg={"enabled":True})
+            self.assertIsNotNone(enabled.vectors)
+            vector.assert_called_once()
+
     async def test_prompt_change_during_review_cancels_old_decision(self):
         self.seed(registered=False)
         entered, release = asyncio.Event(), asyncio.Event()

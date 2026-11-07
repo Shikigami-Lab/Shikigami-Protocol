@@ -418,6 +418,33 @@ class SettingsIntegrityTests(unittest.TestCase):
                     self.assertEqual(422, save(path, json={"curation_active_limit": value}).status_code)
         self.assertEqual(422, self.client.post("/settings/memory", json={"curation_active_limit": None}).status_code)
 
+    def test_review_batch_size_is_inheritable_and_preserves_memory_switches(self):
+        path = "/settings/memory"
+        self.assertEqual(self.client.get(path).json().get("curation_batch_size"), 30)
+        fields = {"enabled": False, "vector_enabled": True, "day_summary_enabled": True,
+                  "daily_curation_enabled": True, "extraction_frequency": 13}
+        self.assertEqual(self.client.post(path, json=fields).status_code, 200)
+        self.assertEqual(self.client.post(path, json={"curation_batch_size": 100}).status_code, 200)
+        saved = self.client.get(path).json()
+        self.assertEqual(saved["curation_batch_size"], 100)
+        self.assertEqual({key:saved[key] for key in fields}, fields)
+        self.assertEqual(self.client.post(path, json={"enabled": True}).status_code, 200)
+        saved = self.client.get(path).json()
+        self.assertTrue(saved["vector_enabled"])
+        self.assertTrue(saved["daily_curation_enabled"])
+        self.assertEqual(saved["curation_batch_size"], 100)
+
+        (self.profiles / "example.json").write_text("{}", encoding="utf-8")
+        role_path = "/profiles/example/memory_config"
+        self.assertEqual(self.client.put(role_path, json={"curation_batch_size": 15}).status_code, 200)
+        self.assertEqual(self.client.put(role_path, json={"enabled": False}).status_code, 200)
+        self.assertEqual(self.client.get(role_path).json()["memory_config"]["curation_batch_size"], 15)
+        self.assertEqual(self.client.put(role_path, json={"curation_batch_size": None}).status_code, 200)
+        self.assertNotIn("curation_batch_size", self.client.get(role_path).json()["memory_config"])
+        for value in (0, 101, 30.0, "30", True):
+            for save, url in ((self.client.post, path), (self.client.put, role_path)):
+                self.assertEqual(save(url, json={"curation_batch_size": value}).status_code, 422)
+
     def test_delete_profile_retry_yields_and_stops_if_profile_was_recreated(self):
         card = self.profiles / "example.json"
         card.write_text("{}", encoding="utf-8")

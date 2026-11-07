@@ -13,6 +13,7 @@ const EMOTION_KEYS_FALLBACK = [
 const MEMORY_PROMPT_KEYS = ['extraction_prompt', 'day_summary_prompt', 'review_prompt'];
 
 const DEFAULT_CURATION_ACTIVE_LIMIT = 500;
+const DEFAULT_CURATION_BATCH_SIZE = 30;
 
 function memoryCurationSchedule(form, intervalFallback = null) {
   const integer = (value, min, max, fallback = null) => {
@@ -405,6 +406,7 @@ const SettingsMixin = {
         daily_forgetting_enabled: false,
         daily_curation_enabled: false,
         curation_active_limit: DEFAULT_CURATION_ACTIVE_LIMIT,
+        curation_batch_size: DEFAULT_CURATION_BATCH_SIZE,
         ...memoryCurationSchedule({}, 1),
         daily_decay_factor: 0.998,
         daily_decay_min_weight: 0.1,
@@ -415,6 +417,7 @@ const SettingsMixin = {
         daily_consolidation_batch_max: 15,
       },
       memoryGlobalSavedActiveLimit: DEFAULT_CURATION_ACTIVE_LIMIT,
+      memoryGlobalSavedBatchSize: DEFAULT_CURATION_BATCH_SIZE,
       memoryGlobalSaving: false,
 
       // ── Embedding Tab ──
@@ -723,15 +726,20 @@ const SettingsMixin = {
       return this.memorySummaries.slice(0, this.summariesDisplayLimit);
     },
 
-    // 人格记忆「当前生效」开关（用于总开关关闭时禁用子项）
+    // 记忆「当前生效」开关（用于总开关关闭时禁用子项）
+    memoryGlobalEffectiveDaySummaryEnabled() {
+      return this.memoryGlobalForm.enabled && this.memoryGlobalForm.day_summary_enabled;
+    },
     memoryProfileEffectiveEnabled() {
       return this.memoryTabProfileForm.enabled ?? this.memoryGlobalForm.enabled;
     },
     memoryProfileEffectiveVectorEnabled() {
-      return this.memoryTabProfileForm.vector_enabled ?? this.memoryGlobalForm.vector_enabled;
+      return this.memoryProfileEffectiveEnabled
+        && (this.memoryTabProfileForm.vector_enabled ?? this.memoryGlobalForm.vector_enabled);
     },
     memoryProfileEffectiveDaySummaryEnabled() {
-      return this.memoryTabProfileForm.day_summary_enabled ?? this.memoryGlobalForm.day_summary_enabled;
+      return this.memoryProfileEffectiveEnabled
+        && (this.memoryTabProfileForm.day_summary_enabled ?? this.memoryGlobalForm.day_summary_enabled);
     },
 
     /** 入门页教程：与 /api/setup/status 的 bundles 一致 */
@@ -4173,9 +4181,9 @@ const SettingsMixin = {
 
     /* ─────────────── Memory (P6) ─────────────── */
 
-    setMemoryCurationActiveLimit(form, input) {
+    setMemoryCurationNumber(form, key, input) {
       if (!input.reportValidity()) return;
-      form.curation_active_limit = input.value === '' ? null : input.valueAsNumber;
+      form[key] = input.value === '' ? null : input.valueAsNumber;
     },
 
     async loadMemoryGlobalConfig() {
@@ -4189,6 +4197,7 @@ const SettingsMixin = {
         if (!current()) return;
         this.memoryGlobalFormLoaded = false;
         this.memoryGlobalSavedActiveLimit = data.curation_active_limit ?? DEFAULT_CURATION_ACTIVE_LIMIT;
+        this.memoryGlobalSavedBatchSize = data.curation_batch_size ?? DEFAULT_CURATION_BATCH_SIZE;
         this.memoryGlobalForm = {
           enabled:               data.enabled               ?? false,
           vector_enabled:        data.vector_enabled        ?? false,
@@ -4210,6 +4219,7 @@ const SettingsMixin = {
           daily_forgetting_enabled: data.daily_forgetting_enabled ?? false,
           daily_curation_enabled: data.daily_curation_enabled ?? false,
           curation_active_limit: this.memoryGlobalSavedActiveLimit,
+          curation_batch_size: this.memoryGlobalSavedBatchSize,
           ...memoryCurationSchedule(data, 1),
           daily_decay_factor: data.daily_decay_factor ?? 0.998,
           daily_decay_min_weight: data.daily_decay_min_weight ?? 0.1,
@@ -4231,6 +4241,7 @@ const SettingsMixin = {
         return Number.isFinite(value) ? value : fallback;
       };
       const activeLimit = this.memoryGlobalForm.curation_active_limit;
+      const batchSize = this.memoryGlobalForm.curation_batch_size;
       const cfg = {
         enabled:               this.memoryGlobalForm.enabled,
         vector_enabled:        this.memoryGlobalForm.vector_enabled,
@@ -4262,8 +4273,10 @@ const SettingsMixin = {
       };
       return this.queueSettingsWrite('memory-global', async () => {
         if (activeLimit !== this.memoryGlobalSavedActiveLimit) cfg.curation_active_limit = activeLimit;
+        if (batchSize !== this.memoryGlobalSavedBatchSize) cfg.curation_batch_size = batchSize;
         if (await this.writeMemoryGlobalConfig(JSON.stringify(cfg), silent)) {
           this.memoryGlobalSavedActiveLimit = activeLimit;
+          this.memoryGlobalSavedBatchSize = batchSize;
         }
       }, debounce);
     },
@@ -4473,6 +4486,7 @@ const SettingsMixin = {
           daily_curation_enabled: cfg.daily_curation_enabled ?? null,
           ...memoryCurationSchedule(cfg),
           curation_active_limit: cfg.curation_active_limit ?? null,
+          curation_batch_size: cfg.curation_batch_size ?? null,
         };
         const _pn = (v) => v != null ? v : '';
         this.memoryTabProfileSavedReview = review;
@@ -4516,6 +4530,7 @@ const SettingsMixin = {
         daily_curation_enabled: form.daily_curation_enabled ?? null,
         ...memoryCurationSchedule(form),
         curation_active_limit: form.curation_active_limit ?? null,
+        curation_batch_size: form.curation_batch_size ?? null,
       };
       const savedReview = this.memoryTabProfileSavedReview;
       const cfg = { extraction_llm_preset: form.extraction_llm_preset };

@@ -20,12 +20,15 @@ class SharedMemoryPromptsTests(IsolatedAsyncioTestCase):
     def setUp(self):
         self.root = Path(self.enterContext(TemporaryDirectory()))
         self.config = AppConfig(default_llm="fixture", llm_presets={"fixture": {"model": "fixture"}},
-                                memory={"day_summary_enabled": True}, user_name="Human")
+                                memory={"enabled": True, "day_summary_enabled": True}, user_name="Human")
         self.app = FastAPI()
         self.app.state.config = self.config
         self.app.include_router(settings_ext.router)
         self.config_path = self.root / "app.yaml"
-        self.config_path.write_text("memory:\n  day_summary_enabled: true\n  extraction_frequency: 30\n", encoding="utf-8")
+        self.config_path.write_text(
+            "memory:\n  enabled: true\n  day_summary_enabled: true\n  extraction_frequency: 30\n",
+            encoding="utf-8",
+        )
         self.enterContext(patch.object(settings_ext, "_YAML_PATH", str(self.config_path)))
         self.enterContext(patch("src.utils.debug_logger.log_secondary_llm_call"))
         self.enterContext(patch("src.utils.debug_logger.log_secondary_llm_response"))
