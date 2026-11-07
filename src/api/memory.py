@@ -22,7 +22,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.memory.curation import CurationConflict, curation_for, curation_preset, request_suggestions
-from src.memory.recall import RecallCandidates
+from src.memory.recall import RecallCandidates, experience_links_by_day
+from src.memory.extraction_batches import is_memory_turn, message_hash
 from src.utils.debug_logger import (
     log_app_event,
     log_fact_add,
@@ -128,6 +129,47 @@ async def get_facts(profile_id: str, request: Request):
     ]}
 
 
+@router.get("/{profile_id}/facts/{fact_id}/evidence")
+async def get_fact_evidence(profile_id: str, fact_id: str, request: Request):
+    manager = _require_manager(request, profile_id)
+    if manager._profile_id != profile_id:
+        raise HTTPException(status_code=404, detail="Memory profile not found")
+    fact = manager.facts.get_by_id(fact_id)
+    if fact is None:
+        raise HTTPException(status_code=404, detail="Fact not found")
+
+    session = request.app.state.session_manager.get_by_id(profile_id)
+    groups = getattr(request.app.state, "group_manager", None)
+    allowed_groups = set(groups.get_group_ids_for_profile(profile_id)) if groups else set()
+    stores = {"single": session.conversation_store} if session and session.profile_id == profile_id else {}
+    items = []
+    for ref in fact.evidence:
+        if not isinstance(ref, dict):
+            continue
+        source, id = ref.get("source"), ref.get("id")
+        if not isinstance(source, str) or type(id) is not int:
+            continue
+        item = {key: ref[key] for key in ("source", "id", "timestamp", "role", "start_char", "end_char") if key in ref}
+        item["available"] = False
+        items.append(item)
+        if source.startswith("group:") and source[6:] in allowed_groups and source not in stores:
+            stores[source] = groups.get_conversation_store(source[6:])
+        store = stores.get(source)
+        row = store.get_memory_source_message(id) if store else None
+        if (row is None or not is_memory_turn(row) or row["timestamp"] != ref.get("timestamp")
+                or row["role"] != ref.get("speaker_role", ref.get("role", "user"))):
+            continue
+        content = row["content"]
+        if ref.get("content_hash") and message_hash(content) != ref["content_hash"]:
+            continue
+        start, end = ref.get("start_char", 0), ref.get("end_char", len(content))
+        if type(start) is not int or type(end) is not int or not 0 <= start <= end <= len(content):
+            continue
+        item.update(available=True, role=row["role"], content=content[start:min(end, start + 16000)],
+                    truncated=end - start > 16000)
+    return {"profile_id": profile_id, "fact_id": fact_id, "items": items}
+
+
 @router.post("/{profile_id}/facts", status_code=201)
 async def create_fact(profile_id: str, body: FactCreate, request: Request):
     mgr = _require_manager(request, profile_id)
@@ -191,6 +233,10 @@ async def delete_fact(profile_id: str, fact_id: str, request: Request):
 
 # ── Vectors ───────────────────────────────────────────────────────────────────
 
+class BulkCurationPreview(BaseModel):
+    cursor: Optional[str] = Field(default=None, max_length=128)
+
+
 class CurationApply(BaseModel):
     preview_id: str = Field(min_length=32, max_length=32)
     fact_ids: Optional[List[str]] = Field(default=None, max_length=24)
@@ -221,6 +267,21 @@ async def preview_curation(profile_id: str, request: Request):
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception:
         logger.warning("Memory curation preview failed for profile %s", profile_id)
+        raise HTTPException(status_code=502, detail="The memory model did not return a valid preview")
+
+
+@router.post("/{profile_id}/curation/bulk-preview")
+async def preview_curation_page(profile_id: str, body: BulkCurationPreview, request: Request):
+    manager, curation = _require_curation(request, profile_id)
+    try:
+        async def decide(rows):
+            return await request_suggestions(rows, curation_preset(manager, request.app))
+
+        return await curation.preview_bulk(decide, cursor=body.cursor)
+    except CurationConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception:
+        logger.warning("Bulk memory curation preview failed for profile %s", profile_id)
         raise HTTPException(status_code=502, detail="The memory model did not return a valid preview")
 
 
@@ -323,7 +384,12 @@ async def delete_vector(profile_id: str, memory_id: str, request: Request):
 @router.get("/{profile_id}/summaries")
 async def get_summaries(profile_id: str, request: Request, days: int = 3):
     mgr = _require_manager(request, profile_id)
-    return {"summaries": mgr.day_store.get_recent(n=days)}
+    links = experience_links_by_day(mgr.facts.get_all())
+    return {"summaries": [
+        {**summary, "experience_ids": sorted(links.get(summary.get("date", ""), set())
+                                             | set(summary.get("experience_ids") or ()))}
+        for summary in mgr.day_store.get_recent(n=days)
+    ]}
 
 
 @router.get("/{profile_id}/summaries/preview")

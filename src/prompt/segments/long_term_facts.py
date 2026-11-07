@@ -185,8 +185,13 @@ class LongTermFactsSegment(PromptSegment):
         semantic.sort(key=_emotion_sort_key)
         top_facts = []
         seen = set()
+        unpinned_experience_shown = False
         for fact in pinned + recent + semantic:
-            key = (normalize(fact.content), fact.event_date)
+            if fact.kind == "experience" and not fact.pinned:
+                if unpinned_experience_shown:
+                    continue
+                unpinned_experience_shown = True
+            key = (normalize(fact.content), fact.event_date, fact.occurred_from, fact.occurred_to)
             if key not in seen:
                 seen.add(key)
                 top_facts.append(fact)
@@ -196,8 +201,14 @@ class LongTermFactsSegment(PromptSegment):
 
         # ── 格式化（按分类分组） ─────────────────────────────────────────────
         groups = defaultdict(list)
-        for f in top_facts:
-            groups[f.category].append(f)
+        experiences = []
+        for fact in top_facts:
+            if fact.kind == "experience":
+                experiences.append(fact)
+            else:
+                groups[fact.category].append(fact)
+        if experiences:
+            ctx.extras["recalled_experiences"] = experiences
 
         lines = []
         idx = 1
@@ -226,6 +237,15 @@ class LongTermFactsSegment(PromptSegment):
                 time_str = ('事件日期 ' + f.event_date) if f.event_date else ('记录更新于 ' + source_time(f.updated_at))
                 suffix = f"（{note}，{time_str}）" if note else f"（{time_str}）"
                 lines.append(f"{idx}. {f.content}{suffix}")
+                idx += 1
+
+        if experiences:
+            lines.append("【值得记住的经历】")
+            for fact in experiences:
+                when = fact.occurred_from or fact.occurred_to or "发生时间未确认"
+                if fact.occurred_from and fact.occurred_to and fact.occurred_from != fact.occurred_to:
+                    when = f"{fact.occurred_from} 至 {fact.occurred_to}"
+                lines.append(f"{idx}. {fact.content}（{when}）")
                 idx += 1
 
         has_emotional = any(getattr(f, "emotional_note", "") for f in top_facts)

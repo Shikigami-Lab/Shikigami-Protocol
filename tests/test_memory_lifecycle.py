@@ -234,6 +234,27 @@ class MemoryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.model.call_args.args[0]), 60)
         self.assertEqual(self.model.await_count, 1)
 
+    async def test_removed_group_cannot_commit_in_flight_evidence(self):
+        group = ConversationStore(str(self.root / "revoked-group"), max_turns=0)
+        self.addCleanup(group.close)
+        members = ["revoked"]
+        self.app.state.group_manager = SimpleNamespace(get_group_ids_for_profile=lambda _: members)
+        sources = {"group:revoked": group}
+        await self.manager.auto_extract(sources, {}, self.app)
+        cursor = self.manager.facts.source_cursors()
+        mid = group.append("user", "I prefer lime tea.")
+        group.append("assistant", "Noted.")
+
+        async def decide(*args, **kwargs):
+            members.clear()
+            return [{"op": "add", "kind": "stable", "content": "User prefers lime tea.",
+                     "category": "preference", "evidence": [f"group:revoked:{mid}"]}]
+
+        self.model.side_effect = decide
+        await self.manager.auto_extract(sources, {}, self.app)
+        self.assertEqual(self.manager.facts.source_cursors(), cursor)
+        self.assertFalse(self.manager.facts.get_all())
+
     async def test_group_cadence_uses_complete_turns_with_multiple_assistants(self):
         self.manager._cfg["extraction_frequency"] = 30
         self.model.return_value = []

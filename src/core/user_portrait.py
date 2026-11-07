@@ -639,7 +639,9 @@ def _get_facts_text(storage_root: str, max_facts: int = 30) -> str:
     try:
         from src.memory.long_term_store import LongTermStore
         store = LongTermStore(storage_root)
-        facts = store.get_recallable()
+        facts = [fact for fact in store.get_recallable()
+                 if fact.kind in ("", "stable", "address")
+                 and fact.category != "ai_insight" and fact.source != "reflection"]
         facts = sorted(facts, key=lambda f: getattr(f, "weight", 0), reverse=True)
         facts = [f for f in facts if getattr(f, "weight", 0) > 0.3][:max_facts]
         if not facts:

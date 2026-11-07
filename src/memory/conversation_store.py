@@ -296,12 +296,24 @@ class ConversationStore:
         return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
                 for row in rows]
 
+    def get_memory_source_message(self, message_id: int) -> Optional[Dict]:
+        """Read a cited original even after a non-destructive context reset."""
+        row = self._conn.execute(
+            "SELECT id,role,content,timestamp,sender,generation_status FROM messages WHERE id=?",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(zip(("id", "role", "content", "timestamp", "sender", "generation_status"), row))
+
     def has_memory_evidence(self, message: Dict) -> bool:
         row = self._conn.execute(
-            "SELECT role, content, sender, timestamp FROM messages WHERE id=? AND timestamp >= ?",
+            "SELECT role, content, sender, timestamp, generation_status FROM messages WHERE id=? AND timestamp >= ?",
             (message["id"], self.context_since_ts),
         ).fetchone()
-        return row is not None and tuple(row) == tuple(message[key] for key in ("role", "content", "sender", "timestamp"))
+        expected = (*[message[key] for key in ("role", "content", "sender", "timestamp")],
+                    message.get("generation_status", "completed"))
+        return row is not None and tuple(row) == expected
 
     def get_recent_with_ts(self, n_turns: int = 20) -> List[Dict]:
         """Like get_recent but each dict includes 'timestamp' for merging with group messages."""

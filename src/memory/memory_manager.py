@@ -23,6 +23,8 @@ from src.utils.memory_time import write_time_context
 
 from src.memory.long_term_store import LongTermStore
 from src.memory.day_store import DaySummaryStore
+from src.memory.extraction_batches import is_memory_turn as _is_memory_turn, plan_batch
+from src.memory.merged_history import memory_group_sources_allowed
 from src.memory.vector_store import VectorMemoryStore
 from src.memory.bm25_retriever import BM25Retriever
 from src.utils.debug_logger import (
@@ -33,26 +35,13 @@ from src.utils.debug_logger import (
     log_summary_generate,
 )
 from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates, rank_related
-from src.memory.recall import RecallCandidates, is_cold
+from src.memory.recall import RecallCandidates, experience_links_by_day, is_cold
 from src.utils.paths import get_project_root
 from src.utils.persona_context import persona_prompt_parts
 
 logger = logging.getLogger(__name__)
 
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
-
-
-def _is_memory_turn(message: Any) -> bool:
-    """Keep user speech and completed AI speech for extraction and summaries.
-
-    Both store Message objects and merged dictionaries carry generation_status.
-    Legacy rows without the field remain eligible. An explicit non-completed
-    status is never treated as a finished reply. This does not mutate chat data.
-    """
-    def value(key, default=None):
-        return message.get(key, default) if isinstance(message, dict) else getattr(message, key, default)
-    role = value("role")
-    return role == "user" or (role == "assistant" and value("generation_status", "completed") == "completed")
 
 
 def _vector_document_for_fact(fact: Any) -> str:
@@ -71,8 +60,9 @@ def _vector_metadata_for_fact(fact: Any, extra: Optional[Dict[str, Any]] = None)
         "category": fact.category,
         "created_at": fact.updated_at,
         "emotional_note": (fact.emotional_note or "")[:64],
-        "tags": list(fact.tags) if getattr(fact, "tags", None) else [],
     }
+    if getattr(fact, "tags", None):
+        meta["tags"] = list(fact.tags)
     if extra:
         meta.update(extra)
     return meta
@@ -215,11 +205,12 @@ class MemoryManager:
         if query and max_count > 0:
             pool = RecallCandidates(self.facts)
             all_facts = pool.active.values()
-            related_cold = rank_related(list(pool.cold.values()), query, 1)
+            relevant = [fact for fact in all_facts if fact.kind == "experience"]
+            related_cold = rank_related([*relevant, *pool.cold.values()], query, 1)
         else:
             all_facts = self.facts.get_recallable()
             related_cold = []
-        filtered = [f for f in all_facts if f.weight >= min_weight]
+        filtered = [f for f in all_facts if f.kind != "experience" and f.weight >= min_weight]
         # 有情感注记的排前面
         filtered.sort(
             key=lambda f: (
@@ -327,34 +318,32 @@ class MemoryManager:
             if not unseen and not due:
                 return
 
-            revision, cursors, facts = self.facts.extraction_snapshot()
+            revision, cursors, facts, offsets = self.facts.extraction_progress_snapshot()
             if trigger not in cursors:
                 tail = sources[trigger].memory_tail_id()
                 cursors[trigger] = min(tail, first_message[1] - 1) if first_message else tail
 
-            rows = []
-            next_cursors = dict(cursors)
+            streams = {}
             if due:
                 for source, store in sources.items():
-                    # Another store may already contain a user message whose first reply
-                    # is still streaming. Initialize that store on its own callback.
+                    # Initialize each source on its own callback, after the first reply.
                     if source not in cursors:
                         continue
                     if source == trigger:
                         fresh = store.memory_turn_batch_after(cursors[source], max(20, frequency * 2))
                     else:
                         fresh = store.memory_messages_after(cursors[source], 2)
-                    if fresh:
-                        next_cursors[source] = fresh[-1]["id"]
-                    rows.extend(dict(row, source=source) for row in fresh if _is_memory_turn(row))
-                rows.sort(key=lambda row: (row["timestamp"], row["source"], row["id"]))
+                    streams[source] = [dict(row, source=source) for row in fresh]
 
+            rows, originals, next_cursors, next_offsets = plan_batch(streams, cursors, offsets)
             if not any(row["role"] == "user" for row in rows):
-                if unseen or next_cursors != cursors:
-                    self.facts.apply_extraction(revision, facts, next_cursors)
+                if unseen or next_cursors != cursors or next_offsets != offsets:
+                    self.facts.apply_extraction_progress(revision, facts, next_cursors, next_offsets)
                 return
 
-            references = {f'{row["source"]}:{row["id"]}': row for row in rows}
+            if not memory_group_sources_allowed(app, self._profile_id, originals):
+                return
+            references = {row["reference"]: row for row in rows}
             candidates = choose_candidates(facts, rows)
             try:
                 operations = await self._extract_facts_llm(rows, profile, app, candidates=candidates)
@@ -362,7 +351,9 @@ class MemoryManager:
                 logger.warning("[MemoryManager] Extraction failed; pending messages kept (profile=%s)", self._profile_id)
                 return
 
-            if not all(sources[row["source"]].has_memory_evidence(row) for row in rows):
+            if not memory_group_sources_allowed(app, self._profile_id, originals):
+                return
+            if not all(sources[row["source"]].has_memory_evidence(row) for row in originals):
                 return
             try:
                 changed = apply_operations(facts, operations, references, candidates,
@@ -370,7 +361,7 @@ class MemoryManager:
             except ValueError:
                 logger.warning("[MemoryManager] Invalid extraction evidence; pending messages kept")
                 return
-            if not self.facts.apply_extraction(revision, facts, next_cursors):
+            if not self.facts.apply_extraction_progress(revision, facts, next_cursors, next_offsets):
                 return
             if self.vectors and self.vectors.is_available():
                 for fact_id in changed:
@@ -565,7 +556,8 @@ class MemoryManager:
                 keep_days = int(self._cfg.get("day_summary_keep_days", 14))
                 self.day_store.add_summary(date_str, summary,
                                            message_count=len(day_msgs),
-                                           keep_days=keep_days)
+                                           keep_days=keep_days,
+                                           experience_ids=sorted(experience_links_by_day(self.facts.get_all()).get(date_str, ())))
                 logger.info("[MemoryManager] 日摘要已生成 date=%s len=%d profile=%s",
                             date_str, len(summary), self._profile_id)
                 log_summary_generate(self._profile_id, date_str, len(day_msgs), summary)
@@ -783,22 +775,27 @@ class MemoryManager:
 
     # ── 私有方法 ──────────────────────────────────────────────────────────────
 
-    async def _extract_facts_llm(self, recent_turns: List[Dict], profile: Dict, app,
-                                 *, candidates=()) -> List[Dict]:
+    def _extraction_messages(self, recent_turns: List[Dict], profile: Dict, app, candidates=()) -> List[Dict]:
         source_turns = [message for message in recent_turns if _is_memory_turn(message)]
         if not source_turns:
             return []
         persona_name = profile.get("display_name") or profile.get("name", "AI")
+        def reference(row):
+            return row.get("reference") or f"{row.get('source', 'single')}:{row.get('id', '?')}"
+
         conv_text = "\n".join(
-            f'[{row.get("source", "single")}:{row.get("id", "?")}] '
+            f'[{reference(row)}] '
             f'{("用户" if row["role"] == "user" else row.get("sender") or persona_name)}: '
-            f'{row["content"][:1500]}'
+            f'{row["content"]}'
             for row in source_turns
         )
 
         threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
         previous = [{"fact_id": f.id, "kind": f.kind or "stable", "category": f.category,
-                     "content": f.content, "event_date": f.event_date, "protected": f.is_manual or f.pinned}
+                     "content": f.content, "event_date": f.event_date,
+                     "occurred_from": f.occurred_from, "occurred_to": f.occurred_to,
+                     "record_version": f.record_version,
+                     "archived": f.archived, "protected": f.is_manual or f.pinned or f.curation_protected}
                     for f in candidates]
         from src.config.prompt_loader import get_locale
         locale = get_locale()
@@ -813,13 +810,20 @@ class MemoryManager:
         protocol = FORMAT + f"\nWeight must be greater than {threshold}."
         system = self._memory_system_prompt("extraction_prompt", profile, app, protocol)
 
+        return [{"role": "system", "content": system}, {"role": "user", "content": context}]
+
+    async def _extract_facts_llm(self, recent_turns: List[Dict], profile: Dict, app,
+                                 *, candidates=()) -> List[Dict]:
+        messages = self._extraction_messages(recent_turns, profile, app, candidates)
+        if not messages:
+            return []
+
         from src.llm.registry import get_provider
         from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response
         name = self._cfg.get("extraction_llm_preset", "")
         if name == "__none__":
             return []
         preset = app.state.config.get_llm_preset(name) if name else app.state.config.get_active_llm_preset()
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": context}]
         model = preset.get("model", "unknown")
         log_secondary_llm_call(role="memory_extract", messages=messages, model=model,
                                gen_kwargs={}, session_id=self._profile_id)

@@ -7,11 +7,11 @@ memory:
 
   extraction_task:
     zh: |
-      提取对方明确表达且以后仍有用的偏好、习惯、边界、关系和有后续用途的安排。事实正文简洁，保留称呼和口吻，但不要添加角色猜测。
+      提取对方明确表达且以后仍有用的偏好、习惯、边界、关系和安排。若对方讲起值得以后想起的真实往事，单独保存为经历，写清是对方讲述的往事还是双方共有的经历。事实正文简洁，保留称呼和口吻，但不要添加角色猜测。
       寒暄、一次性任务、临时心情和未证实的推测留在原始对话。区分假设、打算与已经发生的事，任务是否完成应以可核对的结果为准。
       重复提及已有内容时优先确认旧条目，只有对方明确更正时才更新。没有值得写入的内容就返回空结果。
     en: |
-      Extract durable preferences, habits, boundaries, and relationships explicitly stated by the other person, plus plans with a clear future use. Keep entries concise. Use the persona's voice without adding speculation.
+      Extract durable preferences, habits, boundaries, and relationships explicitly stated by the other person, plus plans with a clear future use. Keep meaningful past episodes as experiences and distinguish personal stories they tell from events shared with the character. Keep facts concise and use the persona's voice without adding speculation.
       Leave small talk, one-off tasks, passing moods, and unverified interpretations in the original conversation. Distinguish hypotheticals, plans, and confirmed events. Treat task completion as established only when supported by a verifiable result.
       Confirm an existing record when its content is repeated. Update it after an explicit correction. Return an empty result when nothing belongs in memory.
 

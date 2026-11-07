@@ -36,6 +36,7 @@ test('current-character Memory opens content for the chat character after anothe
     currentSessionId: 'chat-role', selectedProfileId: 'settings-role', memoryProfileId: 'previous-role',
     activeTab: 'memory', memoryActiveSubTab: 'maintenance',
     selectMemoryProfile: settings.methods.selectMemoryProfile,
+    replaceMemoryFacts: settings.methods.replaceMemoryFacts,
     clearMemoryCurationPreview: settings.methods.clearMemoryCurationPreview,
     openSettings() {
       assert.equal(this.activeTab, 'memory-content');

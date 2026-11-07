@@ -81,6 +81,15 @@ def _merge_enabled_and_caps(profile: Dict[str, Any]) -> tuple:
     return True, max_utterances, max_groups, merged_cap
 
 
+def memory_group_sources_allowed(app, profile_id, rows):
+    """Recheck group membership when dialogue is about to be sent or committed."""
+    cited = {row["source"][6:] for row in rows if row["source"].startswith("group:")}
+    manager = getattr(app.state, "group_manager", None)
+    if not cited or manager is None:
+        return True
+    return cited.issubset(manager.get_group_ids_for_profile(profile_id))
+
+
 def memory_extraction_sources(session, app, profile, group_id=None, group_store=None):
     """Separate physical source IDs for durable extraction cursors."""
     merge, _, max_groups, _ = _merge_enabled_and_caps(profile)

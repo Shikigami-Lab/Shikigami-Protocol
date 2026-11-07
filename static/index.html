@@ -11,12 +11,12 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20261105lucide1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261107curation1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261107memoryoverhaul2" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memoryprompts2"></script>
+  <script src="js/i18n.js?v=20261107memoryoverhaul3"></script>
 </head>
 <body>
 
@@ -4812,7 +4812,7 @@
         <!-- 记忆内容：人格选择、状态、操作、事实库/向量/摘要/历史 -->
         <div class="param-row" style="margin-bottom:10px;">
           <span class="param-label">{{ t('lblMemoryProfile') }}</span>
-          <select class="form-select" v-model="memoryProfileId"
+          <select id="memory-content-profile" class="form-select" v-model="memoryProfileId" :aria-label="t('lblMemoryProfile')"
                   @change="onMemoryContentProfileChange(memoryProfileId)"
                   style="font-size:13px;padding:6px 8px;">
             <option v-for="p in profiles" :key="p.profile_id" :value="p.profile_id">
@@ -4833,7 +4833,7 @@
           <span v-if="memoryStatus.vector_ok" class="mem-stat-provider">{{ memoryStatus.vector_provider }}</span>
         </div>
         <div class="mem-subtab-bar">
-          <button type="button" :aria-pressed="memoryActiveSubTab==='facts'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='facts'}]" @click="memoryActiveSubTab='facts'">{{ t('memTabFacts') }}</button>
+          <button id="memory-facts-tab" type="button" :aria-pressed="memoryActiveSubTab==='facts'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='facts'}]" @click="memoryActiveSubTab='facts'">{{ t('memTabFacts') }}</button>
           <button type="button" :aria-pressed="memoryActiveSubTab==='vectors'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='vectors'}]" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="memoryActiveSubTab='vectors'">{{ t('memTabVectors') }}</button>
           <button type="button" :aria-pressed="memoryActiveSubTab==='summaries'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='summaries'}]" @click="memoryActiveSubTab='summaries'; loadDiaryPreview(memoryProfileId)">{{ t('memTabSummaries') }}</button>
           <button type="button" :aria-pressed="memoryActiveSubTab==='history'" :class="['mem-subtab-btn', {active: memoryActiveSubTab==='history'}]" @click="memoryActiveSubTab='history'; loadChatHistory(memoryProfileId)">{{ t('memTabHistory') }}</button>
@@ -4857,9 +4857,10 @@
               <button class="s-btn s-btn-primary" style="font-size:12px;padding:4px 10px;" @click="addMemoryFact()">{{ t('btnAddFact') }}</button>
             </div>
             <div class="mem-sort-bar">
-              <select class="form-select mem-fact-status-filter" v-model="factFilterStatus"
+              <select id="memory-fact-filter" class="form-select mem-fact-status-filter" v-model="factFilterStatus"
                       :aria-label="t('lblFactStatusFilter')" @change="factsDisplayLimit = 30">
                 <option value="active">{{ t('memFactFilterActive') }}</option>
+                <option value="experiences">{{ t('memFactFilterExperiences') }}</option>
                 <option value="archived">{{ t('memFactFilterArchived') }}</option>
                 <option value="review">{{ t('memFactFilterReview') }}</option>
               </select>
@@ -4875,9 +4876,9 @@
             </div>
             <div class="mem-list">
               <div v-if="sortedMemoryFacts.length === 0" class="mem-empty">
-                {{ t(memoryFacts.length ? 'memEmptyFactFilter' : 'memEmptyFacts') }}
+                {{ t(factFilterStatus === 'experiences' ? 'memEmptyExperiences' : (memoryFacts.length ? 'memEmptyFactFilter' : 'memEmptyFacts')) }}
               </div>
-              <div v-for="fact in displayedMemoryFacts" :key="fact.id" class="mem-fact-row">
+              <div v-for="fact in displayedMemoryFacts" :key="fact.id" :data-fact-id="fact.id" class="mem-fact-row">
                 <template v-if="memoryEditingFact && memoryEditingFact.id === fact.id">
                   <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
                     <input class="form-input" style="font-size:13px;" v-model="memoryEditingFact.content" />
@@ -4899,6 +4900,7 @@
                 </template>
                 <template v-else>
                   <span class="mem-cat-badge">{{ fact.category || 'other' }}</span>
+                  <span v-if="fact.kind" class="mem-cat-badge mem-fact-kind" :title="t('memFactKind')">{{ memoryFactKindLabel(fact.kind) }}</span>
                   <span :class="['mem-fact-content', fact.pinned ? 'pinned' : '']">{{ fact.content }}</span>
                   <span v-if="fact.event_date" class="mem-cat-badge">{{ t('memFactEventDate') }} {{ fact.event_date }}</span>
                   <span v-if="fact.archived" class="mem-cat-badge">{{ t('memFactArchived') }}</span>
@@ -4916,7 +4918,10 @@
                           @click="restoreMemoryFact(fact)">
                     {{ t(memoryRestoringFactId === fact.id ? 'btnMemoryFactRestoring' : 'btnMemoryFactRestore') }}
                   </button>
-                  <div v-if="fact.archived || fact.review_note" class="mem-fact-curation-details">
+                  <div v-if="fact.archived || fact.review_note || fact.occurred_from || fact.occurred_to || fact.retention_reason" class="mem-fact-curation-details">
+                    <div v-if="fact.occurred_from" class="mem-fact-occurred-from">{{ t('memFactOccurredFrom') }} · {{ fact.occurred_from }}</div>
+                    <div v-if="fact.occurred_to" class="mem-fact-occurred-to">{{ t('memFactOccurredTo') }} · {{ fact.occurred_to }}</div>
+                    <div v-if="fact.retention_reason" class="mem-fact-retention-reason">{{ t('memFactRetentionReason') }} · {{ fact.retention_reason }}</div>
                     <div v-if="fact.archived">
                       {{ memoryArchiveReasonLabel(fact.archive_reason) }} · {{ memoryArchiveRecallLabel(fact) }}
                     </div>
@@ -4926,9 +4931,43 @@
                     </div>
                     <div v-if="fact.review_note">{{ t('memFactFilterReview') }} · {{ fact.review_note }}</div>
                   </div>
+                  <details :key="memoryFactsRevision" class="mem-fact-evidence"
+                           @toggle="$event.target.open && loadMemoryFactEvidence(fact)">
+                    <summary>{{ t('memFactEvidence') }}</summary>
+                    <p v-if="memoryFactEvidence.get(fact.id)?.status === 'loading'" class="mem-fact-detail-status" role="status">{{ t('loading') }}</p>
+                    <p v-else-if="memoryFactEvidence.get(fact.id)?.status === 'error'" class="mem-fact-detail-status" role="status">{{ t('memFactEvidenceError') }}</p>
+                    <ul v-else-if="memoryFactEvidence.get(fact.id)?.items?.length" class="mem-fact-evidence-list">
+                      <li v-for="(item, index) in memoryFactEvidence.get(fact.id).items" :key="index" class="mem-fact-evidence-row">
+                        <div class="mem-fact-evidence-meta">
+                          <span>{{ item.source }} #{{ item.id }}</span>
+                          <span v-if="item.role">{{ item.role }}</span>
+                          <span v-if="item.timestamp != null">{{ memoryFactTimestamp(item.timestamp) }}</span>
+                          <span v-if="item.start_char != null && item.end_char != null">{{ t('memFactEvidenceRange') }} [{{ item.start_char }}, {{ item.end_char }})</span>
+                        </div>
+                        <template v-if="item.available">
+                          <blockquote class="mem-fact-original">{{ item.content }}</blockquote>
+                          <p v-if="item.truncated" class="mem-fact-detail-status">{{ t('memFactEvidenceTruncated') }}</p>
+                        </template>
+                        <p v-else class="mem-fact-detail-status mem-fact-evidence-unavailable">{{ t('memFactEvidenceUnavailable') }}</p>
+                      </li>
+                    </ul>
+                    <p v-else-if="memoryFactEvidence.get(fact.id)?.status === 'ready'" class="mem-fact-detail-status" role="status">{{ t('memFactEvidenceEmpty') }}</p>
+                  </details>
                   <details v-if="fact.versions?.length" class="mem-fact-versions">
                     <summary>{{ t('memFactEarlierVersions') }} · {{ fact.versions.length }}</summary>
-                    <div v-for="(version, index) in fact.versions" :key="index">{{ version.content }}</div>
+                    <div v-for="(version, index) in memoryFactVersionComparisons(fact)" :key="index" class="mem-fact-version">
+                      <div v-if="version.updated_at != null">{{ memoryFactTimestamp(version.updated_at) }}</div>
+                      <div class="mem-fact-version-comparison">
+                        <div>
+                          <span>{{ t('memFactVersionBefore') }}</span>
+                          <p class="mem-fact-original">{{ version.prefix }}<mark v-if="version.before">{{ version.before }}</mark>{{ version.suffix }}</p>
+                        </div>
+                        <div>
+                          <span>{{ t('memFactVersionAfter') }}</span>
+                          <p class="mem-fact-original">{{ version.prefix }}<mark v-if="version.after">{{ version.after }}</mark>{{ version.suffix }}</p>
+                        </div>
+                      </div>
+                    </div>
                   </details>
                 </template>
               </div>
@@ -5025,6 +5064,52 @@
                   {{ t(memoryCurationPreview.items.length ? 'memCurationSelectChanges' : 'memCurationNoChanges') }}
                 </p>
               </div>
+
+              <details id="memory-bulk-curation" class="mem-curation-preview">
+                <summary class="mem-diary-preview-title">{{ t('memBulkCurationTitle') }}</summary>
+                <p id="memory-bulk-curation-hint" class="mem-cfg-hint">{{ t('hintMemoryBulkCuration') }}</p>
+                <template v-if="memoryBulkCurationPage">
+                  <p id="memory-bulk-curation-coverage" class="mem-cfg-hint" role="status">
+                    {{ t('memBulkCurationCoverage').replace('{covered}', memoryBulkCurationPage.coverage.covered)
+                        .replace('{total}', memoryBulkCurationPage.coverage.total) }}
+                    <template v-if="memoryBulkCurationPage.coverage.covered > memoryBulkCurationPage.coverage.offset">
+                      · {{ t('memBulkCurationRange').replace('{first}', memoryBulkCurationPage.coverage.offset + 1)
+                            .replace('{last}', memoryBulkCurationPage.coverage.covered) }}
+                    </template>
+                  </p>
+                  <div v-if="memoryBulkCurationPage.items.length" class="mem-list">
+                    <div v-for="item in memoryBulkCurationPage.items" :key="item.fact_id" class="mem-curation-item">
+                      <div class="mem-curation-meta">
+                        <span class="mem-cat-badge">{{ t('memCurationAction_' + item.action) }}</span>
+                        <span>{{ item.fact_id }}</span>
+                      </div>
+                      <div class="mem-curation-original">{{ item.content }}</div>
+                      <div v-if="item.archive_reason" class="mem-curation-meta">{{ memoryArchiveReasonLabel(item.archive_reason) }}</div>
+                      <div v-if="item.reason" class="mem-curation-meta">{{ item.reason }}</div>
+                      <div v-if="item.target_id || item.target_content" class="mem-curation-meta">
+                        {{ t('memCurationMergeTarget') }} · {{ item.target_content || item.target_id }}
+                        <span v-if="item.target_content && item.target_id">({{ item.target_id }})</span>
+                      </div>
+                    </div>
+                  </div>
+                  <p v-else class="mem-cfg-hint">{{ t('memBulkCurationEmpty') }}</p>
+                  <p v-if="memoryBulkCurationPage.next_cursor === null" class="mem-cfg-hint">{{ t('memBulkCurationDone') }}</p>
+                </template>
+                <p v-if="memoryBulkCurationError" class="mem-cfg-hint" role="status">{{ t('memBulkCurationError') }}</p>
+                <div v-if="!memoryBulkCurationPage || memoryBulkCurationPage.next_cursor !== null" class="memory-maintenance-actions">
+                  <button id="memory-bulk-curation-page" type="button" class="s-btn s-btn-secondary"
+                          aria-describedby="memory-bulk-curation-hint" :disabled="memoryBulkCurationPending || !memoryProfileId"
+                          @click="loadMemoryBulkCurationPage(memoryProfileId)">
+                    {{ t(memoryBulkCurationPending ? 'btnMemoryCurationGenerating'
+                         : memoryBulkCurationPage ? 'btnMemoryBulkCurationNext' : 'btnMemoryBulkCurationFirst') }}
+                  </button>
+                  <button v-if="memoryBulkCurationError && memoryBulkCurationPage" type="button" class="s-btn s-btn-secondary"
+                          aria-describedby="memory-bulk-curation-hint" :disabled="memoryBulkCurationPending"
+                          @click="loadMemoryBulkCurationPage(memoryProfileId, true)">
+                    {{ t('btnMemoryBulkCurationRestart') }}
+                  </button>
+                </div>
+              </details>
 
               <template v-if="memoryStatus?.curation">
                 <div id="memory-curation-latest" class="mem-curation-preview">
@@ -5742,10 +5827,10 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261107memoryprompts1"></script>
+<script src="js/api-paths.js?v=20261107memoryoverhaul2"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memoryprompts2"></script>
+<script src="js/settings.js?v=20261107memoryoverhaul2"></script>
 <script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107memoryprompts2"></script>

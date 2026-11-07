@@ -107,6 +107,26 @@ test('manual memory curation exposes its preview and apply separately from local
   ]) assert.ok(memory.includes(binding), binding);
 });
 
+test('old-store preview labels the per-page cost and exposes read-only controls in Maintenance', () => {
+  const window = {};
+  for (const filename of ['api-paths.js', 'i18n.js']) {
+    runInNewContext(readFileSync(join(__dirname, '../static/js', filename), 'utf8'), { window });
+  }
+  assert.equal(window.API_PATHS.memoryCurationBulkPreview('a/b'), '/memory/a%2Fb/curation/bulk-preview');
+  const bulk = html.match(/<details id="memory-bulk-curation"[\s\S]*?<\/details>/)?.[0] || '';
+  assert.match(bulk, /id="memory-bulk-curation-hint"/);
+  assert.match(bulk, /aria-describedby="memory-bulk-curation-hint"/);
+  assert.match(bulk, /@click="loadMemoryBulkCurationPage\(memoryProfileId\)"/);
+  assert.match(bulk, /memoryBulkCurationPage.next_cursor !== null/);
+  assert.match(bulk, /memoryBulkCurationPage.items/);
+  assert.match(bulk, /id="memory-bulk-curation-coverage"/);
+  assert.doesNotMatch(bulk, /applyMemoryCuration|type="checkbox"|@toggle/);
+  assert.match(window.LOCALES.en.memBulkCurationTitle, /read-only/i);
+  assert.match(window.LOCALES.en.hintMemoryBulkCuration, /each page.*one model request.*charges/i);
+  assert.match(window.LOCALES.zh.memBulkCurationTitle, /只读/);
+  assert.match(window.LOCALES.zh.hintMemoryBulkCuration, /每页.*一次模型请求.*费用/);
+});
+
 test('daily curation controls are independently addressable and Maintenance renders durable and session results', () => {
   const toggle = html.match(/<input id="memory-daily-curation-global"[^>]*>/)?.[0] || '';
   assert.match(toggle, /v-model="memoryGlobalForm.daily_curation_enabled"/);
@@ -128,7 +148,32 @@ test('daily curation controls are independently addressable and Maintenance rend
   runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
   for (const locale of ['en', 'zh']) {
     const keys = ['hintDailyCuration', 'memCurationOrigin_manual', 'memCurationOrigin_daily', 'memCurationIndexPending',
-      ...['running', 'completed', 'failed', 'cancelled'].map(status => 'memDailyCurationStatus_' + status)];
+      ...['running', 'completed', 'failed', 'cancelled', 'stale'].map(status => 'memDailyCurationStatus_' + status)];
     for (const key of keys) assert.ok(window.LOCALES[locale][key], locale + ' ' + key);
+  }
+});
+
+test('the Facts view exposes experiences, original evidence and text changes using localized controls', () => {
+  const memory = html.slice(html.indexOf('class="memory-panel-content"'), html.indexOf('class="memory-panel-settings"'));
+  const window = {};
+  for (const filename of ['api-paths.js', 'i18n.js']) {
+    runInNewContext(readFileSync(join(__dirname, '../static/js', filename), 'utf8'), { window });
+  }
+  assert.equal(window.API_PATHS.memoryFactEvidence('a/b', 'f/1'), '/memory/a%2Fb/facts/f%2F1/evidence');
+  assert.match(memory, /<option value="experiences">/);
+  assert.match(memory, /:data-fact-id="fact.id"/);
+  assert.match(memory, /@toggle="\$event.target.open && loadMemoryFactEvidence\(fact\)"/);
+  for (const binding of [
+    'fact.kind', 'fact.occurred_from', 'fact.occurred_to', 'fact.retention_reason',
+    'item.available', 'item.content', 'item.source', 'item.role', 'item.timestamp', 'item.id',
+    'item.start_char', 'item.end_char', 'item.truncated', 'memoryFactVersionComparisons(fact)',
+  ]) assert.ok(memory.includes(binding), binding);
+  assert.doesNotMatch(memory, /v-html="item.content"/);
+  for (const locale of ['en', 'zh']) {
+    for (const key of ['memFactFilterExperiences', 'memFactKind_experience', 'memFactOccurredFrom',
+      'memFactOccurredTo', 'memFactRetentionReason', 'memFactEvidence', 'memFactEvidenceUnavailable', 'memFactEvidenceTruncated',
+      'memFactVersionBefore', 'memFactVersionAfter']) {
+      assert.ok(window.LOCALES[locale][key], locale + ' ' + key);
+    }
   }
 });

@@ -1694,6 +1694,7 @@ textarea.form-input {
   overflow-wrap: anywhere;
 }
 .mem-curation-preview { margin-top: 12px; }
+#memory-bulk-curation > summary { cursor: pointer; }
 .mem-curation-counts {
   display: flex;
   flex-wrap: wrap;
@@ -2430,13 +2431,48 @@ textarea.form-input {
   min-width: 60px;
   word-break: break-word;
 }
-.mem-fact-versions {
+.mem-fact-versions,
+.mem-fact-evidence {
   flex: 1 1 100%;
+  min-width: 0;
   color: var(--text-secondary);
   font-size: var(--fs-xs);
 }
-.mem-fact-versions summary { cursor: pointer; }
-.mem-fact-versions div { padding: 4px 0 0 12px; overflow-wrap: anywhere; }
+.mem-fact-versions summary,
+.mem-fact-evidence summary { cursor: pointer; }
+.mem-fact-evidence-list { list-style: none; margin: 0; padding: 0; }
+.mem-fact-evidence-row,
+.mem-fact-version {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+.mem-fact-evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  overflow-wrap: anywhere;
+}
+.mem-fact-original {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mem-fact-detail-status { margin: 4px 0 0; }
+.mem-fact-version-comparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+.mem-fact-original mark {
+  color: var(--text-primary);
+  background: var(--accent-dim);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
 .mem-fact-content.pinned {
   color: var(--accent);
   font-weight: 500;

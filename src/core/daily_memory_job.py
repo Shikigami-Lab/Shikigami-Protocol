@@ -6,7 +6,12 @@ import os
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
-from src.memory.curation import curation_for, curation_preset, request_suggestions
+from src.memory.curation import (
+    DailyDialogue, curation_for, curation_preset, request_combined_suggestions, request_suggestions,
+)
+from src.memory.extraction_batches import plan_batch
+from src.memory.fact_operations import choose_candidates
+from src.memory.merged_history import memory_extraction_sources, memory_group_sources_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +244,8 @@ async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool 
 async def _run_daily_curation(session, today: str, app) -> None:
     def active_manager():
         manager = _get_manager_for_session(session, app)
-        if manager and manager._cfg.get("enabled") and manager._cfg.get("daily_curation_enabled"):
+        if (manager and manager._cfg.get("enabled") and manager._cfg.get("daily_curation_enabled")
+                and manager._cfg.get("extraction_llm_preset") != "__none__"):
             return manager
         return None
 
@@ -247,11 +253,60 @@ async def _run_daily_curation(session, today: str, app) -> None:
     if manager is None:
         return
     try:
-        preset = curation_preset(manager, app)
+        profile = {}
+
+        def prepare_dialogue(facts, cursors, offsets):
+            nonlocal profile
+            if not cursors:
+                return None
+            from src.config.profile_loader import ProfileLoader
+
+            profile = ProfileLoader().load(session.profile_id)
+            sources = memory_extraction_sources(session, app, profile)
+            streams = {
+                source: [dict(row, source=source)
+                         for row in store.memory_turn_batch_after(cursors[source], max_user_turns=20)]
+                for source, store in sources.items() if source in cursors
+            }
+            rows, originals, next_cursors, next_offsets = plan_batch(streams, cursors, offsets)
+            if not rows and next_cursors == cursors and next_offsets == offsets:
+                return None
+
+            group_rows = [row for row in originals if row["source"].startswith("group:")]
+
+            def dialogue_is_current():
+                if group_rows and (
+                    getattr(app.state, "group_manager", None) is None
+                    or not memory_group_sources_allowed(app, session.profile_id, group_rows)
+                ):
+                    return False
+                return all(sources[row["source"]].has_memory_evidence(row) for row in originals)
+
+            return DailyDialogue(
+                rows=rows, candidates=choose_candidates(facts, rows),
+                next_cursors=next_cursors, next_offsets=next_offsets, is_current=dialogue_is_current,
+                threshold=float(manager._cfg.get("extraction_weight_threshold", 0.5)),
+            )
+
         async def decide(rows):
             return await request_suggestions(rows, preset)
 
-        await curation_for(manager).run_daily(today, decide, enabled=lambda: active_manager() is manager)
+        async def decide_combined(rows, dialogue):
+            messages = manager._extraction_messages(dialogue.rows, profile, app, dialogue.candidates)
+            return await request_combined_suggestions(rows, messages, preset)
+
+        # Serialize with ordinary extraction so the same dialogue is not billed twice.
+        async with manager._extraction_lock:
+            if active_manager() is not manager:
+                return
+            preset = curation_preset(manager, app)
+            changed = await curation_for(manager).run_daily(
+                today, decide, enabled=lambda: active_manager() is manager,
+                prepare_dialogue=prepare_dialogue, decide_combined=decide_combined,
+            )
+        if changed and manager.vectors and manager.vectors.is_available():
+            for fact_id in changed:
+                await manager.reembed_fact(fact_id)
     except Exception:
         logger.warning("Daily curation unavailable for profile %s", session.profile_id)
 

@@ -12,7 +12,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import List, Optional
 from src.utils.memory_time import has_floating_date
 
@@ -50,6 +50,20 @@ _VALID_CATEGORIES = frozenset({
     "location", "milestone", "ai_insight", "other",
 })
 _VALID_SOURCES = frozenset({"manual", "auto", "reflection"})
+EXPERIENCE_CONTENT_LIMIT = 1200
+
+
+def _valid_source_offsets(data):
+    if not isinstance(data, dict):
+        return {}
+    return {
+        source: {key: value[key] for key in ("id", "offset", "content_hash")}
+        for source, value in data.items()
+        if isinstance(source, str) and source and isinstance(value, dict)
+        and type(value.get("id")) is int and value["id"] > 0
+        and type(value.get("offset")) is int and value["offset"] >= 0
+        and isinstance(value.get("content_hash"), str) and value["content_hash"]
+    }
 
 
 @dataclass
@@ -79,10 +93,22 @@ class LongTermFact:
     archive_note: str = ""
     review_note: str = ""
     curation_protected: bool = False
+    occurred_from: Optional[str] = None
+    occurred_to: Optional[str] = None
+    retention_reason: str = ""
+
+    @property
+    def record_version(self) -> int:
+        return len(self.versions) + 1
+
+    def snapshot(self) -> dict:
+        values = {item.name: getattr(self, item.name) for item in fields(self) if item.name != "versions"}
+        return {**deepcopy(values), "record_version": self.record_version}
 
     def is_active(self, now: Optional[float] = None) -> bool:
         return not self.archived and (
-            self.expires_at is None or self.expires_at > (time.time() if now is None else now)
+            self.kind == "experience" or self.expires_at is None
+            or self.expires_at > (time.time() if now is None else now)
         )
 
     def score(self) -> float:
@@ -92,7 +118,15 @@ class LongTermFact:
         return self.weight * 0.7 + recency * 0.3
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if self.kind == "experience":
+            data["record_version"] = self.record_version
+        else:
+            # Keep unchanged legacy records' serialized shape and curation fingerprints.
+            for name in ("occurred_from", "occurred_to", "retention_reason"):
+                if not data[name]:
+                    data.pop(name)
+        return data
 
     @classmethod
     def from_dict(cls, d: dict) -> "LongTermFact":
@@ -121,6 +155,9 @@ class LongTermFact:
             archive_note=d.get("archive_note") or "",
             review_note=d.get("review_note") or "",
             curation_protected=bool(d.get("curation_protected", False)),
+            occurred_from=d.get("occurred_from"),
+            occurred_to=d.get("occurred_to"),
+            retention_reason=d.get("retention_reason") or "",
         )
 
 
@@ -131,6 +168,7 @@ class LongTermStore:
         self._path = os.path.join(storage_root, "long_term_facts.json")
         self._facts: List[LongTermFact] = []
         self._cursors: dict[str, int] = {}
+        self._offsets: dict[str, dict] = {}
         self._curation: dict = {}
         self._revision = 0
         self._disk_stamp = None
@@ -180,6 +218,10 @@ class LongTermStore:
         fact = self._get_by_id(fact_id)
         if not fact:
             return False
+        content = kwargs.get("content")
+        if fact.kind == "experience" and content and len(str(content).strip()) > EXPERIENCE_CONTENT_LIMIT:
+            return False
+        previous = fact
         fact = deepcopy(fact)
         semantic_changed = False
         for k, v in kwargs.items():
@@ -197,6 +239,8 @@ class LongTermStore:
             elif k == "pinned":
                 fact.pinned = bool(v)
         if semantic_changed:
+            if fact.kind == "experience":
+                fact.versions.append(previous.snapshot())
             fact.updated_at = time.time()
             fact.curation_protected = True
             fact.review_note = ""
@@ -235,16 +279,33 @@ class LongTermStore:
         return dict(self._cursors)
 
     def extraction_snapshot(self):
-        self._refresh()
-        return self._revision, dict(self._cursors), deepcopy(self._facts)
+        revision, cursors, facts, _ = self.extraction_progress_snapshot()
+        return revision, cursors, facts
 
     def apply_extraction(self, revision: int, facts: List[LongTermFact], cursors: dict[str, int]) -> bool:
         return self._commit(facts, cursors, expected_revision=revision)
 
-    def curation_snapshot(self):
+    def extraction_progress_snapshot(self):
         self._refresh()
         with _WRITE_LOCK:
-            return self._revision, dict(self._cursors), deepcopy(self._facts), deepcopy(self._curation)
+            return self._revision, dict(self._cursors), deepcopy(self._facts), deepcopy(self._offsets)
+
+    def apply_extraction_progress(self, revision: int, facts: List[LongTermFact],
+                                  cursors: dict[str, int], offsets: dict[str, dict]) -> bool:
+        validated = _valid_source_offsets(offsets)
+        if validated != offsets:
+            return False
+        return self._commit(facts, cursors, expected_revision=revision, offsets=validated)
+
+    def curation_snapshot(self):
+        revision, cursors, facts, state, _ = self.curation_progress_snapshot()
+        return revision, cursors, facts, state
+
+    def curation_progress_snapshot(self):
+        self._refresh()
+        with _WRITE_LOCK:
+            return (self._revision, dict(self._cursors), deepcopy(self._facts),
+                    deepcopy(self._curation), deepcopy(self._offsets))
 
     def curation_status(self) -> dict:
         self._refresh()
@@ -270,6 +331,13 @@ class LongTermStore:
 
     def apply_curation(self, revision: int, facts: List[LongTermFact], cursors: dict[str, int], state: dict) -> bool:
         return self._commit(facts, cursors, expected_revision=revision, curation=state)
+
+    def apply_curation_progress(self, revision: int, facts: List[LongTermFact],
+                                cursors: dict[str, int], offsets: dict[str, dict], state: dict) -> bool:
+        validated = _valid_source_offsets(offsets)
+        if validated != offsets:
+            return False
+        return self._commit(facts, cursors, expected_revision=revision, curation=state, offsets=validated)
 
     def get_top_n(self, n: int) -> List[LongTermFact]:
         """返回 prompt 用事实：全部 pinned + 按 score 降序填充剩余配额。"""
@@ -346,36 +414,39 @@ class LongTermStore:
                 data = json.load(fp)
                 stamp = _disk_stamp(os.fstat(fp.fileno()))
             facts = [LongTermFact.from_dict(d) for d in data.get("facts", [])]
+            offsets = _valid_source_offsets(data.get("source_offsets"))
             curation = data.get("curation")
             curation = curation if isinstance(curation, dict) else {}
             cursors = {key: value for key, value in (data.get("source_cursors") or {}).items()
                        if type(value) is int and value >= 0}
         except FileNotFoundError:
-            facts, cursors, curation, stamp = [], {}, {}, None
+            facts, cursors, offsets, curation, stamp = [], {}, {}, {}, None
         except (OSError, ValueError, TypeError, AttributeError) as error:
             logger.error("[LongTermStore] Could not load facts: %s", error)
             return
-        self._facts, self._cursors, self._curation, self._disk_stamp = facts, cursors, curation, stamp
+        self._facts, self._cursors, self._offsets, self._curation, self._disk_stamp = (
+            facts, cursors, offsets, curation, stamp
+        )
         self._revision += 1
 
     def _commit(self, facts: List[LongTermFact], cursors: dict[str, int],
-                *, expected_revision: Optional[int] = None, curation: Optional[dict] = None) -> bool:
+                *, expected_revision: Optional[int] = None, curation: Optional[dict] = None,
+                offsets: Optional[dict] = None) -> bool:
         """Atomically replace only the version this store instance loaded."""
         with _WRITE_LOCK:
             if expected_revision is not None and self._revision != expected_revision:
                 return False
-            if curation is None:
-                return self._replace_file(facts, cursors)
-            return self._replace_file(facts, cursors, curation)
+            return self._replace_file(facts, cursors, curation, offsets)
 
     def _replace_file(self, facts: List[LongTermFact], cursors: dict[str, int],
-                      curation: Optional[dict] = None) -> bool:
+                      curation: Optional[dict] = None, offsets: Optional[dict] = None) -> bool:
         curation = self._curation if curation is None else curation
+        offsets = self._offsets if offsets is None else offsets
         tmp = f"{self._path}.{uuid.uuid4().hex}.tmp"
         try:
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
             with _fact_file_lock(self._path):
-                stamp = self._write_current_file(tmp, facts, cursors, curation)
+                stamp = self._write_current_file(tmp, facts, cursors, curation, offsets)
                 if stamp is None:
                     return False
         except (OSError, TypeError, ValueError) as error:
@@ -389,11 +460,12 @@ class LongTermStore:
         self._disk_stamp = stamp
         self._facts = facts
         self._cursors = dict(cursors)
+        self._offsets = deepcopy(offsets)
         self._curation = deepcopy(curation)
         self._revision += 1
         return True
 
-    def _write_current_file(self, tmp, facts, cursors, curation):
+    def _write_current_file(self, tmp, facts, cursors, curation, offsets):
         try:
             current = _disk_stamp(os.stat(self._path))
         except FileNotFoundError:
@@ -403,6 +475,8 @@ class LongTermStore:
             return None
         with open(tmp, "w", encoding="utf-8") as fp:
             payload = {"facts": [f.to_dict() for f in facts], "source_cursors": cursors}
+            if offsets:
+                payload["source_offsets"] = offsets
             if curation:
                 payload["curation"] = curation
             json.dump(payload, fp, ensure_ascii=False, indent=2)

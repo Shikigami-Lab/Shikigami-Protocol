@@ -22,7 +22,7 @@ class DaySummaryStore:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def add_summary(self, date_str: str, summary: str, message_count: int = 0,
-                    keep_days: int = 14):
+                    keep_days: int = 14, *, experience_ids: Optional[List[str]] = None):
         """写入一天的摘要，然后裁剪旧记录。"""
         # 如果已有同一天的，覆盖
         self._summaries = [s for s in self._summaries if s.get("date") != date_str]
@@ -31,6 +31,7 @@ class DaySummaryStore:
             "summary": summary.strip(),
             "message_count": message_count,
             "generated_at": time.time(),
+            **({"experience_ids": list(dict.fromkeys(experience_ids))} if experience_ids else {}),
         })
         self._summaries.sort(key=lambda s: s.get("date", ""))
         self._prune(keep_days)

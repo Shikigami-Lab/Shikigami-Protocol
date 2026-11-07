@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import time
+from datetime import datetime
 
 from src.memory.long_term_store import LongTermFact, LongTermStore
 
@@ -19,9 +20,28 @@ def semantic_version(fact: LongTermFact) -> str:
         "kind": fact.kind,
         "event_date": fact.event_date,
         "expires_at": fact.expires_at,
+        **({"occurred_from": fact.occurred_from, "occurred_to": fact.occurred_to} if fact.kind == "experience" else {}),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def experience_links_by_day(facts):
+    """Index dialogue dates for experience links, separately from when an event happened."""
+    result = {}
+    for fact in facts:
+        if fact.kind != "experience":
+            continue
+        for reference in fact.evidence:
+            value = reference.get("timestamp") if isinstance(reference, dict) else None
+            if type(value) not in (int, float) or not math.isfinite(value):
+                continue
+            try:
+                day = datetime.fromtimestamp(value).date().isoformat()
+            except (OSError, OverflowError, ValueError):
+                continue
+            result.setdefault(day, set()).add(fact.id)
+    return result
 
 
 def is_cold(fact: LongTermFact, now: float) -> bool:

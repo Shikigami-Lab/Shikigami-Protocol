@@ -6,6 +6,7 @@ day_summary_enabled=False 时静默跳过。
 import logging
 from datetime import date, datetime
 
+from src.memory.recall import experience_links_by_day
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
 
@@ -57,10 +58,18 @@ class MidTermMemorySegment(PromptSegment):
         if not summaries:
             return SegmentResult(fired=False)
 
+        experiences = ctx.extras.get("recalled_experiences") or ()
+        links = experience_links_by_day(experiences)
         lines = []
-        for s in summaries:
-            label = _relative_date(s.get("date", ""))
-            lines.append(f"- {label}：{s.get('summary', '')}")
+        for summary in summaries:
+            day = summary.get("date", "")
+            label = _relative_date(day)
+            text = summary.get("summary", "")
+            linked = links.get(day, set()) | set(summary.get("experience_ids") or ())
+            for fact in experiences:
+                if fact.id in linked and fact.content in text:
+                    text = text.replace(fact.content, "（相关经历已在上文）")
+            lines.append(f"- {label}：{text}")
 
         content = "【近期对话回顾】\n" + "\n".join(lines)
         return SegmentResult(messages=[{"role": "system", "content": content}])
