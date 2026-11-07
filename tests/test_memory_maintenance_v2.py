@@ -45,7 +45,7 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         self.portrait = self.enterContext(patch.object(job, "run_portrait_refresh_for_profile", new_callable=AsyncMock))
 
     async def test_manual_run_calls_only_index_maintenance(self):
-        counts = await job.run_forgetting_for_profile(PROFILE, self.app, YESTERDAY, force=True)
+        counts = await job.run_fact_index_maintenance(PROFILE, self.app, YESTERDAY, force=True)
 
         self.assertEqual(counts, self.counts)
         self.manager.maintain_fact_index.assert_awaited_once_with()
@@ -53,32 +53,40 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         self.portrait.assert_not_awaited()
         self.assertEqual(list(Path(self.root).iterdir()), [])
 
-    async def test_retired_flags_cannot_enable_maintenance(self):
+    async def test_legacy_flag_off_does_not_disable_automatic_index_cleanup(self):
+        self.manager._cfg.update(daily_forgetting_enabled=False, daily_curation_enabled=False)
+
+        preview = job.preview_fact_index_maintenance(PROFILE, self.app, YESTERDAY)
+        await job.run_daily_for_profile(PROFILE, YESTERDAY, self.app)
+        await job.run_daily_for_profile(PROFILE, YESTERDAY, self.app)
+
+        self.assertFalse(preview["skip"])
+        self.manager.maintain_fact_index.assert_awaited_once_with()
+
+    async def test_startup_cleans_index_even_when_today_model_jobs_already_ran(self):
         self.manager._cfg["daily_forgetting_enabled"] = False
+        job._save_last_daily_run(self.root, job.date.today().isoformat())
 
-        preview = job.preview_forgetting_for_profile(PROFILE, self.app, YESTERDAY)
-        await job.run_forgetting_for_profile(PROFILE, self.app, YESTERDAY)
-        await job.run_forgetting_for_profile(PROFILE, self.app, YESTERDAY, force=True)
+        await job._catch_up_missed_runs(self.app)
 
-        self.assertTrue(preview["skip"])
-        self.assertEqual(preview["reason_code"], "maintenance_disabled")
-        self.manager.preview_fact_index.assert_not_called()
-        self.manager.maintain_fact_index.assert_not_awaited()
+        self.manager.maintain_fact_index.assert_awaited_once_with()
+        self.summary.assert_not_awaited()
+        self.portrait.assert_not_awaited()
 
     async def test_memory_disabled_and_unloaded_profiles_are_skipped(self):
         self.manager._cfg["enabled"] = False
 
         for profile_id, reason in [(PROFILE, "memory_disabled"), ("missing", "profile_not_loaded")]:
             with self.subTest(profile_id=profile_id):
-                preview = job.preview_forgetting_for_profile(profile_id, self.app, YESTERDAY)
+                preview = job.preview_fact_index_maintenance(profile_id, self.app, YESTERDAY)
                 self.assertTrue(preview["skip"])
                 self.assertEqual(preview["reason_code"], reason)
-                self.assertIsNone(await job.run_forgetting_for_profile(profile_id, self.app, force=True))
+                self.assertIsNone(await job.run_fact_index_maintenance(profile_id, self.app, force=True))
 
         self.manager.maintain_fact_index.assert_not_awaited()
 
     async def test_preview_maps_manager_counts_without_running_maintenance(self):
-        preview = job.preview_forgetting_for_profile(PROFILE, self.app, YESTERDAY)
+        preview = job.preview_fact_index_maintenance(PROFILE, self.app, YESTERDAY)
 
         self.assertFalse(preview["skip"])
         self.assertEqual(preview["expired_fact_count"], 1)
@@ -95,7 +103,7 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         self.manager.fact_index = None
         self.manager.preview_fact_index.return_value = {"active": 0, "expired": 1, "vectors_removed": 0}
 
-        preview = job.preview_forgetting_for_profile(PROFILE, self.app, YESTERDAY)
+        preview = job.preview_fact_index_maintenance(PROFILE, self.app, YESTERDAY)
 
         self.assertEqual(preview["expired_fact_count"], 1)
         self.assertEqual(preview["orphan_cleanup"], {"enabled": False, "would_delete_count": 0})
@@ -108,19 +116,31 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         self.portrait.assert_awaited_once_with(PROFILE, self.app)
         self.manager.maintain_fact_index.assert_awaited_once_with()
 
-    async def test_maintenance_failure_leaves_portrait_independent_and_daily_run_retryable(self):
-        self.manager.maintain_fact_index.side_effect = OSError("index unavailable")
+    async def test_maintenance_failure_can_retry_without_repeating_completed_model_jobs(self):
+        self.manager.maintain_fact_index.side_effect = [OSError("index unavailable"), self.counts]
 
         with self.assertRaisesRegex(OSError, "index unavailable"):
             await job.run_daily_for_profile(PROFILE, YESTERDAY, self.app)
+        await job._catch_up_missed_runs(self.app)
 
+        self.assertEqual(job._load_last_daily_run(self.root), job.date.today().isoformat())
+        self.assertEqual(self.manager.maintain_fact_index.await_count, 2)
+        self.summary.assert_awaited_once_with(PROFILE, YESTERDAY, self.app)
         self.portrait.assert_awaited_once_with(PROFILE, self.app)
+
+    async def test_failed_model_job_does_not_block_index_cleanup(self):
+        self.summary.side_effect = OSError("unreadable diary")
+
+        with self.assertRaisesRegex(OSError, "unreadable diary"):
+            await job.run_daily_for_profile(PROFILE, YESTERDAY, self.app)
+
+        self.manager.maintain_fact_index.assert_awaited_once_with()
         self.assertFalse((Path(self.root) / "last_daily_run.json").exists())
 
     async def test_preview_and_run_agree_using_the_real_manager_and_store(self):
         with patch.object(memory_manager, "log_memory_startup"):
             manager = memory_manager.MemoryManager(PROFILE, self.root, profile_memory_cfg={
-                "enabled": True, "daily_forgetting_enabled": True,
+                "enabled": True, "daily_forgetting_enabled": False,
             })
         self.get_manager.return_value = manager
         revision, cursors, _ = manager.facts.extraction_snapshot()
@@ -158,10 +178,10 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         manager.vectors._collection = SimpleNamespace(get=get_vectors, delete=delete_vectors)
 
         with patch.object(memory_manager.time, "time", return_value=NOW):
-            preview = job.preview_forgetting_for_profile(PROFILE, self.app)
+            preview = job.preview_fact_index_maintenance(PROFILE, self.app)
             self.assertEqual(len(indexed), 6)
-            result = await job.run_forgetting_for_profile(PROFILE, self.app, force=True)
-            after = job.preview_forgetting_for_profile(PROFILE, self.app)
+            result = await job.run_fact_index_maintenance(PROFILE, self.app, force=True)
+            after = job.preview_fact_index_maintenance(PROFILE, self.app)
 
         self.assertEqual(preview["expired_fact_count"], result["expired"])
         self.assertEqual(preview["orphan_cleanup"]["would_delete_count"], result["vectors_removed"])
@@ -184,7 +204,7 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         })
         changelog_path = Path(self.root) / "memory_changelog.json"
         before = changelog_path.read_bytes()
-        await job.run_forgetting_for_profile(PROFILE, self.app, force=True)
+        await job.run_fact_index_maintenance(PROFILE, self.app, force=True)
         self.assertEqual(changelog_path.read_bytes(), before)
 
         result = await memory_changelog.rollback(self.root, "legacy", manager)

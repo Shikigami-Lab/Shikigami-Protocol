@@ -225,7 +225,7 @@ class ArchiveProtectionTests(IsolatedAsyncioTestCase):
     async def test_bulk_promotes_only_the_selected_merge_without_touching_its_representative(self):
         self.seed(
             note("a", "I like tea.", category="preference", review_note="Review this separately."),
-            note("b", "I enjoy tea.", category="preference"),
+            note("b", "I like tea!", category="preference"),
             note("c", "Waved once."),
             note("pinned", "A pinned memory.", pinned=True),
         )
@@ -289,7 +289,7 @@ class ArchiveProtectionTests(IsolatedAsyncioTestCase):
 
     async def test_promoted_merge_still_rechecks_the_keep_dependency_at_apply(self):
         self.seed(note("a", "I like tea.", category="preference"),
-                  note("b", "I enjoy tea.", category="preference"))
+                  note("b", "I like tea!", category="preference"))
         page = await self.service.preview_bulk(AsyncMock(return_value=[
             {"fact_id": "a", "action": "keep", "reason": "Representative"},
             {"fact_id": "b", "action": "merge", "target_id": "a", "reason": "Same preference"},

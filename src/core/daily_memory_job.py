@@ -123,7 +123,6 @@ _MAINTENANCE_SKIP_REASONS = {
     "profile_not_loaded": "人格未加载",
     "memory_manager_unavailable": "无法创建 MemoryManager",
     "memory_disabled": "记忆未启用",
-    "maintenance_disabled": "每日记忆维护未启用",
 }
 
 
@@ -139,12 +138,10 @@ def _get_maintenance_manager(profile_id: str, app):
         return None, "memory_manager_unavailable"
     if not mgr._cfg.get("enabled"):
         return None, "memory_disabled"
-    if not mgr._cfg.get("daily_forgetting_enabled"):
-        return None, "maintenance_disabled"
     return mgr, None
 
 
-def preview_forgetting_for_profile(
+def preview_fact_index_maintenance(
     profile_id: str, app, yesterday: Optional[str] = None
 ) -> Dict[str, Any]:
     """预览当前事实到期和向量清理数量。保留旧预览字段以兼容现有客户端。"""
@@ -188,19 +185,19 @@ def preview_forgetting_for_profile(
     return out
 
 
-async def run_forgetting_for_profile(
+async def run_fact_index_maintenance(
     profile_id: str, app, yesterday: Optional[str] = None, *, force: bool = False
 ) -> Optional[Dict[str, Any]]:
-    """只执行事实索引维护。保留原有调用参数，手动和定时执行使用同一开关。"""
+    """Clean the index for a loaded character with memory enabled."""
     mgr, reason = _get_maintenance_manager(profile_id, app)
     if mgr is None:
         if force:
-            logger.info("[daily_memory_job] 跳过手动记忆维护 profile=%s reason=%s", profile_id, reason)
+            logger.info("[daily_memory_job] 跳过手动索引清理 profile=%s reason=%s", profile_id, reason)
         return None
 
     counts = await mgr.maintain_fact_index()
     logger.info(
-        "[daily_memory_job] 记忆维护完成 profile=%s trigger=%s counts=%s",
+        "[daily_memory_job] 索引清理完成 profile=%s trigger=%s counts=%s",
         profile_id, "manual" if force else "scheduled", counts,
     )
     return counts
@@ -329,34 +326,30 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
         logger.debug("[daily_memory_job] profile %s 今天已跑过每日任务，跳过", profile_id)
         return
 
-    await _run_daily_curation(session, today_str, app)
-    await run_day_summary_for_profile(profile_id, yesterday, app)
-
-    # 画像有独立开关。索引维护失败也不影响当日的画像任务。
-    await run_portrait_refresh_for_profile(profile_id, app)
-
-    index_counts = await run_forgetting_for_profile(profile_id, app)
-    if index_counts is None:
-        manager = _get_manager_for_session(session, app)
-        if manager and manager._cfg.get("enabled"):
-            await manager.prune_curation_index()
-    _save_last_daily_run(session.storage_root, today_str)
+    try:
+        await _run_daily_curation(session, today_str, app)
+        await run_day_summary_for_profile(profile_id, yesterday, app)
+        await run_portrait_refresh_for_profile(profile_id, app)
+        _save_last_daily_run(session.storage_root, today_str)
+    finally:
+        # Index cleanup can retry on startup without repeating completed model jobs.
+        await run_fact_index_maintenance(profile_id, app)
 
 
 async def _catch_up_missed_runs(app) -> None:
-    """启动补跑：桌面应用在 00:05 常处于关机状态，错过的每日任务在启动时补一次。
-    依据 last_daily_run.json（每人格独立），今天没跑过的才补。"""
+    """Check the index at startup and catch up today's scheduled jobs when needed."""
     sm = getattr(app.state, "session_manager", None)
     if not sm:
         return
     today_str = date.today().strftime("%Y-%m-%d")
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
     for s in sm.list_sessions():
-        if _load_last_daily_run(s.storage_root) == today_str:
-            continue
-        logger.info("[daily_memory_job] 启动补跑每日任务 profile=%s", s.profile_id)
         try:
-            await run_daily_for_profile(s.profile_id, yesterday, app)
+            if _load_last_daily_run(s.storage_root) == today_str:
+                await run_fact_index_maintenance(s.profile_id, app)
+            else:
+                logger.info("[daily_memory_job] 启动补跑每日任务 profile=%s", s.profile_id)
+                await run_daily_for_profile(s.profile_id, yesterday, app)
         except Exception as e:
             logger.exception("[daily_memory_job] 补跑 profile %s 失败: %s", s.profile_id, e)
 

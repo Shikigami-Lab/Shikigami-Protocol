@@ -714,9 +714,6 @@ const SettingsMixin = {
     memoryProfileEffectiveDaySummaryEnabled() {
       return this.memoryTabProfileForm.day_summary_enabled ?? this.memoryGlobalForm.day_summary_enabled;
     },
-    memoryProfileEffectiveForgettingEnabled() {
-      return this.memoryTabProfileForm.daily_forgetting_enabled ?? this.memoryGlobalForm.daily_forgetting_enabled;
-    },
 
     /** 入门页教程：与 /api/setup/status 的 bundles 一致 */
     onboardingMemBundles() {

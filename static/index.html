@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memorycompletion2"></script>
+  <script src="js/i18n.js?v=20261107memoryalignment"></script>
 </head>
 <body>
 
@@ -5028,7 +5028,7 @@
               </button>
             </div>
             <div class="s-card memory-maintenance-card">
-              <div class="s-card-title">{{ t('memSectDailyMaintenance') }}</div>
+              <div class="s-card-title">{{ t('memIndexMaintenanceTitle') }}</div>
               <p class="mem-cfg-hint">{{ t('hintMemoryMaintenanceRun') }}</p>
               <div class="memory-maintenance-actions">
                 <button type="button" class="s-btn s-btn-secondary" :disabled="forgettingPreviewLoading || !memoryProfileId"
@@ -5513,15 +5513,6 @@
             </div>
             <div class="form-hint" style="margin-bottom:10px;">{{ t('hintDailyRunAt') }}</div>
 
-            <div class="param-row">
-              <span class="param-label">{{ t('lblEnableDailyForgetting') }}</span>
-              <label class="toggle-switch">
-                <input type="checkbox" :aria-label="t('lblEnableDailyForgetting')" v-model="memoryGlobalForm.daily_forgetting_enabled" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="form-hint">{{ t('hintEnableDailyForgetting') }}</div>
-
             <div class="param-row" style="margin-top:10px;">
               <span class="param-label">{{ t('lblEnableDailyCuration') }}</span>
               <label class="toggle-switch">
@@ -5688,17 +5679,6 @@
             <!-- 每日记忆维护 (profile) -->
             <div style="margin-top:14px;">
               <div class="block-header" style="margin-bottom:8px;">{{ t('memSectDailyMaintenance') }}（{{ t('optInheritGlobal') }}）</div>
-              <div class="mem-cfg-item">
-                <div class="param-row">
-                  <span class="param-label">{{ t('lblEnableDailyForgetting') }}</span>
-                  <select class="form-select" v-model="memoryTabProfileForm.daily_forgetting_enabled" style="min-width:120px;">
-                    <option :value="null">{{ t('optInheritGlobal') }}</option>
-                    <option :value="true">{{ t('optOn') }}</option>
-                    <option :value="false">{{ t('optOff') }}</option>
-                  </select>
-                </div>
-              </div>
-              <p class="mem-cfg-hint">{{ t('hintEnableDailyForgetting') }}</p>
               <div class="mem-cfg-item">
                 <div class="param-row">
                   <label for="memory-daily-curation-profile" class="param-label">{{ t('lblEnableDailyCuration') }}</label>
@@ -5881,7 +5861,7 @@
 <script src="js/api-paths.js?v=20261107memorycompletion1"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memorycompletion2"></script>
+<script src="js/settings.js?v=20261107memoryalignment"></script>
 <script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107memoryprompts2"></script>

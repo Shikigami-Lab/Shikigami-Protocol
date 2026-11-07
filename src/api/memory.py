@@ -529,13 +529,13 @@ async def generate_summaries(
 
 @router.get("/{profile_id}/forgetting/preview")
 async def get_forgetting_preview(profile_id: str, request: Request):
-    """预览「执行一次每日记忆/遗忘任务」将执行的内容，不实际执行。"""
+    """Preview expired facts and stale index rows without writing."""
     from datetime import date, timedelta
 
-    from src.core.daily_memory_job import preview_forgetting_for_profile
+    from src.core.daily_memory_job import preview_fact_index_maintenance
 
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    data = preview_forgetting_for_profile(profile_id, request.app, yesterday)
+    data = preview_fact_index_maintenance(profile_id, request.app, yesterday)
     return data
 
 
@@ -544,7 +544,7 @@ async def run_forgetting_now(profile_id: str, request: Request):
     """手动整理已加载人格的事实索引。"""
     from datetime import date, timedelta
 
-    from src.core.daily_memory_job import run_forgetting_for_profile
+    from src.core.daily_memory_job import run_fact_index_maintenance
 
     log_app_event("forgetting_run_request", profile_id=profile_id)
     sm = getattr(request.app.state, "session_manager", None)
@@ -559,7 +559,7 @@ async def run_forgetting_now(profile_id: str, request: Request):
         log_app_event("forgetting_run_skip", profile_id=profile_id, reason="profile_not_loaded")
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found or not loaded")
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    result = await run_forgetting_for_profile(profile_id, request.app, yesterday, force=True)
+    result = await run_fact_index_maintenance(profile_id, request.app, yesterday, force=True)
     log_app_event("forgetting_run_done", profile_id=profile_id)
     return {"ok": True, "skipped": result is None, "maintenance": result}
 

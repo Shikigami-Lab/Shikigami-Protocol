@@ -128,6 +128,8 @@ test('old-store preview labels the per-page cost and exposes read-only controls 
 });
 
 test('daily curation controls are independently addressable and Maintenance renders durable and session results', () => {
+  assert.doesNotMatch(html, /v-model="memory(?:GlobalForm|TabProfileForm)\.daily_forgetting_enabled"/);
+  assert.match(html, /t\('memIndexMaintenanceTitle'\)/);
   const toggle = html.match(/<input id="memory-daily-curation-global"[^>]*>/)?.[0] || '';
   assert.match(toggle, /v-model="memoryGlobalForm.daily_curation_enabled"/);
   assert.match(toggle, /:disabled="!memoryGlobalFormLoaded"/);

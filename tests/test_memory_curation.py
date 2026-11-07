@@ -72,13 +72,18 @@ class CurationTests(IsolatedAsyncioTestCase):
         revision, cursors, _ = self.store.extraction_snapshot()
         self.assertTrue(self.store.apply_extraction(revision, [
             fact("a", "Likes coffee", category="preference"),
-            fact("b", "Enjoys coffee", category="preference"),
+            fact("b", "Likes coffee.", category="preference"),
             fact("c", "Waved once"),
             fact("d", "Said good night once", pinned=True),
             fact("e", "Will wave", kind="event", event_date="2026-11-06"),
             fact("f", "Waved", kind="event", event_date="2026-11-06"),
         ], cursors))
         self.service = MemoryCuration("test", self.store)
+
+    def use_near_duplicate(self):
+        revision, cursors, facts = self.store.extraction_snapshot()
+        next(row for row in facts if row.id == "b").content = "Enjoys coffee"
+        self.assertTrue(self.store.apply_extraction(revision, facts, cursors))
 
     async def preview(self, *actions):
         async def reply(rows):
@@ -97,7 +102,7 @@ class CurationTests(IsolatedAsyncioTestCase):
         self.assertEqual((receipt["merged"], receipt["archived"]), (1, 1))
         reopened = LongTermStore(self.root)
         merged = reopened.get_by_id("b")
-        self.assertEqual((merged.merged_into, merged.content), ("a", "Enjoys coffee"))
+        self.assertEqual((merged.merged_into, merged.content), ("a", "Likes coffee."))
         self.assertEqual(reopened.get_by_id("c").archive_reason, "low_value")
         self.assertEqual(MemoryCuration("test", reopened).apply(preview["preview_id"]), receipt)
         self.service.restore("b", merged.archive_revision)
@@ -131,6 +136,7 @@ class CurationTests(IsolatedAsyncioTestCase):
         self.assertEqual(len(self.store.get_active()), 6)
 
     async def test_daily_budget_survives_reload_and_only_applies_safe_changes(self):
+        self.use_near_duplicate()
         async def decide(rows):
             choices = {
                 "b": action("b", "merge", target_id="a"),
@@ -147,6 +153,24 @@ class CurationTests(IsolatedAsyncioTestCase):
         self.assertTrue(reopened.store.get_by_id("c").archived)
         self.assertFalse(reopened.store.get_by_id("b").archived)
         self.assertTrue(reopened.store.get_by_id("b").review_note)
+
+    async def test_manual_bulk_and_daily_keep_a_near_duplicate_available_for_review(self):
+        self.use_near_duplicate()
+        async def decide(rows):
+            return [action(row.id, "merge", target_id="a") if row.id == "b"
+                    else action(row.id, "keep") for row in rows]
+
+        manual = await self.service.preview(decide)
+        bulk = await self.service.preview_bulk(decide)
+        await self.service.run_daily("2026-11-07", decide)
+
+        for result in (manual, bulk):
+            item = next(item for item in result["items"] if item["fact_id"] == "b")
+            self.assertEqual(item["action"], "review")
+            self.assertIsNone(item["target_id"])
+        fact_b = self.store.get_by_id("b")
+        self.assertFalse(fact_b.archived)
+        self.assertTrue(fact_b.review_note)
 
     async def test_failure_consumes_daily_attempt_across_two_managers(self):
         entered, release = asyncio.Event(), asyncio.Event()

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from src.commands.memory_cmds import handle_recall
 from src.core.user_portrait import _get_facts_text
 from src.memory.curation import MemoryCuration
-from src.memory.long_term_store import LongTermFact
+from src.memory.long_term_store import LongTermFact, fact_action_revision
 from src.memory.memory_manager import MemoryManager, _vector_document_for_fact
 from src.memory.recall import semantic_version
 from src.prompt.base import BuildContext
@@ -133,17 +133,19 @@ class CurationRecallTests(TestCase):
     def test_same_query_model_input_before_archive_after_archive_and_restore(self):
         manager = self.manager
         query = "boardwalk"
-        low = fact("low", "Waved once on the boardwalk")
-        cold = fact("cold", "Watched the sunrise on the boardwalk together")
-        manager = self.manager
-        canonical = fact("main", "Prefers walks by the sea", category="preference", kind="stable")
-        duplicate = fact("duplicate", "Likes walking along the boardwalk", category="preference", kind="stable")
+        low = fact("low", "Waved once")
+        cold = fact("cold", "Watched the sunrise on the boardwalk together", kind="experience", evidence=[
+            {"source": "single", "id": 3, "timestamp": 1793923200.0,
+             "speaker_role": "user", "assertion": "self_statement"},
+        ])
+        canonical = fact("main", "Prefers walks by the boardwalk", category="preference", kind="stable")
+        duplicate = fact("duplicate", canonical.content + ".", category="preference", kind="stable")
         unsupported = fact("unsupported", "Unsupported diagnosis about the boardwalk")
         write_facts(manager, low, cold, canonical, duplicate, unsupported)
         manager.vectors = OfflineVectors(*(vector(row) for row in manager.facts.get_all()))
 
         before = chat(manager, query)
-        self.assertCountEqual(prompt_fact_lines(before), [row.content for row in manager.facts.get_all()])
+        self.assertCountEqual(prompt_fact_lines(before), [low.content, cold.content, canonical.content, unsupported.content])
 
         curation = MemoryCuration("fixture", manager.facts)
 
@@ -159,7 +161,10 @@ class CurationRecallTests(TestCase):
 
         preview = asyncio.run(curation.preview(propose))
         receipt = curation.apply(preview["preview_id"])
-        assert (receipt["merged"], receipt["archived"]) == (1, 3)
+        assert (receipt["merged"], receipt["archived"], receipt["reviewed"]) == (1, 2, 1)
+        flagged = manager.facts.get_by_id(unsupported.id)
+        assert flagged.is_active() and flagged.review_note
+        assert manager.facts.resolve_review(flagged.id, fact_action_revision(flagged), "archive", "unsupported")
         assert len(manager.facts.get_all()) == 5
         after = chat(manager, query)
         self.assertCountEqual(prompt_fact_lines(after), [cold.content, canonical.content])
