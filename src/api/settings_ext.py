@@ -1536,8 +1536,6 @@ async def delete_profile(profile_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
 
     runtime = getattr(request.app.state, "agent_runtime", None)
-    if runtime:
-        await runtime.invalidate(profile_id)
 
     # If profile is active, switch away first (so periodic engines won't keep references)
     # If deleting the active profile, switch to another one first
@@ -1556,6 +1554,12 @@ async def delete_profile(profile_id: str, request: Request):
             await ase_engine.stop_session(profile_id)
         except Exception:
             pass
+
+    if runtime:
+        # Wait for in-flight effects, then purge before this ID can be reused.
+        # There is no await between the purge and removing the profile card.
+        await runtime.invalidate(profile_id)
+        runtime.reminders.remove_profile(profile_id)
 
     session_obj = None
     try:

@@ -1,24 +1,30 @@
 """计时器 REST API — GET/POST/DELETE /timers
 
-GET  /timers               — 列出所有活跃计时器（含剩余秒数）
+GET  /timers[?session_id=...]               — 列出所有活跃计时器（含剩余秒数）
 POST /timers               — 启动新计时器
 DELETE /timers/{timer_id}  — 停止/取消指定计时器
 """
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from src.api.agent import _same_origin
 from src.tools.timer.manager import list_timers, start_timer, stop_timer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _reminders(request: Request):
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    return runtime.reminders if runtime is not None else None
+
+
 @router.get("/timers")
-async def get_timers():
-    """返回所有活跃计时器，附带剩余秒数。多端共用同一列表。"""
+async def get_timers(request: Request, session_id: str = ""):
+    """Return active countdowns and the requested session's dated reminders."""
     now = time.time()
     result = []
     for t in list_timers():
@@ -33,6 +39,9 @@ async def get_timers():
             "running":        t.get("running", True),
             "session_id":     t.get("session_id", ""),
         })
+    if session_id and (reminders := _reminders(request)) is not None:
+        _same_origin(request)
+        result.extend(reminders.list_for(session_id))
     return {"timers": result}
 
 
@@ -51,8 +60,11 @@ async def create_timer(body: TimerCreateRequest):
 
 
 @router.delete("/timers/{timer_id}")
-async def cancel_timer_endpoint(timer_id: str):
+async def cancel_timer_endpoint(timer_id: str, request: Request, session_id: str = ""):
     info = stop_timer(timer_id)
+    if info is None and session_id and (reminders := _reminders(request)) is not None:
+        _same_origin(request)
+        info = reminders.cancel(session_id, timer_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Timer not found")
     return {"ok": True}

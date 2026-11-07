@@ -11,7 +11,7 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20261107tasksearch" />
-  <link rel="stylesheet" href="css/settings.css?v=20261107settingstext1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261107reminder1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
@@ -750,9 +750,19 @@
           <div class="tp-list">
             <div v-if="timerList.length === 0" class="tp-empty">{{ t('timerEmpty') }}</div>
             <div v-for="timer in timerList" :key="timer.id" class="tp-item tp-timer-item">
-              <span class="tp-timer-remain" :class="{ expired: timer.remaining === 0 }">{{ fmtRemaining(timer.remaining) }}</span>
-              <span class="tp-text">{{ timer.label }}</span>
-              <button class="tp-del" :title="t('timerCancel')" @click="cancelTimer(timer.id)"><app-icon name="x" :size="14"></app-icon></button>
+              <template v-if="timer.kind === 'reminder'">
+                <span class="tp-timer-remain" :class="{ expired: timer.status !== 'scheduled' }">{{ t('timerReminder_' + timer.status) }}</span>
+                <div class="tp-timer-details">
+                  <span class="tp-text" :title="timer.label">{{ timer.label }}</span>
+                  <small>{{ fmtReminderTime(timer.end_timestamp) }}</small>
+                </div>
+              </template>
+              <template v-else>
+                <span class="tp-timer-remain" :class="{ expired: timer.remaining === 0 }">{{ fmtRemaining(timer.remaining) }}</span>
+                <span class="tp-text">{{ timer.label }}</span>
+              </template>
+              <button class="tp-del" :title="t(timer.kind === 'reminder' && timer.status !== 'scheduled' ? 'timerReminderDismiss' : 'timerCancel')"
+                      @click="cancelTimer(timer.id)"><app-icon name="x" :size="14"></app-icon></button>
             </div>
           </div>
         </div>

@@ -1021,6 +1021,7 @@ test('timer summaries require a completed run and its matching successful result
   model.locale = 'zh';
   assert.equal(model.agentRunLabel(timerRun()), '已创建20分钟计时器');
   assert.equal(model.agentRunLabel(timerRun('timer_list')), '已查询计时器');
+  assert.equal(model.agentRunLabel(timerRun('timer_schedule')), '\u5df2\u5b89\u6392\u5b9a\u65f6\u63d0\u9192');
   assert.equal(model.agentRunLabel(timerRun('timer_cancel')), '已取消计时器');
   for (const run of [timerRun('timer_create', null), timerRun('timer_create', { is_error: true }),
     timerRun('timer_create', { is_error: false, call_id: 'unrelated' }), timerRun('timer_create', {}),
@@ -1207,6 +1208,41 @@ test('timers show current owner plus legacy unscoped entries, never other person
   ] }) }));
   await app.methods.refreshTimers.call(model);
   assert.deepEqual(Array.from(model.timerList, timer => timer.id), ['own', 'legacy', 'missing']);
+});
+
+test('dated reminders use the profile-scoped timer API and show a local date', async () => {
+  const calls = [];
+  const end = 1800000000;
+  const { model, app } = harness(async (url, options) => {
+    calls.push([url, options?.method]);
+    return { ok: true, json: async () => ({ timers: [
+      { id: 'dated', kind: 'reminder', status: 'missed', session_id: 'p1', end_timestamp: end },
+    ] }) };
+  });
+  model.refreshTimers = app.methods.refreshTimers.bind(model);
+  await model.refreshTimers();
+  assert.match(calls[0][0], /\/timers\?session_id=p1$/);
+  assert.equal(model.timerList[0].status, 'missed');
+  model.locale = 'en';
+  const expected = new Date(end * 1000).toLocaleString('en', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  assert.equal(app.methods.fmtReminderTime.call(model, end), expected);
+  await app.methods.cancelTimer.call(model, 'dated');
+  assert.match(calls[1][0], /\/timers\/dated\?session_id=p1$/);
+  assert.equal(calls[1][1], 'DELETE');
+});
+
+test('an open timer panel refreshes once for the visible schedule receipt', () => {
+  const { model } = harness();
+  model.showTimerPanel = true;
+  let refreshes = 0;
+  model.refreshTimers = () => { refreshes++; };
+  const run = timerRun('timer_schedule');
+  model.receiveAgentEvent(run.events[0]);
+  model.receiveAgentEvent(run.events[1]);
+  model.receiveAgentEvent(run.events[1]);
+  assert.equal(refreshes, 1);
 });
 
 test('view switches clear/refetch timers and discard a late earlier fetch', async () => {

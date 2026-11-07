@@ -84,6 +84,20 @@ test('metadata validation and workspace lock prevent writes; preflight rechecks 
   assert.equal(writes, 0);
 });
 
+test('opening the owner view reports a missed reminder once even if refresh and SSE both see it', async () => {
+  const { model, sandbox } = harness();
+  const toasts = [];
+  model.showToast = (...args) => toasts.push(args);
+  sandbox.fetch = async () => ({ ok: true, json: async () => ({ timers: [
+    { id: 'rem-1', label: 'materials', kind: 'reminder', status: 'due', session_id: 'p1' },
+    { id: 'rem-2', label: 'other', kind: 'reminder', status: 'due', session_id: 'p2' },
+  ] }) });
+  await model.refreshTimers();
+  model.notifyDatedReminder('rem-1', 'materials');
+  await model.refreshTimers();
+  assert.deepEqual(toasts, [['Reminder due: materials', 'timer']]);
+});
+
 test('task search uses the scoped endpoint and discards results after switching characters', async () => {
   const { model } = harness();
   const pending = deferred();

@@ -3,7 +3,7 @@
   'use strict';
   const terminal = state => ['completed', 'cancelled', 'failed'].includes(state);
   const timerAction = name => {
-    const actions = { timer_create: 'create', timer_list: 'list', timer_cancel: 'cancel' };
+    const actions = { timer_create: 'create', timer_schedule: 'schedule', timer_list: 'list', timer_cancel: 'cancel' };
     const nativeName = String(name || '').replace(/^mcp__shikigami__/, '');
     return Object.prototype.hasOwnProperty.call(actions, nativeName) ? actions[nativeName] : '';
   };
@@ -346,7 +346,15 @@
       receiveAgentEvent(event, context) {
         // Never infer an event's ownership from the currently selected profile.
         if (context && (event.session_id !== context.sessionId || event.profile_id !== context.sessionId)) return;
-        this.agentRuns = reduceEvent(this.agentRuns, event);
+        const updatedRuns = reduceEvent(this.agentRuns, event);
+        const key = keyOf(event);
+        if (updatedRuns !== this.agentRuns && this.showTimerPanel && !this.currentGroupId &&
+            event.session_id === this.currentSessionId && event.profile_id === this.currentSessionId &&
+            event.type === 'tool_result' && event.is_error === false) {
+          const call = updatedRuns[key]?.events.find(item => item.type === 'tool_call' && item.call_id === event.call_id);
+          if (timerAction(call?.tool_name) === 'schedule') this.refreshTimers();
+        }
+        this.agentRuns = updatedRuns;
         if (context && event.run_id && this.agentRuns[keyOf(event)]?.origin !== 'reflection') {
           context.runKey = keyOf(event);
           // Only a context from the owning HTTP stream has a client nonce.

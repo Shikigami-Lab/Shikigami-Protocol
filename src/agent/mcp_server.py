@@ -30,6 +30,8 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 from starlette.applications import Starlette
 
+from src.tools.timer.reminders import DUE_AT_PATTERN
+
 from .business_tools import (
     ContextCount, DateText, HistoryLimit, HistoryOffset, HistoryOrder,
     HistorySearchArgs, MemoryLimit, MemorySearchArgs, MessageId, Query, RunId, SearchQuery, WebSearchArgs,
@@ -65,8 +67,8 @@ def create_timer_mcp_app(
 ) -> TimerMCPApp:
     """Bind timers and selected business tools to ``call_tool(name,args,request_id)``.
 
-    The default remains the original three timer tools. Only names explicitly
-    selected in business_tools are exposed; the callback still owns all runtime
+    Timer tools are bound to the host session. Business tools require an
+    explicit selection; the callback still owns all runtime
     authorization. task_context(run_id="") selects the latest prior task in
     that bound runtime, allowing model-directed continuation without NL regex.
 
@@ -76,7 +78,7 @@ def create_timer_mcp_app(
     dictionaries; raise an exception to return a native MCP ``isError`` result.
     Exception messages are client-visible, so the host must supply safe text.
 
-    Native names are timer_create/list/cancel. The upstream client configured
+    Native names are timer_create/schedule/list/cancel. The upstream client configured
     with server key ``shikigami`` adds the ``mcp__shikigami__`` prefix.
     """
     allowed = {"history_search", "history_context", "memory_search", "web_search", "task_search", "task_context", 'workspace_describe', *TODO_TOOLS}
@@ -93,15 +95,24 @@ def create_timer_mcp_app(
         """Create a countdown timer in the host-bound run's session."""
         return await call_tool("timer_create", {"seconds": seconds, "label": label}, ctx.request_id)
 
-    async def timer_list(ctx: Context) -> dict[str, Any]:
-        """List timers visible to the host-bound run's session."""
-        return await call_tool("timer_list", {}, ctx.request_id)
+    async def timer_schedule(
+        due_at: Annotated[str, Field(strict=True, pattern=DUE_AT_PATTERN,
+                                    description="Future ISO date and time. Omit the offset for host-local time, or specify it for another timezone.")],
+        label: Annotated[str, Field(strict=True, min_length=1, max_length=128)],
+        ctx: Context,
+    ) -> dict[str, Any]:
+        """Schedule a persistent, one-time reminder for a specific date and time."""
+        return await call_tool("timer_schedule", {"due_at": due_at, "label": label}, ctx.request_id)
+
+    async def timer_list(ctx: Context, label: Annotated[str, Field(strict=True, max_length=128)] = "") -> dict[str, Any]:
+        """List upcoming timers and reminders first. Filter by label to find a specific ID."""
+        return await call_tool("timer_list", {"label": label} if label else {}, ctx.request_id)
 
     async def timer_cancel(
         timer_id: Annotated[str, Field(strict=True, min_length=1, max_length=128)],
         ctx: Context,
     ) -> dict[str, Any]:
-        """Cancel a timer authorized for the host-bound run's session."""
+        """Cancel a countdown or cancel/dismiss a dated reminder in the host-bound session."""
         return await call_tool("timer_cancel", {"timer_id": timer_id}, ctx.request_id)
 
     async def history_search(
@@ -224,6 +235,7 @@ def create_timer_mcp_app(
     tools = []
     entries = [
         (timer_create, False, False, False, False),
+        (timer_schedule, False, False, False, False),
         (timer_list, True, False, True, False),
         (timer_cancel, False, True, True, False),
     ]

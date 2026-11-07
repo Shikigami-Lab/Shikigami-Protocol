@@ -1,4 +1,5 @@
 """Exercise the single-chat endpoint with a real task store and fake models."""
+from datetime import datetime, timedelta, timezone
 import json
 import tempfile
 import unittest
@@ -68,7 +69,7 @@ class ChatTaskModelTests(unittest.IsolatedAsyncioTestCase):
 
     async def send(self, **kwargs):
         response = await chat.chat_endpoint(self.request, chat.ChatRequest(
-            message="Fixture input", session_id="fixture", **kwargs))
+            message=kwargs.pop("message", "Fixture input"), session_id="fixture", **kwargs))
         return [json.loads(frame.removeprefix("data: ")) async for frame in response.body_iterator]
 
     async def test_ordinary_chat_uses_chat_model_once_with_tools_enabled(self):
@@ -76,6 +77,30 @@ class ChatTaskModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([model for model, _ in self.calls], ["chat-model"])
         self.assertEqual("".join(frame.get("token", "") for frame in frames), "A normal chat reply")
         self.assertEqual(self.history.get_recent()[-1]["content"], "A normal chat reply")
+
+    async def test_dated_reminder_routing_and_worker_share_host_local_anchor(self):
+        local_now = datetime(2026, 11, 7, 14, 0, tzinfo=timezone(timedelta(hours=8)))
+        reminder_request = "\u4e0b\u5468\u4e8c\u665a\u4e0a\u4e03\u70b9\u63d0\u9192\u6211\u5e26\u6750\u6599"
+        handoff = '<shikigami-task>{"goal":"Schedule the requested reminder"}</shikigami-task>'
+        self.chat_replies = [[handoff], ["Reminder scheduled."]]
+        original_drive = self.drive
+
+        async def drive(run):
+            self.assertIn(local_now.isoformat(), run.envelope["messages"][0]["content"])
+            self.assertIn("timer_schedule", run.envelope["messages"][0]["content"])
+            self.assertEqual(run.envelope["messages"][-1]["content"], reminder_request)
+            await original_drive(run)
+
+        # build_messages in this fixture supplies no optional time segment.
+        with patch.object(chat, "datetime") as clock, patch.object(self.runtime, "_drive", side_effect=drive):
+            clock.now.return_value.astimezone.return_value = local_now
+            frames = await self.send(message=reminder_request)
+
+        self.assertTrue(frames[-1]["done"])
+        prompt = json.loads(self.calls[0][1])[0]["content"]
+        self.assertIn(local_now.isoformat(), prompt)
+        self.assertIn("timer_schedule", prompt)
+        self.assertIn("Resolve relative dates", prompt)
 
     async def test_task_uses_tool_model_only_between_chat_calls(self):
         self.chat_replies = [[HANDOFF[:6], HANDOFF[6:]], ["Here is the result."]]

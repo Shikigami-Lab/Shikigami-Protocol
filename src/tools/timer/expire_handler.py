@@ -11,6 +11,8 @@
 import asyncio
 import logging
 
+from src.core.broadcast import broadcast
+
 logger = logging.getLogger(__name__)
 
 
@@ -110,6 +112,16 @@ async def _on_expire(app, timer_info: dict):
     except Exception as e:
         log_error("timer/expire_handler", str(e), {"timer_id": timer_id, "label": label})
         logger.error("[timer_expire] 异常 label=%s: %s", label, e)
+
+
+async def publish_reminder_expiry(reminder: dict):
+    """A dated reminder only sends the deterministic, profile-scoped notice."""
+    await broadcast.push_one_for_session(reminder["session_id"], {
+        "type": "timer_expired",
+        "kind": "reminder",
+        "label": reminder["label"],
+        "timer_id": reminder["id"],
+    })
 
 
 def make_expire_callback(app, loop: asyncio.AbstractEventLoop):

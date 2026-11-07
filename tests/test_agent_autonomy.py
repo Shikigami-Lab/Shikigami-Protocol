@@ -118,6 +118,9 @@ class AutonomyTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(run.timer_enabled)
             with self.assertRaises(ValueError):
                 await self.runtime.execute_timer(run.id, 'timer_create', {'seconds': 60, 'label': 'no'}, 'timer')
+            with self.assertRaisesRegex(ValueError, 'disabled'):
+                await self.runtime.execute_timer(run.id, 'timer_schedule',
+                    {'due_at': '2099-01-01T12:00:00+08:00', 'label': 'no'}, 'reminder')
             await self.runtime._publish(run, {'type': 'reply_delta', 'text': 'Synthetic research conclusion'})
             await self.runtime._publish(run, {'type': 'completed'})
             await run.queue.put(None)

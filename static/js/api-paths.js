@@ -92,8 +92,9 @@ window.API_PATHS = {
   memoryChangelog: (pid) => `/memory/${encodeURIComponent(pid)}/changelog`,
   memoryChangelogRollback: (pid) => `/memory/${encodeURIComponent(pid)}/changelog/rollback`,
 
-  timers: () => '/timers',
-  timerById: (id) => `/timers/${encodeURIComponent(id)}`,
+  timers: (sessionId) => '/timers' + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) : ''),
+  timerById: (id, sessionId) => '/timers/' + encodeURIComponent(id)
+    + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) : ''),
 
   groups: () => '/groups',
   group: (gid) => `/groups/${encodeURIComponent(gid)}`,

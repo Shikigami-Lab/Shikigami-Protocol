@@ -29,7 +29,7 @@ export function apply(ctx) {
         const { seed, trigger } = buildHistorySeed(envelope);
         binding = Object.freeze({ profile_id: envelope.profile_id, request_id: envelope.request_id,
           context_revision: envelope.context_revision, session_id: envelope.request_id });
-        const names = [...(timer_enabled ? ['timer_create', 'timer_list', 'timer_cancel'] : []), ...(input.business_tools || [])];
+        const names = [...(timer_enabled ? ['timer_create', 'timer_schedule', 'timer_list', 'timer_cancel'] : []), ...(input.business_tools || [])];
         const tools = [...names.map(n => 'mcp__shikigami__' + n), ...(input.native_tools || [])];
         const available = new Set(ctx.tools.schemas().map(t => t.name));
         if (tools.some(n => !available.has(n))) throw new Error('Timer connection is unavailable');

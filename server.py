@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
 
     # ── 计时器到期：后端直接触发 system_trigger ─────────────────────────────────
     from src.tools.timer.manager import _timer_manager
-    from src.tools.timer.expire_handler import make_expire_callback
+    from src.tools.timer.expire_handler import make_expire_callback, publish_reminder_expiry
     from src.utils.debug_logger import log_debug
 
     _loop = asyncio.get_event_loop()
@@ -338,7 +338,9 @@ async def lifespan(app: FastAPI):
     logger.info("[server] ║      Shikigami Protocol  v%s        ║", app.state.version)
     logger.info("[server] ╚══════════════════════════════════════╝")
     logger.info("[server] 监听地址: http://%s:%s", config.host, config.port)
-    yield
+
+    async with app.state.agent_runtime.reminders.running(publish_reminder_expiry):
+        yield
 
     for _task_attr in ("daily_memory_task", "trend_fetcher_task", "weather_fetcher_task"):
         _t = getattr(app.state, _task_attr, None)

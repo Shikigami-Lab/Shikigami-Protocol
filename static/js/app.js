@@ -1393,7 +1393,8 @@ const App = {
           } else if (data.type === 'message_deleted') {
             this._applyMessageDeleted(data.message_id, sessionId);
           } else if (data.type === 'timer_expired') {
-            this.showToast(`计时器「${data.label}」到时了！`, 'timer');
+            if (data.kind === 'reminder') this.notifyDatedReminder(data.timer_id, data.label);
+            else this.showToast(`计时器「${data.label}」到时了！`, 'timer');
             if (this.showTimerPanel) this.refreshTimers();
             // system_trigger 已由后端直接处理，前端只负责 UI 刷新
           } else if (data.type === 'heartbeat_screenshot_request') {
@@ -2953,6 +2954,10 @@ const App = {
       const now = Date.now() / 1000;
       let needSync = false;
       for (const t of list) {
+        if (t.kind === 'reminder') {
+          if (t.status === 'scheduled' && t.end_timestamp <= now) needSync = true;
+          continue;
+        }
         const end = t.end_timestamp != null ? Number(t.end_timestamp) : (now + (t.remaining || 0));
         if (t.end_timestamp == null) t.end_timestamp = end;
         const prev = t.remaining;
@@ -2968,17 +2973,39 @@ const App = {
       const sequence = this.timerFetchSequence = (this.timerFetchSequence || 0) + 1;
       if (!sessionId || this.currentGroupId) { this.timerList = []; return; }
       try {
-        const res = await fetch(getBaseUrl() + API_PATHS.timers());
+        const res = await fetch(getBaseUrl() + API_PATHS.timers(sessionId));
         if (!res.ok) return;
         const raw = (await res.json()).timers || [];
         if (sessionId !== this.currentSessionId || this.currentGroupId || viewVersion !== this.agentViewVersion || sequence !== this.timerFetchSequence) return;
         const now = Date.now() / 1000;
-        this.timerList = raw.filter(t => !t.session_id || t.session_id === sessionId).map((t) => {
+        this.timerList = raw.filter(t => t.kind === 'reminder'
+          ? t.session_id === sessionId : !t.session_id || t.session_id === sessionId).map((t) => {
+          if (t.kind === 'reminder') return t;
           const end = t.end_timestamp != null ? Number(t.end_timestamp) : (now + (t.remaining || 0));
           const rem = Math.max(0, Math.floor(end - now));
           return { ...t, end_timestamp: end, remaining: rem };
         });
+        for (const timer of this.timerList) {
+          if (timer.kind === 'reminder' && timer.status !== 'scheduled') {
+            this.notifyDatedReminder(timer.id, timer.label);
+          }
+        }
       } catch (_) {}
+    },
+
+    notifyDatedReminder(id, label) {
+      if (!id) return;
+      if (!this._seenDatedReminders) {
+        try {
+          const saved = JSON.parse(localStorage.getItem('datedReminderNotices') || '[]');
+          this._seenDatedReminders = new Set(Array.isArray(saved) ? saved : []);
+        } catch (_) { this._seenDatedReminders = new Set(); }
+      }
+      if (this._seenDatedReminders.has(id)) return;
+      this._seenDatedReminders.add(id);
+      try { localStorage.setItem('datedReminderNotices', JSON.stringify([...this._seenDatedReminders].slice(-256))); }
+      catch (_) {}
+      this.showToast(this.t('timerReminderNotice').replace('{label}', () => label), 'timer');
     },
 
     async createTimer() {
@@ -3000,9 +3027,16 @@ const App = {
 
     async cancelTimer(id) {
       try {
-        await fetch(getBaseUrl() + API_PATHS.timerById(id), { method: 'DELETE' });
+        await fetch(getBaseUrl() + API_PATHS.timerById(id, this.currentSessionId), { method: 'DELETE' });
         await this.refreshTimers();
       } catch (_) {}
+    },
+
+    fmtReminderTime(timestamp) {
+      return new Date(timestamp * 1000).toLocaleString(this.locale === 'zh' ? 'zh-CN' : 'en', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
     },
 
     fmtRemaining(secs) {

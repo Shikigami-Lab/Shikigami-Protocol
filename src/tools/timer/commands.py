@@ -95,7 +95,9 @@ async def handle_timer(sub: str, args: str, session, app) -> CommandResult:
                 if label.lower() in t.get("label", "").lower():
                     target = t
                     break
-        if not target:
+            if target is None:
+                return CommandResult(context_for_llm=f"[计时器] 没有找到名为「{label}」的倒计时。")
+        else:
             target = timers[-1]
         stop_timer(target["id"])
         log_timer(session.id, "stop", timer_id=target["id"], label=target["label"])

@@ -365,8 +365,16 @@ class SettingsIntegrityTests(unittest.TestCase):
         data_dir.mkdir()
         self.app.state.session_manager = SimpleNamespace(_sessions={}, _current_id=None, remove_session=Mock())
 
+        from src.agent.runtime import AgentRuntime
+        runtime = self.app.state.agent_runtime = AgentRuntime(self.app, root=self.root)
+        self.addCleanup(runtime.store.close)
+        due_at = "2099-01-01T12:00:00+08:00"
+        runtime.reminders.schedule("example", due_at, "old persona's reminder")
+        runtime.reminders.schedule("another", due_at, "another persona's reminder")
+
         async def recreate(_delay):
             card.write_text('{"display_name":"recreated"}', encoding="utf-8")
+            runtime.reminders.schedule("example", due_at, "new persona's reminder")
 
         with patch.object(settings_ext.shutil, "rmtree", side_effect=[PermissionError, None]) as remove, \
                 patch.object(settings_ext.asyncio, "sleep", new=AsyncMock(side_effect=recreate)) as sleep:
@@ -375,6 +383,8 @@ class SettingsIntegrityTests(unittest.TestCase):
         remove.assert_called_once()
         self.assertTrue(card.exists())
         self.assertTrue(data_dir.exists())
+        self.assertEqual([r["label"] for r in runtime.reminders.list_for("example")], ["new persona's reminder"])
+        self.assertEqual([r["label"] for r in runtime.reminders.list_for("another")], ["another persona's reminder"])
 
     def test_adjacent_settings_routes_reject_cross_site_before_dispatch(self):
         for method, path in (

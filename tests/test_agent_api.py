@@ -438,7 +438,7 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         run = self.prepare()
         matches = await self.runtime.execute_tool(run.id, "task_search", {"query": "weekend"}, "1")
         self.assertEqual([row["run_id"] for row in matches["matches"]], ["past-alpha"])
-        self.assertEqual(run.task_matches["matches"][0]["artifacts"], [{"path": "notes/weekend.md"}])
+        self.assertEqual(run.task_matches[0]["matches"][0]["artifacts"], [{"path": "notes/weekend.md"}])
         await self.runtime._publish(run, {"type": "tool_call", "tool_name": "mcp__shikigami__task_search",
             "call_id": "search-1", "arguments": '{"query":"weekend"}'})
         await self.runtime._publish(run, {"type": "tool_result", "call_id": "search-1",
@@ -448,6 +448,18 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         self.config.agent["history_enabled"] = False
         with self.assertRaisesRegex(ValueError, "permissions changed"):
             await self.runtime.execute_tool(run.id, "task_search", {"query": "weekend"}, "2")
+
+    async def test_task_context_hides_old_workspace_output_when_permission_is_off(self):
+        store = self.runtime.store
+        store.begin_run("old-work", "alpha", "old-work")
+        store.append_event("old-work", {"type": "tool_call", "tool_name": "read", "call_id": "read-1"})
+        store.append_event("old-work", {"type": "tool_result", "summary": "old file body", "call_id": "read-1"})
+        store.finish_run("old-work", "completed")
+        self.config.agent["history_enabled"] = True
+        run = self.prepare()
+        data = await self.runtime.execute_tool(run.id, "task_context", {"run_id": "old-work"}, "1")
+        self.assertEqual(data["events"], [])
+        self.assertIn("old file body", str(store.task_context("alpha", "old-work")["events"]))
 
     async def test_invalid_profile_query_is_rejected_before_session_lookup(self):
         for value in ("", ".", "..", "../alpha", "alpha/beta", "alpha\\beta", "C:alpha", "a\x00b", "a" * 257):
@@ -480,7 +492,8 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
     async def test_stale_runs_are_hidden_and_controls_return_404(self):
         run = self.prepare()
         await self.runtime.invalidate("alpha")
-        self.assertEqual((await self.request("GET", "/runs", params={"profile_id": "alpha"})).json(), {"runs": []})
+        self.assertEqual((await self.request("GET", "/runs", params={"profile_id": "alpha"})).json(),
+                         {"runs": [], "revision": self.runtime.store.revision("alpha")})
         for action, extra in (("cancel", {}), ("approval", {"approval_id": "old", "outcome": "rejected"})):
             response = await self.request("POST", f"/runs/{run.id}/{action}", json={"profile_id": "alpha", **extra})
             self.assertEqual(response.status_code, 404)

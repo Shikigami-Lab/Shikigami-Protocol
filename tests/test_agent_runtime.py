@@ -1,5 +1,6 @@
 """Host authority/receipts tests use temporary state and the real TimerManager."""
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -48,6 +49,29 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.runtime.execute_timer(self.run.id, "timer_cancel", {"timer_id": first['timer_id']}, "request-4")
         self.assertEqual(len(self.timers.list_timers()), 1)
         self.assertTrue(self.runtime.reflection_results('a'))
+
+    async def test_schedule_uses_receipts_and_current_profile_permission(self):
+        name = "timer_schedule"
+        args = {"due_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(), "label": "materials"}
+        first = await self.runtime.execute_timer(self.run.id, name, args, "schedule-1")
+        self.assertEqual(await self.runtime.execute_timer(self.run.id, name, args, "schedule-1"), first)
+        with self.assertRaisesRegex(ValueError, "reused"):
+            await self.runtime.execute_timer(self.run.id, name, {**args, "label": "changed"}, "schedule-1")
+        self.runtime.store.claim_action(self.run.id, "mcp:uncertain", name, args)
+        with self.assertRaisesRegex(ValueError, "not replaying"):
+            await self.runtime.execute_timer(self.run.id, name, args, "uncertain")
+        listed = await self.runtime.execute_timer(self.run.id, "timer_list", {}, "list")
+        self.assertEqual([(t["id"], t["kind"], t["due_at"]) for t in listed["timers"]],
+                         [(first["timer_id"], "reminder", args["due_at"])])
+        other = self.runtime.prepare(SimpleNamespace(profile_id="b", id="b"), self.run.envelope["messages"],
+                                     self.config.get_active_llm_preset())
+        with self.assertRaisesRegex(ValueError, "not found"):
+            await self.runtime.execute_timer(other.id, "timer_cancel", {"timer_id": first["timer_id"]}, "cross")
+        await self.runtime.execute_timer(self.run.id, "timer_cancel", {"timer_id": first["timer_id"]}, "cancel")
+        self.assertEqual((await self.runtime.execute_timer(self.run.id, "timer_list", {}, "empty"))["total"], 0)
+        self.runtime.profile_loader = lambda _: {"tool_configs": {"timer": {"enabled": False}}}
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            await self.runtime.execute_timer(self.run.id, name, args, "disabled")
 
     async def test_cancelled_invalidated_and_disabled_requests_cannot_execute(self):
         await self.runtime.invalidate('a')

@@ -402,7 +402,7 @@ class LinkStore:
                         AND (r.state IN ('cancelled','failed') OR r.parent_run_id IS NOT NULL
                             OR EXISTS (SELECT 1 FROM actions a WHERE a.run_id=r.run_id)
                             OR EXISTS (SELECT 1 FROM events e WHERE e.run_id=r.run_id
-                                AND link_is_tool_call(e.payload)))
+                                AND link_is_tool_call(e.payload, 'task_search')))
                     ORDER BY r.ordinal DESC LIMIT 1""", (profile_id,)).fetchone()
                 if run is None:
                     return {}

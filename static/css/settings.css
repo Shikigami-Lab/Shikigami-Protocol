@@ -2997,6 +2997,9 @@ textarea.form-input {
 
 /* Timer-specific */
 .tp-timer-item { gap: 8px; }
+.tp-timer-details { flex: 1; min-width: 0; }
+.tp-timer-details .tp-text { display: block; }
+.tp-timer-details small { color: var(--text-secondary); }
 .tp-timer-remain {
   font-family: 'Courier New', monospace;
   font-size: var(--fs-sm);
