@@ -6,7 +6,7 @@ import os
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Optional
 
-from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT, DEFAULT_CURATION_BATCH_SIZE, MAX_CURATION_BATCH_SIZE
+from src.memory.batch_curation import review_options
 from src.memory.curation import (
     CurationConflict, DailyDialogue, curation_for, curation_preset, request_batch_review, request_daily_extraction,
 )
@@ -320,16 +320,7 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
             )
 
         def review_is_current():
-            return fixed_review_prompt(app) == review_prompt and review_options() == (active_limit, batch_size)
-
-        def review_options():
-            limit = manager._cfg.get("curation_active_limit")
-            size = manager._cfg.get("curation_batch_size")
-            if type(limit) is not int or not 1 <= limit <= 1_000_000:
-                limit = DEFAULT_CURATION_ACTIVE_LIMIT
-            if type(size) is not int or not 1 <= size <= MAX_CURATION_BATCH_SIZE:
-                size = DEFAULT_CURATION_BATCH_SIZE
-            return limit, size
+            return fixed_review_prompt(app) == review_prompt and review_options(manager._cfg) == (active_limit, batch_size)
 
         async def decide(batch):
             if active_manager() is not manager or not review_is_current():
@@ -360,7 +351,7 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
 
             preset = curation_preset(manager, app)
             review_prompt = fixed_review_prompt(app)
-            active_limit, batch_size = review_options()
+            active_limit, batch_size = review_options(manager._cfg)
             changed = await curation_for(manager).run_daily(
                 today, decide, enabled=lambda: active_manager() is manager,
                 prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue,
@@ -376,6 +367,8 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
         if changed and manager.vectors and manager.vectors.is_available():
             for fact_id in changed:
                 await manager.reembed_fact(fact_id)
+        if active_manager() is manager:
+            await manager.prune_curation_index()
     except Exception:
         logger.warning("Daily curation unavailable for profile %s", session.profile_id)
 

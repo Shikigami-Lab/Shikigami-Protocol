@@ -134,7 +134,7 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
         self.assertNotIn("daily", state)
         self.get_provider.assert_not_called()
 
-    async def test_capacity_review_sends_oldest_thirty_and_removes_only_the_excess(self):
+    async def test_capacity_review_sends_excess_and_follows_valid_model_decisions(self):
         self.seed(registered=False, old=False)
         self.manager._cfg["curation_active_limit"] = 31
         revision, cursors, _, state = self.manager.facts.curation_snapshot()
@@ -158,7 +158,7 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
         store = LongTermStore(self.root)
         self.assertEqual(len(self.calls), 1)
         self.assertEqual([fact.id for fact in store.get_all() if fact.archived],
-                         ["old-1", "old-2", "old-3"])
+                         [f"old-{index}" for index in range(1, 31)])
         self.assertEqual(store.curation_status()["daily"]["excess_after"], 0)
 
     async def test_character_batch_override_sends_one_hundred_in_one_request(self):

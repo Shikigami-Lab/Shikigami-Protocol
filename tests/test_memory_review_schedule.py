@@ -28,6 +28,7 @@ class MemoryReviewScheduleTests(IsolatedAsyncioTestCase):
     def open_manager(self, **config):
         return SimpleNamespace(
             facts=LongTermStore(self.root), vectors=None, _extraction_lock=asyncio.Lock(),
+            prune_curation_index=AsyncMock(),
             _cfg={"enabled": True, "daily_curation_enabled": True, **config},
         )
 

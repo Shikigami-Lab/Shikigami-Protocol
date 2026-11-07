@@ -21,7 +21,9 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.memory.curation import CurationConflict, curation_for, curation_preset, fixed_review_prompt, request_fixed_review, review_model_key
+from src.config.app_config import MAX_CURATION_BATCH_SIZE
+from src.memory.batch_curation import review_options
+from src.memory.curation import CurationConflict, curation_for, curation_preset, fixed_review_prompt, request_batch_review, review_model_key
 from src.memory.recall import RecallCandidates, experience_links_by_day
 from src.memory.extraction_batches import memory_source_excerpt
 from src.memory.long_term_store import fact_action_revision
@@ -272,7 +274,7 @@ class BulkCurationPromote(BaseModel):
 
 class CurationApply(BaseModel):
     preview_id: str = Field(min_length=32, max_length=32)
-    fact_ids: Optional[List[str]] = Field(default=None, max_length=24)
+    fact_ids: Optional[List[str]] = Field(default=None, max_length=MAX_CURATION_BATCH_SIZE)
 
 
 class ArchiveRestore(BaseModel):
@@ -303,14 +305,13 @@ def _require_curation(request: Request, profile_id: str):
 async def preview_curation(profile_id: str, request: Request):
     manager, curation = _require_curation(request, profile_id)
     try:
+        if not manager._cfg.get("enabled"):
+            raise CurationConflict("Enable memory before starting a review")
         preset = curation_preset(manager, request.app)
-
-        prompt = fixed_review_prompt(request.app)
-
-        async def decide(rows):
-            return await request_fixed_review(rows, preset, review_prompt=prompt)
-
-        return await curation.preview_fixed(decide, model_key=review_model_key(preset, review_prompt=prompt))
+        decide, prompt, limit, size, comparison, is_current = _batch_review_request(manager, request, preset)
+        return await curation.preview_batch(
+            decide, limit=limit, batch_size=size, comparison=comparison, review_is_current=is_current,
+        )
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception:
@@ -322,6 +323,8 @@ async def preview_curation(profile_id: str, request: Request):
 async def preview_curation_page(profile_id: str, body: BulkCurationPreview, request: Request):
     manager, curation = _require_curation(request, profile_id)
     try:
+        if body.fact_id is not None and not manager._cfg.get("enabled"):
+            raise CurationConflict("Enable memory before starting a review")
         try:
             preset = curation_preset(manager, request.app)
         except CurationConflict:
@@ -329,19 +332,38 @@ async def preview_curation_page(profile_id: str, body: BulkCurationPreview, requ
                 raise
             preset = None
 
-        prompt = fixed_review_prompt(request.app)
-
-        async def decide(rows):
-            return await request_fixed_review(rows, preset, review_prompt=prompt)
-
+        decide, prompt, limit, _, comparison, is_current = _batch_review_request(manager, request, preset)
         return await curation.preview_bulk_fixed(
             decide, cursor=body.cursor, fact_id=body.fact_id, model_key=review_model_key(preset, review_prompt=prompt),
+            batch_limit=limit, comparison=comparison, review_is_current=is_current,
         )
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception:
         logger.warning("Bulk memory curation preview failed for profile %s", profile_id)
         raise HTTPException(status_code=502, detail="The memory model did not return a valid preview")
+
+
+def _batch_review_request(manager, request, preset):
+    from src.memory.review_neighbors import find_review_comparison
+
+    prompt = fixed_review_prompt(request.app)
+    limit, size = review_options(manager._cfg)
+
+    def is_current():
+        managers = getattr(request.app.state, "memory_managers", None)
+        return (manager._cfg.get("enabled") and (managers is None or managers.get(manager._profile_id) is manager)
+                and fixed_review_prompt(request.app) == prompt and review_options(manager._cfg) == (limit, size))
+
+    async def decide(batch):
+        if not is_current():
+            raise CurationConflict("Memory review settings changed before the request")
+        return await request_batch_review(batch, preset, review_prompt=prompt)
+
+    def comparison(subject, facts):
+        return find_review_comparison(subject, facts, manager.vectors)
+
+    return decide, prompt, limit, size, comparison, is_current
 
 
 @router.post("/{profile_id}/curation/bulk-preview/promote")

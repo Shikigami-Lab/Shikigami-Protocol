@@ -16,11 +16,30 @@ memory:
       Confirm an existing record when its content is repeated. Update it after an explicit correction. Return an empty result when nothing belongs in memory.
 
   review_task: |
-    Keep durable preferences, boundaries, corrections, dated information, and meaningful
-    experiences with a concrete future use. Age alone proves nothing. No source link alone
-    does not prove a claim unsupported. Archive a unique one-off action, pure roleplay detail,
-    unsupported inference, obsolete context, or an unresolved reference with no actionable
-    claim when the entire subject supports that judgment.
+    Review only the contents of each individual record. Other records in this
+    request cannot establish coverage. Use archive only for a complete record that is
+    plainly disposable roleplay, a one-off question or passing reaction, or unsupported
+    character speculation. Keep any actual event, user's lived detail, preference,
+    boundary, correction, constraint, commitment, or useful personal observation.
+    Preserve a whole mixed record if any part might still be useful. Do not infer that
+    a record is covered by another one. Here there are no duplicate comparisons.
+    State a short specific reason, in the record's language. If unclear, keep.
+
+    Keep direct user feedback about the character, a concrete reported event and
+    the user's reaction, a specific request or plan about how to interact with a
+    character, and a distinctive comparison the user made about the character if it
+    could help recall their shared history. Keep these even when mentioned once or
+    surrounded by roleplay. A named technical term inside a joke, an unspecified
+    test, or a generic scene reaction without independent content can still be
+    archived. Do not invent the real meaning of vague wording.
+
+    Archive a record that only captures temporary progress, such as a result
+    that was still pending, a booking that had just been made, or a countdown
+    from the time of the conversation. Keep it if the record contains a clear
+    follow-up that may still need action, a concrete outcome, or a useful detail
+    worth recalling on its own. Read phrases like “three days left” in the
+    context of the original conversation. A specific amount, size, or duration
+    alone does not make a status update worth keeping.
 
   day_summary_task:
     zh: |

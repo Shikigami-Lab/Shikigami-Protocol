@@ -939,12 +939,15 @@ test('a pending row review is discarded when switching personas and back', async
   assert.equal(model.memoryBulkCurationPending, false);
 });
 
-test('an old-store preview leaves a normal preview selectable and applicable', async () => {
+test('a 100-row batch stays selectable while browsing and applies all checked IDs in one request', async () => {
   const calls = [];
+  const items = Array.from({ length: 100 }, (_, index) => ({ fact_id: `fact-${index + 1}`, action: 'archive' }));
+  const ids = items.map(item => item.fact_id);
   const { model } = harness(async (url, options) => {
-    if (url === 'memoryCurationPreview/a') return response({
-      profile_id: 'a', preview_id: 'normal', items: [{ fact_id: 'eligible', action: 'archive' }],
-    });
+    if (url === 'memoryCurationPreview/a') {
+      assert.equal(options.method, 'POST');
+      return response({ profile_id: 'a', preview_id: 'batch', items });
+    }
     if (url === 'memoryCurationBulkPreview/a') return response({
       profile_id: 'a', page_cursor: null, items: [{ fact_id: 'bulk', action: 'pending' }],
       coverage: { total: 1, offset: 0, covered: 1 }, next_cursor: null,
@@ -957,10 +960,25 @@ test('an old-store preview leaves a normal preview selectable and applicable', a
   });
   model.selectMemoryProfile('a');
   await model.loadMemoryCurationPreview('a');
+  assert.deepEqual([...model.memoryCurationSelection], ids);
+  assert.equal(model.memoryCurationCounts.archive, 100);
+  model.memoryCurationSelection = ids.slice(1);
   await model.loadMemoryBulkCurationPage('a');
-  assert.deepEqual([...model.memoryCurationSelection], ['eligible']);
+  assert.deepEqual([...model.memoryCurationSelection], ids.slice(1));
   await model.applyMemoryCuration();
-  assert.deepEqual(calls, [{ preview_id: 'normal', fact_ids: ['eligible'] }]);
+  assert.deepEqual(calls, [{ preview_id: 'batch', fact_ids: ids.slice(1) }]);
+});
+
+test('manual batch generation moves focus to the preview when it is ready', async () => {
+  const { model } = harness(async () => response({ profile_id: 'a', preview_id: 'batch', items: [] }));
+  const focusedPreviews = [];
+  model.$refs = { memoryCurationReview: {
+    focus: () => focusedPreviews.push(model.memoryCurationPreview.preview_id),
+    scrollIntoView() {},
+  } };
+  model.selectMemoryProfile('a');
+  await model.loadMemoryCurationPreview('a');
+  assert.deepEqual(focusedPreviews, ['batch']);
 });
 
 test('an empty preview cannot be applied and a rejected preview cannot be applied again', async () => {

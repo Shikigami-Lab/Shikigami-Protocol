@@ -5347,6 +5347,15 @@ const SettingsMixin = {
       return true;
     },
 
+    focusMemoryCurationPreview(current) {
+      return this.$nextTick(() => {
+        if (!current()) return;
+        const preview = this.$refs?.memoryCurationReview;
+        preview?.focus({ preventScroll: true });
+        preview?.scrollIntoView({ block: 'nearest' });
+      });
+    },
+
     async loadMemoryCurationPreview(profileId) {
       if (this.memoryCurationPending || this.memoryRestoringFactId || this.memoryPanelLoading
           || profileId !== this.memoryContentProfileId) return;
@@ -5360,7 +5369,9 @@ const SettingsMixin = {
         if (!current()) return;
         if (!res.ok || !this.acceptMemoryCurationPreview(data, profileId)) {
           this.showToast(this.t('toastMemoryCurationPreviewFail'), 'error');
+          return;
         }
+        await this.focusMemoryCurationPreview(current);
       } catch {
         if (current()) this.showToast(this.t('toastMemoryCurationPreviewFail'), 'error');
       } finally {
@@ -5434,12 +5445,7 @@ const SettingsMixin = {
           this.showToast(this.t('toastMemoryBulkCurationPromoteFail'), 'error');
           return;
         }
-        await this.$nextTick(() => {
-          if (!current()) return;
-          const preview = this.$refs?.memoryCurationReview;
-          preview?.focus({ preventScroll: true });
-          preview?.scrollIntoView({ block: 'nearest' });
-        });
+        await this.focusMemoryCurationPreview(current);
       } catch {
         if (current()) this.showToast(this.t('toastMemoryBulkCurationPromoteFail'), 'error');
       } finally {

@@ -62,6 +62,7 @@ class _BulkPage:
     versions: dict[str, str]
     items: dict[str, dict]
     fixed: bool = False
+    review_is_current: Callable[[], bool] | None = None
 
 
 @dataclass
@@ -70,6 +71,8 @@ class _PendingPreview:
     versions: dict[str, str]
     items: list[dict]
     promoted: bool
+    reviewed: dict | None = None
+    review_is_current: Callable[[], bool] | None = None
 
 
 class CurationConflict(Exception):
@@ -321,9 +324,10 @@ class MemoryCuration:
         self._bulk_scope = uuid.uuid4().hex
         self._bulk_page: _BulkPage | None = None
 
-    def _stage_preview(self, versions: dict[str, str], items: list[dict], *, promoted: bool = False) -> dict:
+    def _stage_preview(self, versions: dict[str, str], items: list[dict], *, promoted: bool = False,
+                       reviewed=None, review_is_current=None) -> dict:
         preview_id = uuid.uuid4().hex
-        self._pending = _PendingPreview(preview_id, versions, items, promoted)
+        self._pending = _PendingPreview(preview_id, versions, items, promoted, reviewed, review_is_current)
         return {"profile_id": self.profile_id, "preview_id": preview_id, "items": deepcopy(items)}
 
     @staticmethod
@@ -347,14 +351,22 @@ class MemoryCuration:
             "key": review_key(rows, model_key), "model_key": model_key, "item": payload,
         }
 
-    async def _evaluate_fixed(self, decide, snapshot, rows, model_key):
+    async def _evaluate_fixed(self, decide, snapshot, rows, model_key, *, batch=None, review_is_current=None):
         from src.memory.curation_plan import validate_review
 
         revision, cursors, facts, state = snapshot
         cached = self._cached_review(state, rows, model_key)
         if cached is not None:
             return snapshot, cached
-        item, = validate_review(rows, await decide(rows))
+        if batch is None:
+            item, = validate_review(rows, await decide(rows))
+        else:
+            from src.memory.batch_curation import validate_batch_review
+
+            items, _ = validate_batch_review(batch, await decide(batch))
+            item, = items
+            if review_is_current and not review_is_current():
+                raise CurationConflict("Memory review settings changed during the request")
         self._remember_review(state, rows, item, model_key)
         if not self.store.apply_curation(revision, facts, cursors, state):
             raise CurationConflict("Memories changed during the review")
@@ -362,6 +374,31 @@ class MemoryCuration:
         if current[2] != facts:
             raise CurationConflict("Memories changed after the review")
         return current, item
+
+    async def preview_batch(self, decide, *, limit, batch_size, comparison, review_is_current):
+        from src.memory.batch_curation import make_review_batch, select_review_subjects, validate_batch_review
+
+        if self._in_flight.locked():
+            raise CurationConflict("A memory preview is already running")
+        async with self._in_flight:
+            revision, cursors, facts, state = self.store.curation_snapshot()
+            subjects, active = select_review_subjects(facts, state.get("batch_reviewed", {}), limit, batch_size)
+            if not subjects:
+                return self._stage_preview({}, [])
+            batch = await asyncio.to_thread(make_review_batch, subjects, facts, active, limit, comparison)
+            if not review_is_current():
+                raise CurationConflict("Memory review settings changed before the request")
+            items, reviewed = validate_batch_review(batch, await decide(batch))
+            if not review_is_current() or self.store.curation_snapshot()[0] != revision:
+                raise CurationConflict("Memories or review settings changed during the request")
+            # A successful keep needs no user action. Archive and merge stay staged until applied.
+            keeps = {item["fact_id"]: reviewed[item["fact_id"]] for item in items if item["action"] == "keep"}
+            if keeps:
+                state.setdefault("batch_reviewed", {}).update(keeps)
+                if not self.store.apply_curation(revision, facts, cursors, state):
+                    raise CurationConflict("Memories changed during the review")
+            versions = {fact.id:fact_action_revision(fact) for pair in batch.pairs for fact in pair if fact is not None}
+            return self._stage_preview(versions, items, reviewed=reviewed, review_is_current=review_is_current)
 
     async def preview_fixed(self, decide: Decide, *, model_key="", fact_id=None) -> dict:
         if self._in_flight.locked():
@@ -381,7 +418,8 @@ class MemoryCuration:
             _, item = await self._evaluate_fixed(decide, snapshot, rows, model_key)
             return self._stage_preview({f.id: fact_action_revision(f) for f in rows}, [item])
 
-    async def preview_bulk_fixed(self, decide: Decide, *, cursor=None, fact_id=None, model_key="") -> dict:
+    async def preview_bulk_fixed(self, decide: Decide, *, cursor=None, fact_id=None, model_key="",
+                                 batch_limit=None, comparison=None, review_is_current=None) -> dict:
         """Page a frozen snapshot for free; an explicit focus reviews only that item."""
         if self._in_flight.locked():
             raise CurationConflict("A memory preview is already running")
@@ -405,11 +443,24 @@ class MemoryCuration:
                 if cursor != f"{scope}{offset}" or not 0 < offset < len(ordered) or offset % _BATCH_SIZE:
                     raise CurationConflict("Invalid bulk memory preview cursor")
             page = ordered[offset:offset + _BATCH_SIZE]
+            if batch_limit is not None:
+                from src.memory.batch_curation import make_review_batch
+
+                active = sum(fact.is_active() for fact in ordered)
+                model_key = f"batch:{batch_limit}:{active}:{model_key}"
+
+            def batch_for(subject):
+                return make_review_batch([subject], ordered, active, batch_limit, comparison)
+
             if fact_id is not None:
                 subject = next((f for f in page if f.id == fact_id), None)
                 if subject is None or _curation_keep_reason(subject):
                     raise CurationConflict("The selected memory is unavailable for review")
-                snapshot, _ = await self._evaluate_fixed(decide, snapshot, _fixed_rows(subject, ordered), model_key)
+                batch = batch_for(subject) if batch_limit is not None else None
+                task = [fact for fact in batch.pairs[0] if fact is not None] if batch else _fixed_rows(subject, ordered)
+                snapshot, _ = await self._evaluate_fixed(
+                    decide, snapshot, task, model_key, batch=batch, review_is_current=review_is_current,
+                )
             revision, _, _, state = snapshot
             items = {}
             for fact in page:
@@ -417,13 +468,19 @@ class MemoryCuration:
                 if keep_reason:
                     items[fact.id] = _item(fact, "keep", keep_reason)
                     continue
-                task = _fixed_rows(fact, ordered)
-                items[fact.id] = self._cached_review(state, task, model_key) or _item(
+                cached = None
+                entry = state.get("fixed_reviews", {}).get(fact.id)
+                if entry and entry.get("model_key") == model_key:
+                    batch = batch_for(fact) if batch_limit is not None else None
+                    task = [entry for entry in batch.pairs[0] if entry is not None] if batch else _fixed_rows(fact, ordered)
+                    cached = self._cached_review(state, task, model_key)
+                items[fact.id] = cached or _item(
                     fact, "pending", "尚未审阅，继续使用 / Unreviewed; remains available",
                 )
             covered = offset + len(page)
             page_token = uuid.uuid4().hex
-            self._bulk_page = _BulkPage(page_token, self.profile_id, revision, versions, items, fixed=True)
+            self._bulk_page = _BulkPage(page_token, self.profile_id, revision, versions, items, fixed=True,
+                                        review_is_current=review_is_current)
             return {"profile_id": self.profile_id, "page_token": page_token,
                     "items": deepcopy(list(items.values())),
                     "coverage": {"total": len(ordered), "offset": offset, "covered": covered},
@@ -538,7 +595,7 @@ class MemoryCuration:
                     or fact_action_revision(fact) != version):
                 raise CurationConflict("Memories changed after the bulk preview")
             versions[selected_id] = version
-        return self._stage_preview(versions, [item], promoted=True)
+        return self._stage_preview(versions, [item], promoted=True, review_is_current=page.review_is_current)
 
     def apply(self, preview_id: str, fact_ids: list[str] | None = None) -> dict:
         revision, cursors, facts, state = self.store.curation_snapshot()
@@ -551,6 +608,8 @@ class MemoryCuration:
         pending = self._pending
         if pending is None or preview_id != pending.id:
             raise CurationConflict("Generate a fresh memory preview")
+        if pending.review_is_current and not pending.review_is_current():
+            raise CurationConflict("Memory review settings changed after the preview")
         if pending.promoted and selection == []:
             raise CurationConflict("Select the promoted memory suggestion")
         versions, items = pending.versions, pending.items
@@ -561,6 +620,15 @@ class MemoryCuration:
             items = [item for item in items if item["action"] == "keep" or item["fact_id"] in selected]
             relevant_ids = {item["fact_id"] for item in items} | {item["target_id"] for item in items}
             versions = {fact_id: version for fact_id, version in versions.items() if fact_id in relevant_ids}
+        if pending.review_is_current is not None:
+            from src.memory.batch_curation import merge_representatives
+
+            if {item["fact_id"] for item in items if item["action"] == "merge"} & merge_representatives(facts):
+                raise CurationConflict("A fact became a merge representative after the preview")
+        if pending.reviewed is not None:
+            state.setdefault("batch_reviewed", {}).update({
+                item["fact_id"]:pending.reviewed[item["fact_id"]] for item in items
+            })
         receipt = self._commit_preview(preview_id, versions, items, revision, cursors, facts, state,
                                        origin="manual", selection=selection)
         self._pending = None
@@ -725,7 +793,8 @@ class MemoryCuration:
                     if sum(fact.is_active() for fact in current_facts) != review_batch.active:
                         raise CurationConflict("Active fact count changed during review")
                     retiring = {item["fact_id"] for item in items if item["action"] in ("archive", "merge")}
-                    if retiring & merge_representatives(current_facts):
+                    merging = {item["fact_id"] for item in items if item["action"] == "merge"}
+                    if merging & merge_representatives(current_facts):
                         raise CurationConflict("A fact became a merge representative during review")
                     versions.update({target.id:_version(target) for _, target in review_batch.pairs if target is not None})
                     current_ids = {fact.id for fact in current_facts}
@@ -835,12 +904,6 @@ def curation_preset(manager, app) -> dict:
     if not preset or not preset.get("model"):
         raise CurationConflict("Select a memory model before generating suggestions")
     return preset
-
-
-async def request_fixed_review(rows, preset, *, review_prompt=None):
-    from src.memory.curation_plan import review_messages
-
-    return (await _request_object(review_messages(rows, review_prompt=review_prompt), preset)).get("items")
 
 
 async def request_batch_review(batch, preset, *, review_prompt):

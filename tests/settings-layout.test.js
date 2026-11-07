@@ -107,6 +107,20 @@ test('manual memory curation exposes its preview and apply separately from local
   ]) assert.ok(memory.includes(binding), binding);
 });
 
+test('manual batch preview names the shared settings and exposes the selection count', () => {
+  const window = {};
+  runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
+  assert.match(window.LOCALES.en.hintMemoryCurationModel, /batch.*batch size.*prompt.*protections.*Daily Forgetting/i);
+  assert.match(window.LOCALES.zh.hintMemoryCurationModel, /批量.*每日遗忘.*每轮条数.*提示词.*保护/);
+  assert.match(window.LOCALES.en.hintCurationBatchSize, /scheduled review.*manual batch preview/);
+  assert.match(window.LOCALES.zh.hintCurationBatchSize, /计划审阅.*手动批量预览/);
+  assert.match(html, /<button[^>]*aria-describedby="memory-curation-hint"[^>]*@click="loadMemoryCurationPreview/);
+  assert.match(html, /<p id="memory-curation-hint"[^>]*>\{\{ t\('hintMemoryCurationModel'\) \}\}/);
+  assert.match(html, /id="memory-curation-preview"[^>]*role="region"[^>]*aria-labelledby="memory-curation-preview-title"/);
+  assert.match(html, /id="memory-curation-preview-title"[^>]*>[\s\S]*?memoryCurationPromoted \? 'memCurationPreviewTitle' : 'memCurationBatchPreviewTitle'/);
+  assert.match(html, /role="status"[^>]*>\s*\{\{ t\('memCurationPreviewCount'\)[\s\S]*?\.replace\('\{selected\}', memoryCurationSelection.length\)[\s\S]*?\.replace\('\{total\}', memoryCurationPreview.items.length\)/);
+});
+
 test('old-store preview separates free browsing from explicit per-row review in Maintenance', () => {
   const window = {};
   for (const filename of ['api-paths.js', 'i18n.js']) {
@@ -122,11 +136,13 @@ test('old-store preview separates free browsing from explicit per-row review in 
   assert.match(bulk, /memoryBulkCurationPage.items/);
   assert.match(bulk, /id="memory-bulk-curation-coverage"/);
   assert.doesNotMatch(bulk, /applyMemoryCuration|type="checkbox"|@toggle/);
-  assert.match(window.LOCALES.en.memBulkCurationTitle, /read-only/i);
+  assert.match(window.LOCALES.en.memBulkCurationTitle, /browse old memories/i);
   assert.match(window.LOCALES.en.hintMemoryBulkCuration, /browsing.*free.*review.*one model request.*cache/i);
+  assert.match(window.LOCALES.en.hintMemoryBulkCuration, /same prompt and protections as Daily Forgetting/i);
   assert.equal(window.LOCALES.en.memCurationAction_pending, 'Unreviewed');
-  assert.match(window.LOCALES.zh.memBulkCurationTitle, /只读/);
+  assert.match(window.LOCALES.zh.memBulkCurationTitle, /浏览旧记忆/);
   assert.match(window.LOCALES.zh.hintMemoryBulkCuration, /浏览.*免费.*审阅.*一次模型请求.*缓存/);
+  assert.match(window.LOCALES.zh.hintMemoryBulkCuration, /与每日遗忘相同的提示词和保护规则/);
 });
 
 test('manual and bulk update previews compare the original and proposed text and show optional trim counts', () => {

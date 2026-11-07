@@ -53,21 +53,22 @@ class CapacityReviewTests(TestCase):
         batch = make_review_batch([source], [source, target], 2, 1, comparison=lambda *_: target)
         self.assertEqual(validate_batch_review(batch, answer("merge"))[0][0]["action"], "keep")
 
-    def test_existing_merge_representative_must_stay_active(self):
+    def test_existing_merge_representative_cannot_be_remerged_but_can_be_archived(self):
         source = fact("a", "The user prefers unsweetened tea.", kind="stable", category="preference")
         target = fact("b", source.content, kind="stable", category="preference")
         archived = fact("old", source.content, archived=True, archive_reason="merged", merged_into=source.id)
         batch = make_review_batch([source], [source, target, archived], 2, 1, comparison=lambda *_: target)
         self.assertEqual(validate_batch_review(batch, answer("merge"))[0][0]["action"], "keep")
+        self.assertEqual(validate_batch_review(batch, answer("archive"))[0][0]["action"], "archive")
 
-    def test_archive_requires_positive_evidence_in_legacy_text(self):
+    def test_archive_uses_model_decision_without_a_text_whitelist(self):
         action = answer("archive")
         real = fact("a", "My sister lives in Toronto.", category="relationship")
         question = fact("b", "角色观察到用户询问IPv4和IPv6。关键词：IPv4 IPv6")
-        for row, expected in ((real, "keep"), (question, "archive")):
+        for row in (real, question):
             with self.subTest(row=row.id):
                 batch = make_review_batch([row], [row], 1, 1)
-                self.assertEqual(validate_batch_review(batch, action)[0][0]["action"], expected)
+                self.assertEqual(validate_batch_review(batch, action)[0][0]["action"], "archive")
 
     def test_capacity_never_forces_an_archive_or_rebills_same_keep(self):
         first = fact("a")
@@ -77,8 +78,8 @@ class CapacityReviewTests(TestCase):
         self.assertEqual(actions[0]["action"], "keep")
         self.assertEqual(select_review_subjects([first,protected], reviewed, 1)[0], [])
 
-    def test_archiving_named_real_life_facts_and_conflicting_ids_are_blocked(self):
-        row = fact("a", "角色得知用户喷了名为 Harbor Mist 的香水。")
+    def test_explicitly_protected_facts_and_conflicting_ids_are_blocked(self):
+        row = fact("a", "角色得知用户喷了名为 Harbor Mist 的香水。", pinned=True)
         batch = make_review_batch([row], [row], 1, 1)
         decisions, _ = validate_batch_review(batch, answer("archive"))
         self.assertEqual(decisions[0]["action"], "keep")

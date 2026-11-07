@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memorybatch"></script>
+  <script src="js/i18n.js?v=20261107memoryReviewBatch"></script>
 </head>
 <body>
 
@@ -5070,17 +5070,25 @@
 
             <div class="s-card memory-maintenance-card">
               <div class="s-card-title">{{ t('memCurationTitle') }}</div>
-              <p class="mem-cfg-hint">{{ t('hintMemoryCurationModel') }}</p>
+              <p id="memory-curation-hint" class="mem-cfg-hint">{{ t('hintMemoryCurationModel') }}</p>
               <div class="memory-maintenance-actions">
                 <button type="button" class="s-btn s-btn-secondary"
+                        aria-describedby="memory-curation-hint"
                         :disabled="!!memoryCurationPending || !!memoryRestoringFactId || !memoryProfileId"
                         @click="loadMemoryCurationPreview(memoryProfileId)">
                   {{ t(memoryCurationPending === 'preview' ? 'btnMemoryCurationGenerating' : 'btnMemoryCurationGenerate') }}
                 </button>
               </div>
 
-              <div v-if="memoryCurationPreview" id="memory-curation-preview" ref="memoryCurationReview" tabindex="-1" class="mem-curation-preview">
-                <div class="mem-diary-preview-title">{{ t('memCurationPreviewTitle') }}</div>
+              <div v-if="memoryCurationPreview" id="memory-curation-preview" ref="memoryCurationReview" tabindex="-1"
+                   role="region" aria-labelledby="memory-curation-preview-title" class="mem-curation-preview">
+                <div id="memory-curation-preview-title" class="mem-diary-preview-title">
+                  {{ t(memoryCurationPromoted ? 'memCurationPreviewTitle' : 'memCurationBatchPreviewTitle') }}
+                </div>
+                <p class="mem-cfg-hint" role="status">
+                  {{ t('memCurationPreviewCount').replace('{selected}', memoryCurationSelection.length)
+                      .replace('{total}', memoryCurationPreview.items.length) }}
+                </p>
                 <div class="mem-curation-counts">
                   <span v-for="(count, action) in memoryCurationCounts" :key="action" class="mem-cat-badge">
                     {{ t('memCurationAction_' + action) }} · {{ count }}
@@ -5174,6 +5182,7 @@
                       </div>
                       <div v-else-if="memoryBulkCurationPage.page_token && isMemoryCurationChange(item)" class="memory-maintenance-actions">
                         <button type="button" class="s-btn s-btn-secondary mem-bulk-curation-promote"
+                                :aria-label="t('memBulkCurationPromote') + ' · ' + item.content"
                                 :disabled="!!memoryCurationPending || memoryBulkCurationPending || !!memoryRestoringFactId"
                                 @click="promoteMemoryBulkCurationItem(memoryBulkCurationPage, item)">{{ t('memBulkCurationPromote') }}</button>
                       </div>
@@ -5983,7 +5992,7 @@
 <script src="js/api-paths.js?v=20261107tasksearch"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memorybatch"></script>
+<script src="js/settings.js?v=20261107memoryReviewBatch"></script>
 <script src="js/agent-ui.js?v=20261107workspaceProactive"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107workspaceProactive"></script>

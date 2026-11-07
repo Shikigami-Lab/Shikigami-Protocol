@@ -9,6 +9,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from src.api import memory
+from src.config.app_config import AppConfig
+from src.core import daily_memory_job
+from src.memory.batch_curation import review_batch_messages
 from src.memory.long_term_store import LongTermFact
 from src.memory.memory_manager import MemoryManager
 from test_memory_curation_recall import OfflineVectors
@@ -18,7 +21,7 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         root = self.enterContext(TemporaryDirectory())
         with patch("src.memory.memory_manager.log_memory_startup"):
-            self.manager = MemoryManager("fixture", root)
+            self.manager = MemoryManager("fixture", root, profile_memory_cfg={"enabled": True})
         self.manager.prune_curation_index = AsyncMock()
         app = FastAPI()
         app.include_router(memory.router)
@@ -92,15 +95,12 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
         facts.append(LongTermFact("Waved once.", id="transient", source="auto", is_manual=False))
         self.assertTrue(self.manager.facts.apply_extraction(revision, facts, cursors))
         original = await self.get_row("transient")
-        async def suggest(rows, _preset, **kwargs):
-            return [
-                {"fact_id": fact.id, "action": "archive", "archive_reason": "ephemeral",
-                 "future_use": "", "evidence_quote": fact.content, "reason": "Only a momentary action"}
-                for fact in rows
-            ]
+        async def suggest(batch, _preset, **kwargs):
+            self.assertEqual([fact.id for fact, _ in batch.pairs], ["transient"])
+            return {"items":[{"id":1,"action":"archive","reason":"Only a momentary action"}]}
 
         base = "/memory/fixture/curation"
-        with patch.object(memory, "request_fixed_review", new=AsyncMock(side_effect=suggest)) as model, \
+        with patch.object(memory, "request_batch_review", new=AsyncMock(side_effect=suggest)) as model, \
              patch.object(memory, "curation_preset", return_value={"model": "fixture"}):
             page = await self.client.post(base + "/bulk-preview", json={})
             self.assertEqual(page.status_code, 200, page.text)
@@ -119,6 +119,58 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
             self.assertEqual(applied.status_code, 200, applied.text)
             model.assert_awaited_once()
         self.assertTrue((await self.get_row("transient"))["archived"])
+
+    async def test_manual_and_daily_use_identical_input_and_apply_identical_archives(self):
+        manual = self.manager
+        root = self.enterContext(TemporaryDirectory())
+        settings = {"enabled":True, "daily_curation_enabled":True, "curation_active_limit":1, "curation_batch_size":100}
+        manual._cfg.update(settings)
+        with patch("src.memory.memory_manager.log_memory_startup"):
+            scheduled = MemoryManager("fixture", root, profile_memory_cfg=settings)
+        facts = [
+            LongTermFact("The character waxed poetic in a disposable scene.", id="scene",
+                         source="auto", is_manual=False, updated_at=10),
+            LongTermFact("The hotel had three days left.", id="progress",
+                         source="auto", is_manual=False, updated_at=20),
+            LongTermFact("The user wants clear and gentle feedback.", id="preference",
+                         source="auto", is_manual=False, updated_at=30),
+            LongTermFact("User-pinned fact", id="protected", pinned=True),
+        ]
+        for manager in (manual, scheduled):
+            revision, cursors, _ = manager.facts.extraction_snapshot()
+            self.assertTrue(manager.facts.apply_extraction(revision, facts.copy(), cursors))
+        sent = []
+        preset = {"model":"fixture"}
+
+        async def model(batch, actual_preset, *, review_prompt):
+            self.assertEqual(actual_preset, preset)
+            self.assertEqual([f.id for f, _ in batch.pairs], ["scene","progress","preference"])
+            sent.append(review_batch_messages(batch, review_prompt=review_prompt))
+            return {"items":[{"id":1,"action":"archive","reason":"Disposable scene"},
+                             {"id":2,"action":"archive","reason":"Old progress"},
+                             {"id":3,"action":"keep","reason":"Durable preference"}]}
+
+        with patch.object(memory, "request_batch_review", new=AsyncMock(side_effect=model)), \
+             patch.object(memory, "curation_preset", return_value=preset):
+            preview = await self.client.post("/memory/fixture/curation/preview")
+            self.assertEqual(preview.status_code, 200, preview.text)
+            self.assertFalse(any(f.archived for f in manual.facts.get_all()))
+            selected = [item["fact_id"] for item in preview.json()["items"] if item["action"]=="archive"]
+            applied = await self.client.post("/memory/fixture/curation/apply", json={
+                "preview_id":preview.json()["preview_id"],"fact_ids":selected,
+            })
+            self.assertEqual(applied.status_code, 200, applied.text)
+        app = FastAPI()
+        app.state.config = AppConfig()
+        session = SimpleNamespace(profile_id="fixture", storage_root=root)
+        with patch.object(daily_memory_job, "_get_manager_for_session", return_value=scheduled), \
+             patch.object(daily_memory_job, "curation_preset", return_value=preset), \
+             patch.object(daily_memory_job, "request_batch_review", new=AsyncMock(side_effect=model)):
+            await daily_memory_job._run_daily_curation(session,"2026-11-07",app)
+        self.assertEqual(len(sent),2)
+        self.assertEqual(sent[0],sent[1])
+        for manager in (manual, scheduled):
+            self.assertEqual({f.id for f in manager.facts.get_all() if f.archived},{"scene","progress"})
 
     async def test_fact_and_archive_views_partition_current_records(self):
         facts = (await self.client.get("/memory/fixture/facts?view=facts")).json()["facts"]
@@ -144,15 +196,10 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
             "future_use": "询问本地模型硬件", "evidence_quote": excerpt, "keep_text": excerpt,
         }])
         base = "/memory/fixture/curation"
-        with patch.object(memory, "request_fixed_review", model), \
-             patch.object(memory, "curation_preset", return_value={"model": "fixture"}):
-            page = await self.client.post(base + "/bulk-preview", json={"fact_id": "trim"})
-            preview = await self.client.post(base + "/bulk-preview/promote", json={
-                "page_token": page.json()["page_token"], "fact_id": "trim",
-            })
+        preview = await memory.curation_for(self.manager).preview_fixed(model, fact_id="trim")
         self.manager.vectors = SimpleNamespace(is_available=lambda: True, stage_fact=lambda *_: None)
         applied = await self.client.post(base + "/apply", json={
-            "preview_id": preview.json()["preview_id"], "fact_ids": ["trim"],
+            "preview_id": preview["preview_id"], "fact_ids": ["trim"],
         })
         self.assertEqual(applied.status_code, 409, applied.text)
         current = self.manager.facts.get_by_id("trim")
