@@ -56,7 +56,7 @@ EXPERIENCE_CONTENT_LIMIT = 1200
 _REVIEW_ARCHIVE_REASONS = ("cold_memory", "low_value", "unsupported")
 _DAILY_COUNTERS = (
     "requests", "dialogue_messages", "dialogue_slices", "added", "updated", "confirmed",
-    "merged", "archived", "reviewed",
+    "merged", "archived", "reviewed", "subjects", "active_limit", "active_before", "excess_before", "excess_after",
 )
 
 

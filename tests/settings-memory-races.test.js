@@ -1127,6 +1127,68 @@ test('global review schedule defaults independently and saves zero, inheritance 
   assert.deepEqual(readSchedule(stored), [30, null, 59]);
 });
 
+test('global active fact limit round-trips and unrelated writes preserve a newer limit', async () => {
+  let stored = {};
+  const writes = [];
+  const { model } = harness(async (_url, options) => {
+    if (!options) return response(stored);
+    const patch = JSON.parse(options.body);
+    writes.push(patch);
+    stored = { ...stored, ...patch };
+    return response({ ok: true });
+  });
+  await model.loadMemoryGlobalConfig();
+  assert.equal(model.memoryGlobalForm.curation_active_limit, 500);
+
+  model.memoryGlobalForm.curation_active_limit = 1000000;
+  await model.saveMemoryGlobalConfig();
+  assert.equal(writes[0].curation_active_limit, 1000000);
+  await model.loadMemoryGlobalConfig();
+  assert.equal(model.memoryGlobalForm.curation_active_limit, 1000000);
+
+  stored.curation_active_limit = 600;
+  model.memoryGlobalForm.max_history_turns = 40;
+  await model.saveMemoryGlobalConfig();
+  assert.equal(Object.hasOwn(writes[1], 'curation_active_limit'), false);
+  assert.equal(stored.curation_active_limit, 600);
+});
+
+test('active fact limit inputs ignore invalid edits and allow a character to clear its override', () => {
+  const { model } = harness(() => { throw new Error('Unexpected request'); });
+  const form = { curation_active_limit: 500 };
+  model.setMemoryCurationActiveLimit(form, { value: '1.5', valueAsNumber: 1.5, reportValidity: () => false });
+  assert.equal(form.curation_active_limit, 500);
+  model.setMemoryCurationActiveLimit(form, { value: '750', valueAsNumber: 750, reportValidity: () => true });
+  assert.equal(form.curation_active_limit, 750);
+  model.setMemoryCurationActiveLimit(form, { value: '', valueAsNumber: NaN, reportValidity: () => true });
+  assert.equal(form.curation_active_limit, null);
+});
+
+test('character active fact limit is omitted until edited and can inherit after an in-flight save', async () => {
+  let finishOverride;
+  const writes = [];
+  const { model } = harness((_url, options) => {
+    if (!options) return Promise.resolve(response({ memory_config: {} }));
+    writes.push(JSON.parse(options.body));
+    if (writes.length === 2) return new Promise(resolve => { finishOverride = resolve; });
+    return Promise.resolve(response({ ok: true }));
+  });
+  await model.onMemorySettingsProfileChange('a');
+  assert.equal(model.memoryTabProfileForm.curation_active_limit, null);
+  model.memoryTabProfileForm.max_history_turns = 45;
+  await model.saveMemoryTabProfileConfig();
+  assert.equal(Object.hasOwn(writes[0], 'curation_active_limit'), false);
+
+  model.memoryTabProfileForm.curation_active_limit = 1;
+  const override = model.saveMemoryTabProfileConfig();
+  await tick();
+  model.memoryTabProfileForm.curation_active_limit = null;
+  const inherit = model.saveMemoryTabProfileConfig();
+  finishOverride(response({ ok: true }));
+  await Promise.all([override, inherit]);
+  assert.deepEqual(writes.slice(1).map(write => write.curation_active_limit), [1, null]);
+});
+
 test('daily curation autosave preserves the inherited extraction preset and absent group override', async () => {
   let stored = {};
   const writes = [];

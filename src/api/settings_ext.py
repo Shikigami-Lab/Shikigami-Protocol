@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT
 from src.config.emotion_keys import emotion_keys_csv_for_wizard
 from src.config.memory_prompts import memory_prompt_settings
 from src.llm.registry import get_provider
@@ -2966,6 +2967,7 @@ class MemoryConfigBody(BaseModel):
     curation_interval_days: Optional[int] = Field(default=None, ge=1, le=30, strict=True)
     curation_run_at_hour: Optional[int] = Field(default=None, ge=0, le=23, strict=True)
     curation_run_at_minute: Optional[int] = Field(default=None, ge=0, le=59, strict=True)
+    curation_active_limit: int = Field(default=DEFAULT_CURATION_ACTIVE_LIMIT, ge=1, le=1_000_000, strict=True)
     daily_decay_factor: float = 0.998
     daily_decay_min_weight: float = 0.1
     daily_reinforcement_enabled: bool = False
@@ -3012,6 +3014,8 @@ async def save_memory_config(request: Request, body: MemoryConfigBody):
                 m.pop(key, None)
             else:
                 m[key] = value
+    if "curation_active_limit" in body.model_fields_set:
+        m["curation_active_limit"] = body.curation_active_limit
     m["daily_decay_factor"] = max(0.9, min(1.0, float(body.daily_decay_factor)))
     m["daily_decay_min_weight"] = max(0.0, min(1.0, float(body.daily_decay_min_weight)))
     m["daily_reinforcement_enabled"] = body.daily_reinforcement_enabled
@@ -3299,6 +3303,7 @@ class ProfileMemoryConfigBody(BaseModel):
     curation_interval_days: Optional[int] = Field(default=None, ge=1, le=30, strict=True)
     curation_run_at_hour: Optional[int] = Field(default=None, ge=0, le=23, strict=True)
     curation_run_at_minute: Optional[int] = Field(default=None, ge=0, le=59, strict=True)
+    curation_active_limit: Optional[int] = Field(default=None, ge=1, le=1_000_000, strict=True)
     daily_decay_factor: Optional[float] = None
     daily_decay_min_weight: Optional[float] = None
     daily_reinforcement_enabled: Optional[bool] = None

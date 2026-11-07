@@ -83,6 +83,11 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
                 "reason": "A momentary action with no future relevance.",
                 "future_use": "", "evidence_quote": "Waved once"}
 
+    def review(self, messages):
+        payload = json.loads(messages[-1]["content"])
+        return {"items":[{"id":row["id"], "action":"archive" if row["subject"]["fact_id"] == "old" else "keep",
+                          "reason":"Review reason"} for row in payload["records"]]}
+
     def add(self):
         return {"op": "add", "kind": "stable", "category": "preference",
                 "content": "They prefer unsweetened tea.", "evidence": [f"single:{self.user_id}"]}
@@ -129,6 +134,33 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
         self.assertNotIn("daily", state)
         self.get_provider.assert_not_called()
 
+    async def test_capacity_review_sends_oldest_thirty_and_removes_only_the_excess(self):
+        self.seed(registered=False, old=False)
+        self.manager._cfg["curation_active_limit"] = 31
+        revision, cursors, _, state = self.manager.facts.curation_snapshot()
+        facts = [
+            LongTermFact("Waved once", id=f"old-{index}", source="auto", is_manual=False,
+                         updated_at=index, pinned=index == 0)
+            for index in range(34)
+        ]
+        self.assertTrue(self.manager.facts.apply_curation(revision, facts, cursors, state))
+
+        def reply(messages):
+            data = json.loads(messages[-1]["content"])
+            self.assertEqual(data["capacity"], {"active":34, "limit":31, "excess":3})
+            self.assertEqual([item["subject"]["fact_id"] for item in data["records"]],
+                             [f"old-{index}" for index in range(1, 31)])
+            return {"items":[{"id":item["id"], "action":"archive", "reason":"A passing action"}
+                             for item in data["records"]]}
+
+        self.reply(reply)
+        await self.run_job()
+        store = LongTermStore(self.root)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([fact.id for fact in store.get_all() if fact.archived],
+                         ["old-1", "old-2", "old-3"])
+        self.assertEqual(store.curation_status()["daily"]["excess_after"], 0)
+
     async def test_prompt_change_during_review_cancels_old_decision(self):
         self.seed(registered=False)
         entered, release = asyncio.Event(), asyncio.Event()
@@ -138,7 +170,7 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
             self.assertIn("Review old notes.", messages[0]["content"])
             entered.set()
             await release.wait()
-            yield json.dumps({"items": [self.archive()]})
+            yield json.dumps(self.review(messages))
 
         self.provider.stream_chat = stream
         task = asyncio.create_task(self.run_job())
@@ -187,8 +219,7 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
 
     async def test_fixed_uncertainty_keeps_the_fact_without_creating_a_review_task(self):
         self.seed(registered=False)
-        item = {**self.archive(), "action": "keep", "archive_reason": None,
-                "reason": "Context is uncertain."}
+        item = {"id":1, "action":"keep", "reason":"Context is uncertain."}
         self.reply({"items": [item]})
         await self.run_job()
         await self.run_job("2026-11-08")
@@ -293,12 +324,12 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
         self.assertFalse(self.manager.facts.get_by_id("old").archived)
         covered = {"single": self.assistant_id}
         fresh = self.store.append("user", "I prefer decaf after dinner.")
-        self.reply({"items": [self.archive()]})
+        self.reply(self.review)
         await self.run_job("2026-11-08")
         await self.run_job("2026-11-08")
         self.assertEqual(len(self.calls), 2)
         payload = json.loads(self.calls[-1][-1]["content"])
-        self.assertEqual(payload["subject"]["fact_id"], "old")
+        self.assertEqual(payload["records"][0]["subject"]["fact_id"], "old")
         self.assertNotIn("decaf", self.calls[-1][-1]["content"])
         self.assertEqual(self.manager.facts.source_cursors(), covered)
         self.assertTrue(self.manager.facts.get_by_id("old").archived)
@@ -329,7 +360,7 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
 
     async def test_unregistered_dialogue_is_not_sent_with_curation_only(self):
         self.seed(registered=False)
-        self.reply({"items": [self.archive()]})
+        self.reply(self.review)
         await self.run_job()
         self.assertEqual(len(self.calls), 1)
         self.assertNotIn("unsweetened tea", self.calls[0][-1]["content"])
@@ -438,7 +469,7 @@ class DailyMemoryRequestTests(IsolatedAsyncioTestCase):
 
         def reply(messages):
             self.assertNotIn(f"[single:{self.user_id}]", messages[-1]["content"])
-            return {"items": [self.archive()]}
+            return self.review(messages)
 
         self.reply(reply)
         await self.run_job()

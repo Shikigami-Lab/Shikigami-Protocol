@@ -24,7 +24,6 @@ class MemoryReviewScheduleTests(IsolatedAsyncioTestCase):
         self.enterContext(patch.object(job, "curation_preset", return_value=self.preset))
         self.prompt = self.enterContext(patch("src.memory.curation.fixed_review_prompt", create=True,
                                              return_value="Scheduled review prompt"))
-        self.model_key = self.enterContext(patch.object(job, "review_model_key", return_value="fixture-key"))
 
     def open_manager(self, **config):
         return SimpleNamespace(
@@ -130,18 +129,17 @@ class MemoryReviewScheduleTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.marker(), "2026-11-07")
         self.assertEqual(self.service.run_daily.await_count, 2)
 
-    async def test_same_prompt_is_used_for_the_cache_key_and_fixed_request(self):
+    async def test_same_prompt_is_used_for_the_batch_request_and_limit_default(self):
         request = AsyncMock(return_value=[{"action": "keep"}])
 
         async def run(day, decide, **kwargs):
-            self.assertEqual(kwargs["model_key"], "fixture-key")
+            self.assertEqual(kwargs["review_limit"], 500)
             await decide(["fixture-row"])
 
         self.service.run_daily.side_effect = run
-        with patch.object(job, "request_fixed_review", request):
+        with patch.object(job, "request_batch_review", request):
             await self.check(2026, 11, 7, 12, 0)
         self.assertEqual(self.prompt.call_args_list, [((self.app,), {}), ((self.app,), {})])
-        self.model_key.assert_called_once_with(self.preset, review_prompt="Scheduled review prompt")
         request.assert_awaited_once_with(["fixture-row"], self.preset, review_prompt="Scheduled review prompt")
 
 

@@ -161,6 +161,24 @@ test('review scheduling has separate bounded controls and leaves summaries on th
   assert.match(window.LOCALES.en.hintDaySummarySchedule, /daily.*daily job time/i);
 });
 
+test('active fact limits have bounded inputs and localized review guidance', () => {
+  for (const [scope, form] of [['global', 'memoryGlobalForm'], ['profile', 'memoryTabProfileForm']]) {
+    const id = 'memory-curation-' + scope + '-active-limit';
+    const control = html.match(new RegExp('<input id="' + id + '"[^>]*>'))?.[0] || '';
+    assert.ok(html.includes('for="' + id + '"'));
+    assert.ok(control.includes('aria-describedby="' + id + '-hint"'));
+    assert.match(control, /type="number" min="1" max="1000000" step="1"/);
+    assert.ok(control.includes(':value="' + form + '.curation_active_limit'));
+    assert.ok(control.includes('@change="setMemoryCurationActiveLimit(' + form + ', $event.target)"'));
+    assert.equal(control.includes(' required'), scope === 'global');
+    assert.equal(control.includes("t('optInheritGlobal')"), scope === 'profile');
+  }
+  const window = {};
+  runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
+  assert.match(window.LOCALES.en.hintCurationActiveLimit, /oldest eligible.*protected.*saved archive/i);
+  assert.match(window.LOCALES.zh.hintCurationActiveLimit, /最旧.*受保护.*档案/);
+});
+
 test('daily curation controls are independently addressable and Maintenance renders durable and session results', () => {
   assert.doesNotMatch(html, /v-model="memory(?:GlobalForm|TabProfileForm)\.daily_forgetting_enabled"/);
   assert.match(html, /t\('memIndexMaintenanceTitle'\)/);

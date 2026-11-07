@@ -12,6 +12,8 @@ const EMOTION_KEYS_FALLBACK = [
 
 const MEMORY_PROMPT_KEYS = ['extraction_prompt', 'day_summary_prompt', 'review_prompt'];
 
+const DEFAULT_CURATION_ACTIVE_LIMIT = 500;
+
 function memoryCurationSchedule(form, intervalFallback = null) {
   const integer = (value, min, max, fallback = null) => {
     if (value == null || value === '') return fallback;
@@ -402,6 +404,7 @@ const SettingsMixin = {
         daily_run_at_minute: 5,
         daily_forgetting_enabled: false,
         daily_curation_enabled: false,
+        curation_active_limit: DEFAULT_CURATION_ACTIVE_LIMIT,
         ...memoryCurationSchedule({}, 1),
         daily_decay_factor: 0.998,
         daily_decay_min_weight: 0.1,
@@ -411,6 +414,7 @@ const SettingsMixin = {
         daily_consolidation_weight_below: 0.3,
         daily_consolidation_batch_max: 15,
       },
+      memoryGlobalSavedActiveLimit: DEFAULT_CURATION_ACTIVE_LIMIT,
       memoryGlobalSaving: false,
 
       // ── Embedding Tab ──
@@ -436,7 +440,7 @@ const SettingsMixin = {
       memoryPromptsRefreshQueued: false,
       memoryPromptsError: '',
       memoryTabProfileForm: {},
-      memoryTabProfileSavedSchedule: {},
+      memoryTabProfileSavedReview: {},
       memoryTabFormProfileId: '',
       memoryTabProfileSaving: false,
       memoryTabProfileLoaded: false,
@@ -4169,6 +4173,11 @@ const SettingsMixin = {
 
     /* ─────────────── Memory (P6) ─────────────── */
 
+    setMemoryCurationActiveLimit(form, input) {
+      if (!input.reportValidity()) return;
+      form.curation_active_limit = input.value === '' ? null : input.valueAsNumber;
+    },
+
     async loadMemoryGlobalConfig() {
       try {
         const pending = this.flushSettingsWrite('memory-global');
@@ -4179,6 +4188,7 @@ const SettingsMixin = {
         const data = await res.json();
         if (!current()) return;
         this.memoryGlobalFormLoaded = false;
+        this.memoryGlobalSavedActiveLimit = data.curation_active_limit ?? DEFAULT_CURATION_ACTIVE_LIMIT;
         this.memoryGlobalForm = {
           enabled:               data.enabled               ?? false,
           vector_enabled:        data.vector_enabled        ?? false,
@@ -4199,6 +4209,7 @@ const SettingsMixin = {
           daily_run_at_minute: data.daily_run_at_minute ?? 5,
           daily_forgetting_enabled: data.daily_forgetting_enabled ?? false,
           daily_curation_enabled: data.daily_curation_enabled ?? false,
+          curation_active_limit: this.memoryGlobalSavedActiveLimit,
           ...memoryCurationSchedule(data, 1),
           daily_decay_factor: data.daily_decay_factor ?? 0.998,
           daily_decay_min_weight: data.daily_decay_min_weight ?? 0.1,
@@ -4219,7 +4230,8 @@ const SettingsMixin = {
         const value = parse(this.memoryGlobalForm[key], 10);
         return Number.isFinite(value) ? value : fallback;
       };
-      const body = JSON.stringify({
+      const activeLimit = this.memoryGlobalForm.curation_active_limit;
+      const cfg = {
         enabled:               this.memoryGlobalForm.enabled,
         vector_enabled:        this.memoryGlobalForm.vector_enabled,
         extraction_frequency:  parseInt(this.memoryGlobalForm.extraction_frequency, 10) || 5,
@@ -4247,8 +4259,13 @@ const SettingsMixin = {
         daily_consolidation_after_days: Math.max(7, Math.min(365, parseInt(this.memoryGlobalForm.daily_consolidation_after_days, 10) || 30)),
         daily_consolidation_weight_below: Math.max(0, Math.min(1, number('daily_consolidation_weight_below', 0.3, parseFloat))),
         daily_consolidation_batch_max: Math.max(5, Math.min(30, parseInt(this.memoryGlobalForm.daily_consolidation_batch_max, 10) || 15)),
-      });
-      return this.queueSettingsWrite('memory-global', () => this.writeMemoryGlobalConfig(body, silent), debounce);
+      };
+      return this.queueSettingsWrite('memory-global', async () => {
+        if (activeLimit !== this.memoryGlobalSavedActiveLimit) cfg.curation_active_limit = activeLimit;
+        if (await this.writeMemoryGlobalConfig(JSON.stringify(cfg), silent)) {
+          this.memoryGlobalSavedActiveLimit = activeLimit;
+        }
+      }, debounce);
     },
 
     async writeMemoryGlobalConfig(body, silent) {
@@ -4266,6 +4283,7 @@ const SettingsMixin = {
           if (!silent) this.showToast(this.t('toastMemoryGlobalSaved'), 'success');
           this.memGlobalSaveState = 'saved';
           this._memGlobalSaveStateTimer = setTimeout(() => { this.memGlobalSaveState = null; }, 2000);
+          return true;
         } else {
           this.memGlobalSaveState = null;
           this.showToast(`保存失败: ${data.error || ''}`, 'error');
@@ -4451,9 +4469,13 @@ const SettingsMixin = {
         if (sequence !== this.memoryTabProfileLoadSequence || generation !== this.memoryViewGeneration
             || profileId !== this.memoryProfileId) return;
         const cfg = data.memory_config || {};
-        const schedule = { daily_curation_enabled: cfg.daily_curation_enabled ?? null, ...memoryCurationSchedule(cfg) };
+        const review = {
+          daily_curation_enabled: cfg.daily_curation_enabled ?? null,
+          ...memoryCurationSchedule(cfg),
+          curation_active_limit: cfg.curation_active_limit ?? null,
+        };
         const _pn = (v) => v != null ? v : '';
-        this.memoryTabProfileSavedSchedule = schedule;
+        this.memoryTabProfileSavedReview = review;
         this.memoryTabProfileForm = {
           enabled:              cfg.enabled              ?? null,
           vector_enabled:       cfg.vector_enabled       ?? null,
@@ -4470,7 +4492,7 @@ const SettingsMixin = {
           group_chat_self_recap_max_groups: _pn(cfg.group_chat_self_recap_max_groups),
           group_chat_merge_into_history: cfg.group_chat_merge_into_history ?? null,
           daily_forgetting_enabled: cfg.daily_forgetting_enabled ?? null,
-          ...schedule,
+          ...review,
           daily_decay_factor: _pn(cfg.daily_decay_factor),
           daily_decay_min_weight: _pn(cfg.daily_decay_min_weight),
           daily_reinforcement_enabled: cfg.daily_reinforcement_enabled ?? null,
@@ -4490,8 +4512,12 @@ const SettingsMixin = {
       const profileId = this.memoryTabFormProfileId;
       if (!profileId || profileId !== this.memoryProfileId) return;
       const form = this.memoryTabProfileForm;
-      const schedule = { daily_curation_enabled: form.daily_curation_enabled ?? null, ...memoryCurationSchedule(form) };
-      const savedSchedule = this.memoryTabProfileSavedSchedule;
+      const review = {
+        daily_curation_enabled: form.daily_curation_enabled ?? null,
+        ...memoryCurationSchedule(form),
+        curation_active_limit: form.curation_active_limit ?? null,
+      };
+      const savedReview = this.memoryTabProfileSavedReview;
       const cfg = { extraction_llm_preset: form.extraction_llm_preset };
       for (const key of ['enabled', 'vector_enabled', 'day_summary_enabled', 'daily_forgetting_enabled',
         'daily_reinforcement_enabled', 'daily_consolidation_enabled']) {
@@ -4529,10 +4555,10 @@ const SettingsMixin = {
       return this.queueSettingsWrite(`memory-tab:${profileId}`, async () => {
         // Diff after earlier writes finish so an edit back to inherit is sent
         // if an override was saved while this snapshot was waiting.
-        const changes = Object.fromEntries(Object.entries(schedule).filter(([key, value]) => savedSchedule[key] !== value));
+        const changes = Object.fromEntries(Object.entries(review).filter(([key, value]) => savedReview[key] !== value));
         const body = JSON.stringify({ ...cfg, ...changes });
         if (await this.writeMemoryProfileConfig(profileId, body, silent, generation)) {
-          Object.assign(savedSchedule, changes);
+          Object.assign(savedReview, changes);
         }
       }, debounce);
     },

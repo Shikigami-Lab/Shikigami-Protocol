@@ -388,6 +388,36 @@ class SettingsIntegrityTests(unittest.TestCase):
         self.assertEqual(self.client.put(path, json=dict.fromkeys(settings)).status_code, 200)
         self.assertEqual(self.client.get(path).json()["memory_config"], {"day_summary_enabled": False})
 
+
+    def test_global_active_fact_limit_defaults_and_survives_legacy_updates(self):
+        path = "/settings/memory"
+        key = "curation_active_limit"
+        self.assertEqual(500, self.client.get(path).json().get(key))
+        self.assertEqual(200, self.client.post(path, json={key: 1_000_000}).status_code)
+        self.assertEqual(200, self.client.post(path, json={"day_summary_enabled": True}).status_code)
+        self.assertEqual(1_000_000, self.client.get(path).json()[key])
+        self.assertEqual(1_000_000, AppConfig.load(str(self.yaml)).get_memory_config()[key])
+
+    def test_character_active_fact_limit_overrides_and_can_inherit_again(self):
+        (self.profiles / "example.json").write_text("{}", encoding="utf-8")
+        path = "/profiles/example/memory_config"
+        key = "curation_active_limit"
+        self.assertNotIn(key, self.client.get(path).json()["memory_config"])
+        self.assertEqual(200, self.client.put(path, json={key: 1}).status_code)
+        self.assertEqual(200, self.client.put(path, json={"day_summary_enabled": False}).status_code)
+        self.assertEqual({key: 1, "day_summary_enabled": False}, self.client.get(path).json()["memory_config"])
+        self.assertEqual(200, self.client.put(path, json={key: None}).status_code)
+        self.assertEqual({"day_summary_enabled": False}, self.client.get(path).json()["memory_config"])
+
+    def test_active_fact_limit_rejects_invalid_values(self):
+        (self.profiles / "example.json").write_text("{}", encoding="utf-8")
+        for value in (0, 1_000_001, 1.5, 500.0, True, "500"):
+            for save, path in ((self.client.post, "/settings/memory"),
+                               (self.client.put, "/profiles/example/memory_config")):
+                with self.subTest(value=value, path=path):
+                    self.assertEqual(422, save(path, json={"curation_active_limit": value}).status_code)
+        self.assertEqual(422, self.client.post("/settings/memory", json={"curation_active_limit": None}).status_code)
+
     def test_delete_profile_retry_yields_and_stops_if_profile_was_recreated(self):
         card = self.profiles / "example.json"
         card.write_text("{}", encoding="utf-8")

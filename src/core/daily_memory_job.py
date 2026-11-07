@@ -6,8 +6,9 @@ import os
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Optional
 
+from src.config.app_config import DEFAULT_CURATION_ACTIVE_LIMIT
 from src.memory.curation import (
-    CurationConflict, DailyDialogue, curation_for, curation_preset, request_daily_extraction, request_fixed_review, review_model_key,
+    CurationConflict, DailyDialogue, curation_for, curation_preset, request_batch_review, request_daily_extraction,
 )
 from src.memory.extraction_batches import plan_batch
 from src.memory.fact_operations import choose_candidates
@@ -320,12 +321,16 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
             )
 
         def review_is_current():
-            return fixed_review_prompt(app) == review_prompt
+            return fixed_review_prompt(app) == review_prompt and current_limit() == active_limit
 
-        async def decide(rows):
+        def current_limit():
+            value = manager._cfg.get("curation_active_limit")
+            return value if type(value) is int and 1 <= value <= 1_000_000 else DEFAULT_CURATION_ACTIVE_LIMIT
+
+        async def decide(batch):
             if active_manager() is not manager or not review_is_current():
                 raise CurationConflict("Memory review settings changed before the request")
-            return await request_fixed_review(rows, preset, review_prompt=review_prompt)
+            return await request_batch_review(batch, preset, review_prompt=review_prompt)
 
         async def decide_dialogue(dialogue, facts):
             dialogue.candidates = await manager.choose_extraction_candidates(facts, dialogue.rows)
@@ -347,14 +352,17 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
                 today = checked_at.date().isoformat()
 
             from src.memory.curation import fixed_review_prompt
+            from src.memory.review_neighbors import find_review_comparison
 
             preset = curation_preset(manager, app)
             review_prompt = fixed_review_prompt(app)
-            model_key = review_model_key(preset, review_prompt=review_prompt)
+            active_limit = current_limit()
             changed = await curation_for(manager).run_daily(
                 today, decide, enabled=lambda: active_manager() is manager,
-                prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue, model_key=model_key,
+                prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue,
                 review_is_current=review_is_current,
+                review_limit=active_limit,
+                review_comparison=lambda fact, facts: find_review_comparison(fact, facts, manager.fact_index),
             )
             if scheduled and active_manager() is manager:
                 revision, cursors, facts, state = manager.facts.curation_snapshot()

@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107neutralCharacter"></script>
+  <script src="js/i18n.js?v=20261107memorycapacity"></script>
 </head>
 <body>
 
@@ -5589,6 +5589,14 @@
               </select>
             </div>
             <p class="form-hint">{{ t('hintCurationScheduleGlobal') }}</p>
+            <div class="param-row">
+              <label for="memory-curation-global-active-limit" class="param-label">{{ t('lblCurationActiveLimit') }}</label>
+              <input id="memory-curation-global-active-limit" class="form-input" type="number" min="1" max="1000000" step="1" required
+                     :value="memoryGlobalForm.curation_active_limit" :disabled="!memoryGlobalFormLoaded"
+                     @change="setMemoryCurationActiveLimit(memoryGlobalForm, $event.target)"
+                     aria-describedby="memory-curation-global-active-limit-hint" />
+            </div>
+            <p id="memory-curation-global-active-limit-hint" class="form-hint">{{ t('hintCurationActiveLimit') }}</p>
           </div><!-- end Maintenance card -->
 
           <!-- Global auto-save indicator -->
@@ -5779,6 +5787,16 @@
                   <option v-for="minute in 60" :key="minute" :value="minute - 1">{{ String(minute - 1).padStart(2, '0') }}</option>
                 </select>
               </div>
+              <div class="param-row">
+                <label for="memory-curation-profile-active-limit" class="param-label">{{ t('lblCurationActiveLimit') }}</label>
+                <input id="memory-curation-profile-active-limit" class="form-input" type="number" min="1" max="1000000" step="1"
+                       :value="memoryTabProfileForm.curation_active_limit ?? ''" :placeholder="t('optInheritGlobal')"
+                       @change="setMemoryCurationActiveLimit(memoryTabProfileForm, $event.target)"
+                       aria-describedby="memory-curation-profile-active-limit-hint" />
+              </div>
+              <p id="memory-curation-profile-active-limit-hint" class="mem-cfg-hint">
+                {{ t('hintCurationActiveLimitInherit') }} {{ t('hintCurationActiveLimit') }}
+              </p>
             </div>
 
             <!-- Group Recap -->
@@ -5949,7 +5967,7 @@
 <script src="js/api-paths.js?v=20261107tasksearch"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memoryreviewschedulesave"></script>
+<script src="js/settings.js?v=20261107memorycapacity"></script>
 <script src="js/agent-ui.js?v=20261107workspaceProactive"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107workspaceProactive"></script>

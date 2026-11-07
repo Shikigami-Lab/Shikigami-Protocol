@@ -130,6 +130,28 @@ class VectorMemoryStore:
             logger.error("[VectorStore] search 失败: %s", e)
             return []
 
+    def get_fact_embeddings(self, fact_ids: List[str]) -> List[Dict]:
+        """Read stored fact vectors and their identifying documents without embedding text."""
+        if not self._available or not fact_ids:
+            return []
+        try:
+            rows = self._collection.get(
+                where={"fact_id": {"$in": fact_ids}},
+                include=["documents", "metadatas", "embeddings"],
+            )
+            if rows["embeddings"] is None:
+                return []
+            return [
+                {"id": row_id, "document": document, "metadata": metadata, "embedding": embedding}
+                for row_id, document, metadata, embedding in zip(
+                    rows["ids"], rows["documents"], rows["metadatas"], rows["embeddings"],
+                )
+                if isinstance(metadata, dict) and isinstance(metadata.get("fact_id"), str)
+            ]
+        except Exception as error:
+            logger.debug("Stored fact embeddings unavailable: %s", error)
+            return []
+
     def get_all(self, *, strict: bool = False) -> List[Dict]:
         """返回全部记忆条目 [{id, document, metadata}]。"""
         if not self._available:

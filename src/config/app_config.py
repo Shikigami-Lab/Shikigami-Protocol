@@ -10,6 +10,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_CURATION_ACTIVE_LIMIT = 500
+
+
 @dataclass
 class AppConfig:
     port: int = 7788
@@ -130,6 +133,7 @@ class AppConfig:
             "curation_interval_days": 1,
             "curation_run_at_hour": None,
             "curation_run_at_minute": None,
+            "curation_active_limit": DEFAULT_CURATION_ACTIVE_LIMIT,
             "daily_decay_factor": 0.998,
             "daily_decay_min_weight": 0.1,
             "daily_reinforcement_enabled": False,

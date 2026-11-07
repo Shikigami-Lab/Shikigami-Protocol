@@ -621,7 +621,8 @@ class MemoryCuration:
 
     async def run_daily(self, day: str, decide: Decide, *, enabled: Callable[[], bool] = lambda: True,
                         prepare_dialogue=None, decide_combined=None, decide_dialogue=None, model_key="",
-                        review_is_current: Callable[[], bool] = lambda: True):
+                        review_is_current: Callable[[], bool] = lambda: True,
+                        review_limit: int | None = None, review_comparison=None):
         """Reserve one attempt and commit its validated outputs together."""
         fixed = decide_dialogue is not None
         async with self._in_flight:
@@ -646,7 +647,17 @@ class MemoryCuration:
                     revision, cursors, facts, state, offsets = self.store.curation_progress_snapshot()
                     if not enabled() or state.get("daily", {}).get("day", "") >= day:
                         return
-            if fixed:
+            if review_limit is not None:
+                from src.memory.batch_curation import select_review_subjects
+
+                rows, active = select_review_subjects(facts, state.get("batch_reviewed", {}), review_limit)
+                previous_job = state.get("daily", {}).get("job")
+                if (dialogue is not None and rows and
+                        (previous_job == "dialogue" or (not previous_job and active > review_limit))):
+                    dialogue = None
+                if dialogue is not None:
+                    rows = []
+            elif fixed:
                 subject = _pending_fixed_subject(facts, state, model_key)
                 if dialogue is not None and subject is not None and state.get("daily", {}).get("job") == "dialogue":
                     dialogue = None
@@ -657,16 +668,29 @@ class MemoryCuration:
                 return
             run_id = uuid.uuid4().hex
             job = "dialogue" if dialogue is not None else "review"
-            cached = self._cached_review(state, rows, model_key) if fixed and rows else None
+            cached = self._cached_review(state, rows, model_key) if fixed and rows and review_limit is None else None
             state["daily"] = {"day": day, "id": run_id, "status": "running", "job": job,
                               **dict.fromkeys(_DAILY_COUNTS, 0)}
+            if review_limit is not None and rows:
+                state["daily"].update(subjects=len(rows), active_limit=review_limit, active_before=active,
+                                      excess_before=max(0, active - review_limit))
             if not self.store.apply_curation(revision, facts, cursors, state):
                 return
             request_token = _daily_request_start.set(lambda: self._record_daily_request(run_id))
             try:
                 reviewed_item = None
+                review_batch = None
+                batch_reviewed = None
                 if fixed and dialogue is not None:
                     operations, items = await decide_dialogue(dialogue, facts), []
+                elif review_limit is not None:
+                    from src.memory.batch_curation import make_review_batch, merge_representatives, validate_batch_review
+
+                    operations = []
+                    review_batch = await asyncio.to_thread(
+                        make_review_batch, rows, facts, active, review_limit, review_comparison,
+                    )
+                    items, batch_reviewed = validate_batch_review(review_batch, await decide(review_batch))
                 elif fixed:
                     from src.memory.curation_plan import validate_review
 
@@ -685,13 +709,26 @@ class MemoryCuration:
                     operations, raw_items = (await decide_combined(rows, dialogue) if dialogue is not None
                                              else ([], await decide(rows)))
                     items = _validate(rows, raw_items)
-                if not enabled() or (reviewed_item is not None and not review_is_current()):
+                if not enabled() or ((reviewed_item is not None or review_batch is not None)
+                                     and not review_is_current()):
                     self._end_attempt(run_id, "cancelled")
                     return
                 revision, current_cursors, current_facts, state, current_offsets = self.store.curation_progress_snapshot()
                 if state.get("daily", {}).get("id") != run_id:
                     return
                 versions = {fact.id: _version(fact) for fact in rows}
+                if review_batch is not None:
+                    if sum(fact.is_active() for fact in current_facts) != review_batch.active:
+                        raise CurationConflict("Active fact count changed during review")
+                    retiring = {item["fact_id"] for item in items if item["action"] in ("archive", "merge")}
+                    if retiring & merge_representatives(current_facts):
+                        raise CurationConflict("A fact became a merge representative during review")
+                    versions.update({target.id:_version(target) for _, target in review_batch.pairs if target is not None})
+                    current_ids = {fact.id for fact in current_facts}
+                    state["batch_reviewed"] = {
+                        key: value for key, value in state.get("batch_reviewed", {}).items() if key in current_ids
+                    } | batch_reviewed
+                    state["daily"]["excess_after"] = max(0, review_batch.excess - len(retiring))
                 changed = set()
                 next_offsets = None
                 if dialogue is not None:
@@ -800,6 +837,12 @@ async def request_fixed_review(rows, preset, *, review_prompt=None):
     from src.memory.curation_plan import review_messages
 
     return (await _request_object(review_messages(rows, review_prompt=review_prompt), preset)).get("items")
+
+
+async def request_batch_review(batch, preset, *, review_prompt):
+    from src.memory.batch_curation import review_batch_messages
+
+    return await _request_object(review_batch_messages(batch, review_prompt=review_prompt), preset)
 
 
 async def request_daily_extraction(dialogue_messages, preset):
