@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from src.memory.batch_curation import review_options
 from src.memory.curation import (
     CurationConflict, DailyDialogue, curation_for, curation_preset, request_batch_review, request_daily_extraction,
+    review_model_key,
 )
 from src.memory.extraction_batches import plan_batch
 from src.memory.fact_operations import choose_candidates
@@ -320,7 +321,12 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
             )
 
         def review_is_current():
-            return fixed_review_prompt(app) == review_prompt and review_options(manager._cfg) == (active_limit, batch_size)
+            if fixed_review_prompt(app) != review_prompt or review_options(manager._cfg) != (active_limit, batch_size):
+                return False
+            try:
+                return review_model_key(curation_preset(manager, app), review_prompt=review_prompt) == model_key
+            except CurationConflict:
+                return False
 
         async def decide(batch):
             if active_manager() is not manager or not review_is_current():
@@ -351,6 +357,7 @@ async def _run_daily_curation(session, today: Optional[str], app, *, now: Option
 
             preset = curation_preset(manager, app)
             review_prompt = fixed_review_prompt(app)
+            model_key = review_model_key(preset, review_prompt=review_prompt)
             active_limit, batch_size = review_options(manager._cfg)
             changed = await curation_for(manager).run_daily(
                 today, decide, enabled=lambda: active_manager() is manager,

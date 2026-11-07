@@ -172,6 +172,38 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
         for manager in (manual, scheduled):
             self.assertEqual({f.id for f in manager.facts.get_all() if f.archived},{"scene","progress"})
 
+    async def test_preview_keeps_ledger_unchanged_and_reuses_the_same_result_until_apply(self):
+        base = "/memory/fixture/curation"
+        preset = {"model":"first"}
+
+        async def keep(batch, *_args, **_kwargs):
+            return {"items":[{"id":i,"action":"keep","reason":"Useful fact"}
+                             for i in range(1,len(batch.pairs)+1)]}
+
+        before = self.manager.facts.curation_snapshot()
+        with patch.object(memory, "request_batch_review", new=AsyncMock(side_effect=keep)) as model, \
+             patch.object(memory, "curation_preset", side_effect=lambda *_:preset):
+            first = await self.client.post(base + "/preview")
+            second = await self.client.post(base + "/preview")
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(first.json(), second.json())
+            model.assert_awaited_once()
+            self.assertEqual(self.manager.facts.curation_snapshot(), before)
+            preset = {"model":"second"}
+            stale = await self.client.post(base + "/apply", json={
+                "preview_id":first.json()["preview_id"],"fact_ids":[],
+            })
+            self.assertEqual(stale.status_code, 409, stale.text)
+            self.assertEqual(self.manager.facts.curation_snapshot(), before)
+            preview = await self.client.post(base + "/preview")
+            self.assertEqual(preview.status_code, 200, preview.text)
+            self.assertNotEqual(first.json()["preview_id"], preview.json()["preview_id"])
+            applied = await self.client.post(base + "/apply", json={
+                "preview_id":preview.json()["preview_id"],"fact_ids":[],
+            })
+            self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(set(self.manager.facts.curation_snapshot()[-1]["batch_reviewed"]), {"review","experience"})
+
     async def test_fact_and_archive_views_partition_current_records(self):
         facts = (await self.client.get("/memory/fixture/facts?view=facts")).json()["facts"]
         archive = (await self.client.get("/memory/fixture/facts?view=archive")).json()["facts"]

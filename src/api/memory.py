@@ -349,11 +349,17 @@ def _batch_review_request(manager, request, preset):
 
     prompt = fixed_review_prompt(request.app)
     limit, size = review_options(manager._cfg)
+    model_key = review_model_key(preset, review_prompt=prompt)
 
     def is_current():
         managers = getattr(request.app.state, "memory_managers", None)
-        return (manager._cfg.get("enabled") and (managers is None or managers.get(manager._profile_id) is manager)
-                and fixed_review_prompt(request.app) == prompt and review_options(manager._cfg) == (limit, size))
+        if (not manager._cfg.get("enabled") or (managers is not None and managers.get(manager._profile_id) is not manager)
+                or fixed_review_prompt(request.app) != prompt or review_options(manager._cfg) != (limit, size)):
+            return False
+        try:
+            return review_model_key(curation_preset(manager, request.app), review_prompt=prompt) == model_key
+        except CurationConflict:
+            return False
 
     async def decide(batch):
         if not is_current():

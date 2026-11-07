@@ -1005,7 +1005,7 @@ test('an empty preview cannot be applied and a rejected preview cannot be applie
   assert.deepEqual(toasts.map(toast => toast.type), ['error']);
 });
 
-test('only keep suggestions can be confirmed when every changed item is unchecked', async () => {
+test('empty selection confirms only a nonempty all-Keep batch', async () => {
   const writes = [];
   let items = [{ fact_id: 'one', action: 'review' }];
   const { model } = harness(async (url, options) => {
@@ -1025,6 +1025,12 @@ test('only keep suggestions can be confirmed when every changed item is unchecke
   items = [...items, { fact_id: 'two', action: 'keep' }];
   await model.loadMemoryCurationPreview('a');
   model.memoryCurationSelection = [];
+  await model.applyMemoryCuration();
+  assert.deepEqual(writes, []);
+
+  items = [{ fact_id: 'two', action: 'keep' }, { fact_id: 'three', action: 'keep' }];
+  await model.loadMemoryCurationPreview('a');
+  assert.deepEqual([...model.memoryCurationSelection], []);
   await model.applyMemoryCuration();
   assert.deepEqual(writes, [{ preview_id: 'p1', fact_ids: [] }]);
   assert.equal(model.memoryCurationResult.reviewed, 0);

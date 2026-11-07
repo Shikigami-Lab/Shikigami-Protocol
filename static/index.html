@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memoryReviewBatch"></script>
+  <script src="js/i18n.js?v=20261107memoryConfirmReview"></script>
 </head>
 <body>
 
@@ -5126,7 +5126,7 @@
                   </div>
                 </div>
                 <p v-if="memoryCurationCounts.keep && !memoryCurationPromoted" class="mem-cfg-hint">{{ t('hintMemoryCurationKeep') }}</p>
-                <div v-if="memoryCurationSelection.length || (memoryCurationCounts.keep && !memoryCurationPromoted)" class="memory-maintenance-actions">
+                <div v-if="memoryCurationSelection.length || memoryCurationCanConfirmReview" class="memory-maintenance-actions">
                   <button id="memory-curation-apply" type="button" class="s-btn s-btn-primary"
                           :disabled="!!memoryCurationPending || !!memoryRestoringFactId"
                           @click="applyMemoryCuration()">
@@ -5992,7 +5992,7 @@
 <script src="js/api-paths.js?v=20261107tasksearch"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memoryReviewBatch"></script>
+<script src="js/settings.js?v=20261107memoryConfirmReview"></script>
 <script src="js/agent-ui.js?v=20261107workspaceProactive"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107workspaceProactive"></script>

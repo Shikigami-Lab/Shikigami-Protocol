@@ -121,6 +121,14 @@ test('manual batch preview names the shared settings and exposes the selection c
   assert.match(html, /role="status"[^>]*>\s*\{\{ t\('memCurationPreviewCount'\)[\s\S]*?\.replace\('\{selected\}', memoryCurationSelection.length\)[\s\S]*?\.replace\('\{total\}', memoryCurationPreview.items.length\)/);
 });
 
+test('the preview offers Confirm review for an all-Keep batch', () => {
+  const window = {};
+  runInNewContext(readFileSync(join(__dirname, '../static/js/i18n.js'), 'utf8'), { window });
+  assert.equal(window.LOCALES.en.btnMemoryCurationMarkReviewed, 'Confirm review');
+  assert.equal(window.LOCALES.zh.btnMemoryCurationMarkReviewed, '确认审核');
+  assert.match(html, /v-if="memoryCurationSelection.length \|\| memoryCurationCanConfirmReview"[^>]*>\s*<button id="memory-curation-apply"/);
+});
+
 test('old-store preview separates free browsing from explicit per-row review in Maintenance', () => {
   const window = {};
   for (const filename of ['api-paths.js', 'i18n.js']) {

@@ -696,6 +696,11 @@ const SettingsMixin = {
       return counts;
     },
 
+    memoryCurationCanConfirmReview() {
+      const items = this.memoryCurationPreview?.items;
+      return !this.memoryCurationPromoted && !!items?.length && items.every(item => item.action === 'keep');
+    },
+
     sortedMemoryVectors() {
       const kw = this.vectorSearch.trim().toLowerCase();
       const vecs = kw
@@ -5462,7 +5467,7 @@ const SettingsMixin = {
       const selectedIds = new Set(this.memoryCurationSelection);
       const factIds = preview.items.filter(item => this.isMemoryCurationChange(item) && selectedIds.has(item.fact_id))
         .map(item => item.fact_id);
-      if (!factIds.length && (promoted || !preview.items.some(item => item.action === 'keep'))) return;
+      if (!factIds.length && !this.memoryCurationCanConfirmReview) return;
       const current = this.beginMemoryRequest(profileId, 'curation');
       if (!current) return;
       this.memoryCurationPending = 'apply';
