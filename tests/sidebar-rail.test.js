@@ -52,7 +52,7 @@ test('current-character Memory opens content for the chat character after anothe
 
 test('avatars have native keyboard activation and retain drag and keyboard reorder', async () => {
   assert.match(sidebar, /<button[^>]*class="sidebar-role-button"/);
-  assert.match(sidebar, /:aria-label="session.display_name"/);
+  assert.match(sidebar, /:aria-label="session\.display_name \+ \(hasUnreadProactive\(session\.id\)/);
   assert.match(sidebar, /:aria-current="!currentGroupId && session.id === currentSessionId/);
   assert.match(sidebar, /@dragstart="sessionDragStart/);
   assert.match(sidebar, /@pointerdown.stop="sessionPointerDown/);

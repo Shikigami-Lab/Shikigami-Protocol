@@ -845,7 +845,12 @@ class AseEngine:
             # error string: the frontend renders tokens as they arrive and starts TTS on "done",
             # so neither may ever be pushed. Ordinary replies are released after a few characters.
             holding = True
+            late_error = ""
             async for token in llm.stream_chat(messages):
+                if not holding and token.lstrip().startswith(_LLM_ERROR_PREFIX):
+                    late_error = token
+                    await broadcast.push(session.id, {"type": "proactive_stream_discard"})
+                    break
                 full_response += token
                 if holding:
                     if could_become_silence_reply(full_response) or could_be_llm_error(full_response):
@@ -857,8 +862,8 @@ class AseEngine:
             raw_response = full_response
             full_response = full_response.replace("**", "").strip()
 
-            is_llm_error = holding and full_response.startswith(_LLM_ERROR_PREFIX)
-            if holding and (not full_response or is_silence_reply(full_response) or is_llm_error):
+            is_llm_error = bool(late_error) or (holding and full_response.startswith(_LLM_ERROR_PREFIX))
+            if is_llm_error or (holding and (not full_response or is_silence_reply(full_response))):
                 # The model chose not to speak, returned nothing, or the request failed. Nothing
                 # is stored, broadcast or spoken, and no proactive counter, cooldown or segment
                 # trigger is updated. As with a low-urgency skip, the loop simply waits for its
@@ -867,7 +872,7 @@ class AseEngine:
                 # retried on every check); the next reflection sets it afresh.
                 if is_llm_error:
                     skip_reason = "llm_error"
-                    log_ase_error(session_id=session.id, error=full_response[:500])
+                    log_ase_error(session_id=session.id, error=(late_error or full_response)[:500])
                 else:
                     skip_reason = "silence_reply" if full_response else "empty_reply"
                 log_llm_response(
@@ -899,6 +904,8 @@ class AseEngine:
 
             # Save only the assistant response (no user trigger message)
             assistant_message_id = store.append("assistant", full_response, sender=session.display_name or "")
+            notice = {"message_id": assistant_message_id, "timestamp": time.time()}
+            session.last_proactive_message = notice
 
             await broadcast.push(session.id, {
                 "type": "new_message",
@@ -972,10 +979,11 @@ class AseEngine:
             state["proactive_log"] = proactive_log[-15:]  # keep last 15
             _save_ase_state(session.storage_root, state)
 
-            # Reset urgency so we don't speak again immediately
+            # Reset urgency and save the notification only after a real message exists.
             if session.reflection_state:
                 session.reflection_state["urgency"] = 0.0
-                session.save_runtime_state()
+            session.save_runtime_state()
+            await broadcast.push_all({"type": "proactive_message", "session_id": session.id, **notice})
 
             # Trigger TTS if enabled (fire-and-forget via broadcast already handles it)
             # The frontend SSE handler for "new_message" will initiate TTS if enabled

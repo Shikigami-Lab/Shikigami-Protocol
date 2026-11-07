@@ -50,7 +50,14 @@ async def message_events(session_id: str, request: Request):
 
     async def generate():
         # Handshake
-        yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
+        manager = getattr(request.app.state, "session_manager", None)
+        notices = {}
+        if manager:
+            for session in manager.list_sessions():
+                notice = session.get_proactive_notice()
+                if notice:
+                    notices[session.id] = notice
+        yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id, 'proactive_notices': notices})}\n\n"
         try:
             while True:
                 if await request.is_disconnected():

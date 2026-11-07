@@ -8,6 +8,7 @@ window.LOCALES = {
   zh: {
     agentTaskDetails: "任务详情",
     agentWorkspaceFilesTab: "文件",
+    proactiveUnread: "主动消息",
     agentArtifactPreview: "预览",
     agentWorkspaceBackToFiles: "返回文件列表",
     agentWorkspaceProperties: "文件属性",
@@ -1936,6 +1937,7 @@ window.LOCALES = {
   en: {
     agentTaskDetails: "Task details",
     agentWorkspaceFilesTab: "Files",
+    proactiveUnread: "New proactive message",
     agentArtifactPreview: "Preview",
     agentWorkspaceBackToFiles: "Back to files",
     agentWorkspaceProperties: "File properties",

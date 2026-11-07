@@ -1,7 +1,11 @@
 import json
 import gc
 import logging
+import math
 import os
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -34,6 +38,7 @@ class Session:
     last_screenshot_b64: Optional[str] = field(default=None, repr=False)
     # Current ASE activity mode (low / medium / high / game / focus)
     ase_mode: str = field(default="medium", repr=False)
+    last_proactive_message: Optional[Dict[str, Any]] = field(default=None, repr=False)
     # Segment cooldown: segment_id -> last_fired (epoch seconds), persisted so cooldown survives restart
     segment_last_fired: Dict[str, float] = field(default_factory=dict, repr=False)
     # Segment once_per_day: segment_id -> last fired date "YYYY-MM-DD"
@@ -77,12 +82,29 @@ class Session:
         """Record that a segment fired today (for once_per_day)."""
         self.segment_last_fired_date[segment_id] = date_str
 
+    def get_proactive_notice(self):
+        """Return a persisted notice only if the original message still exists."""
+        notice = self.last_proactive_message
+        if notice is None:
+            return None
+        if self._store is not None:
+            return notice if self._store.get_memory_source_message(notice["message_id"]) else None
+        path = Path(self.storage_root, "chat_records.db").resolve()
+        try:
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=1)) as db:
+                row = db.execute("SELECT 1 FROM messages WHERE id=? AND role='assistant'",
+                                 (notice["message_id"],)).fetchone()
+                return notice if row else None
+        except sqlite3.Error:
+            return None
+
     def save_runtime_state(self) -> bool:
         """Persist volatile runtime state so it survives server restarts."""
         path = os.path.join(self.storage_root, _RUNTIME_STATE_FILE)
         data = {
             "reflection_state": self.reflection_state,
             "ase_mode": self.ase_mode,
+            "last_proactive_message": self.last_proactive_message,
             "last_user_message_time": self.last_user_message_time,
             "segment_last_fired": self.segment_last_fired,
             "segment_last_fired_date": self.segment_last_fired_date,
@@ -120,6 +142,12 @@ class Session:
                 self.reflection_state = data["reflection_state"]
             if data.get("ase_mode"):
                 self.ase_mode = data["ase_mode"]
+            notice = data.get("last_proactive_message")
+            self.last_proactive_message = None
+            if (isinstance(notice, dict) and type(notice.get("message_id")) is int
+                    and notice["message_id"] > 0 and type(notice.get("timestamp")) in (int, float)
+                    and math.isfinite(notice["timestamp"]) and notice["timestamp"] > 0):
+                self.last_proactive_message = {"message_id": notice["message_id"], "timestamp": notice["timestamp"]}
             if data.get("last_user_message_time"):
                 self.last_user_message_time = float(data["last_user_message_time"])
             if data.get("segment_last_fired") and isinstance(data["segment_last_fired"], dict):

@@ -75,6 +75,7 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         self.storage_root = tmp.name
         self.pushed = []
+        self.notices = []
         self.stored = []
         self.stored_ids = []
         self._next_message_id = 41
@@ -109,8 +110,11 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         async def push(session_id, data, exclude=None):
             self.pushed.append(data)
 
+        async def push_all(data):
+            self.notices.append(data)
+
         mode_cfg = {"message_config": {"n_history_turns": 4, "extra_behavior": "-"}}
-        with mock.patch("src.core.broadcast.broadcast", SimpleNamespace(push=push)), \
+        with mock.patch("src.core.broadcast.broadcast", SimpleNamespace(push=push, push_all=push_all)), \
                 mock.patch("src.prompt.pipeline.build_messages", return_value=[{"role": "system", "content": "-"}]), \
                 mock.patch("src.llm.registry.get_provider", return_value=_FakeProvider(tokens)), \
                 mock.patch("src.api.memory.get_or_create_manager_for_session"), \
@@ -131,6 +135,7 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([], self.pushed)
         self.assertEqual([], self.stored)
+        self.assertEqual([], self.notices)
         self.assertEqual({}, self.engine._state.get("p1", {}))
         self.assertFalse(os.path.exists(os.path.join(self.storage_root, "ase_state.json")))
         self.assertEqual(0.0, self.session.reflection_state["urgency"])
@@ -159,6 +164,12 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({}, self.engine._state.get("p1", {}))
         self.assertEqual(0.0, self.session.reflection_state["urgency"])
 
+    async def test_error_after_partial_speech_discards_the_stream_without_a_notice(self):
+        await self._speak(["Hello", " there.", "[LLM Error: disconnect]"])
+        self.assertEqual(self.stored, [])
+        self.assertEqual(self.notices, [])
+        self.assertEqual(self.pushed[-1], {"type": "proactive_stream_discard"})
+
     async def test_broadcast_uses_stored_ids_for_streamed_and_held_replies(self):
         await self._speak(["Hello", " there."])
         await self._speak(["(", "sil"])
@@ -170,6 +181,34 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stored, [(p["role"], p["content"]) for p in messages])
         completed = [p for p in self.pushed if "token" in p and p.get("done")]
         self.assertEqual(self.stored_ids, [p.get("message_id") for p in completed])
+        self.assertEqual(self.stored_ids, [p["message_id"] for p in self.notices])
+        self.assertEqual(self.session.last_proactive_message["message_id"], 42)
+        self.assertTrue(all(p["type"] == "proactive_message" and p["session_id"] == "p1"
+                            and "content" not in p for p in self.notices))
+
+    async def test_proactive_notice_survives_restart_and_clears_when_the_message_is_deleted(self):
+        from src.api.sessions import _prune_proactive_message
+        from src.core.session import Session
+
+        session = Session("a", "a", "A", self.storage_root)
+        store = session.conversation_store
+        self.addCleanup(store.close)
+        message_id = store.append("assistant", "A proactive hello")
+        session.last_proactive_message = {"message_id": message_id, "timestamp": 123.0}
+        self.assertTrue(session.save_runtime_state())
+        reopened = Session("a", "a", "A", self.storage_root)
+        reopened.load_runtime_state()
+        self.assertEqual(reopened.last_proactive_message, session.last_proactive_message)
+        with mock.patch("src.api.sessions.broadcast.push_all", new_callable=mock.AsyncMock) as push:
+            await _prune_proactive_message(reopened, store)
+            push.assert_not_awaited()
+            self.assertTrue(store.delete_by_id(message_id))
+            await _prune_proactive_message(reopened, store)
+            push.assert_awaited_once_with({"type": "proactive_message", "session_id": "a",
+                                          "removed": True, "message_id": message_id, "timestamp": 123.0})
+        final = Session("a", "a", "A", self.storage_root)
+        final.load_runtime_state()
+        self.assertIsNone(final.last_proactive_message)
 
     async def test_reply_held_back_until_the_end_is_still_sent(self):
         await self._speak(["(", "sil"])

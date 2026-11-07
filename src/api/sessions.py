@@ -38,6 +38,7 @@ async def list_sessions(request: Request):
             "display_name": s.display_name,
             "is_current": s.id == current_id,
             "avatar": avatar,
+            "last_proactive_message": s.get_proactive_notice() if hasattr(s, "get_proactive_notice") else None,
         })
     return {"sessions": sessions_data, "current_id": current_id}
 
@@ -77,6 +78,15 @@ async def switch_session(request: Request, body: SwitchRequest):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+async def _prune_proactive_message(session, store):
+    notice = getattr(session, "last_proactive_message", None)
+    if notice is None or store.get_memory_source_message(notice["message_id"]) is not None:
+        return
+    session.last_proactive_message = None
+    session.save_runtime_state()
+    await broadcast.push_all({"type": "proactive_message", "session_id": session.id, "removed": True, **notice})
+
+
 @router.delete("/sessions/{session_id}/history")
 async def clear_session_history(
     session_id: str,
@@ -109,6 +119,7 @@ async def clear_session_history(
                         pass
     else:
         store.clear()
+        await _prune_proactive_message(session, store)
     runtime = getattr(request.app.state, "agent_runtime", None)
     if runtime:
         await runtime.invalidate(session.profile_id)
@@ -124,6 +135,7 @@ async def delete_messages_from(session_id: str, msg_idx: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     store.delete_from_index(msg_idx)
+    await _prune_proactive_message(session, store)
     runtime = getattr(request.app.state, "agent_runtime", None)
     if runtime:
         await runtime.invalidate(session.profile_id)
@@ -139,6 +151,7 @@ async def delete_message_by_id(session_id: str, msg_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     if hasattr(store, "delete_by_id") and store.delete_by_id(msg_id):
+        await _prune_proactive_message(session, store)
         runtime = getattr(request.app.state, "agent_runtime", None)
         if runtime:
             await runtime.invalidate(session.profile_id)
@@ -159,6 +172,7 @@ async def delete_message(session_id: str, msg_idx: int, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     store.delete_at_index(msg_idx)
+    await _prune_proactive_message(session, store)
     runtime = getattr(request.app.state, "agent_runtime", None)
     if runtime:
         await runtime.invalidate(session.profile_id)

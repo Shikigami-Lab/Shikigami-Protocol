@@ -676,6 +676,33 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
   model.showToast = () => {};
   return { model, sandbox, app };
 }
+test('a proactive notice marks its own role and opening it only clears that notice', async () => {
+  const { model, sandbox } = harness();
+  const saved = new Map();
+  sandbox.localStorage.getItem = key => saved.get(key) || null;
+  sandbox.localStorage.setItem = (key, value) => saved.set(key, value);
+  model.sessions.push({ id: 'p2', display_name: 'Two' });
+  sandbox.EventSource = class { close() {} };
+  model.subscribeEvents('group:test');
+  const event = (payload) => model._sseSource.onmessage({ data: JSON.stringify(payload) });
+  event({ type: 'new_message', role: 'assistant', session_id: 'p1', message_id: 3 });
+  assert.equal(model.hasUnreadProactive('p1'), false);
+  event({ type: 'proactive_message', session_id: 'p2', message_id: 4, timestamp: 20 });
+  assert.equal(model.hasUnreadProactive('p2'), true);
+  assert.equal(model.hasUnreadProactive('p1'), false);
+  model.acknowledgeProactiveChat('p2');
+  assert.equal(model.hasUnreadProactive('p2'), true);
+  model.messages.push({ id: 4 });
+  model.acknowledgeProactiveChat('p2');
+  event({ type: 'connected', proactive_notices: { p2: { message_id: 4, timestamp: 20 } } });
+  assert.equal(model.hasUnreadProactive('p2'), false);
+  event({ type: 'proactive_message', session_id: 'p2', message_id: 5, timestamp: 21 });
+  event({ type: 'proactive_message', session_id: 'p2', message_id: 4, timestamp: 20, removed: true });
+  assert.equal(model.hasUnreadProactive('p2'), true);
+  event({ type: 'proactive_message', session_id: 'p2', message_id: 5, timestamp: 21, removed: true });
+  assert.equal(model.hasUnreadProactive('p2'), false);
+});
+
 const streamResponse = frames => {
   let sent = false;
   return { ok: true, body: { getReader: () => ({ read: async () => {

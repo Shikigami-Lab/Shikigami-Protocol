@@ -200,6 +200,8 @@ const App = {
 
       // Session state
       sessions: [],
+      proactiveNotices: {},
+      proactiveSeen: {},
       sessionDragging: false,
       sessionDragOverId: null,
       sessionDragActiveId: null,   // 触屏拖拽：当前被拖动的 session id
@@ -699,12 +701,78 @@ const App = {
       }
     },
 
+    hasUnreadProactive(sessionId) {
+      return (this.proactiveNotices?.[sessionId]?.timestamp ?? 0) > (this.proactiveSeen?.[sessionId] ?? 0);
+    },
+
+    rememberProactiveRead(sessionId, timestamp) {
+      if (timestamp <= (this.proactiveSeen?.[sessionId] ?? 0)) return;
+      this.proactiveSeen = { ...this.proactiveSeen, [sessionId]: timestamp };
+      try { localStorage.setItem('proactiveSeen:' + sessionId, String(timestamp)); } catch (_) {}
+    },
+
+    receiveProactiveNotice(sessionId, notice) {
+      if (typeof sessionId !== 'string' || !sessionId || !Number.isSafeInteger(notice?.message_id)
+          || notice.message_id <= 0 || !Number.isFinite(notice.timestamp) || notice.timestamp <= 0) return;
+      const prior = this.proactiveNotices?.[sessionId];
+      try {
+        const saved = Number(localStorage.getItem('proactiveSeen:' + sessionId));
+        if (Number.isFinite(saved) && saved > (this.proactiveSeen?.[sessionId] ?? 0)) {
+          this.proactiveSeen = { ...this.proactiveSeen, [sessionId]: saved };
+        }
+      } catch (_) {}
+      if (notice.removed) {
+        if (prior?.message_id === notice.message_id && prior.timestamp === notice.timestamp) {
+          const next = { ...this.proactiveNotices };
+          delete next[sessionId];
+          this.proactiveNotices = next;
+        }
+        this.rememberProactiveRead(sessionId, notice.timestamp);
+      } else if (!prior || notice.timestamp > prior.timestamp) {
+        this.proactiveNotices = { ...this.proactiveNotices, [sessionId]: notice };
+      }
+    },
+
+    markProactiveRead(sessionId) {
+      const notice = this.proactiveNotices?.[sessionId];
+      if (notice) this.rememberProactiveRead(sessionId, notice.timestamp);
+    },
+
+    acknowledgeProactiveChat(sessionId) {
+      const notice = this.proactiveNotices?.[sessionId];
+      if (notice && this.messages.some(message => message.id === notice.message_id && !message._streaming)) {
+        this.markProactiveRead(sessionId);
+      }
+    },
+
+    async openUnreadProactive() {
+      const session = this.sessions.filter(s => this.hasUnreadProactive(s.id))
+        .sort((a, b) => this.proactiveNotices[b.id].timestamp - this.proactiveNotices[a.id].timestamp)[0];
+      if (!session) return;
+      await this.switchSession(session.id);
+      if (this.currentSessionId === session.id && !this.currentGroupId) {
+        this.$nextTick(() => this.$refs?.chatTextarea?.focus());
+      }
+    },
+
+    reconcileProactiveNotices(notices, before = this.proactiveNotices || {}) {
+      const next = { ...this.proactiveNotices };
+      for (const sessionId of Object.keys(before)) {
+        if (!Object.hasOwn(notices, sessionId) && next[sessionId] === before[sessionId]) delete next[sessionId];
+      }
+      this.proactiveNotices = next;
+      for (const [sessionId, notice] of Object.entries(notices)) this.receiveProactiveNotice(sessionId, notice);
+    },
+
     async loadSessions() {
+      const noticesBefore = this.proactiveNotices || {};
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessions());
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this.sessions = data.sessions || [];
+        this.reconcileProactiveNotices(Object.fromEntries(this.sessions.filter(s => s.last_proactive_message)
+          .map(s => [s.id, s.last_proactive_message])), noticesBefore);
         // 以服务端 current_id 为准，多端对齐：谁后切换/谁后刷新，当前会话都一致
         const serverCurrentId = data.current_id || null;
         const current = serverCurrentId
@@ -871,7 +939,8 @@ const App = {
 
     async switchSession(sessionId) {
       const canDetach = !this.currentGroupId && !!this.agentChatContext?.runKey;
-      if (sessionId === this.currentSessionId) {
+      if (sessionId === this.currentSessionId && !this.currentGroupId) {
+        this.acknowledgeProactiveChat(sessionId);
         if (this.sidebarMobile && this.sidebarOpen) this.closeSidebar();
         return;
       }
@@ -902,6 +971,8 @@ const App = {
           // Let the profile watcher establish the new view before requesting history.
           await this.$nextTick();
           await this.loadHistory(sessionId);
+          if (this.currentSessionId !== sessionId || this.currentGroupId) return;
+          this.acknowledgeProactiveChat(sessionId);
           this.subscribeEvents(sessionId);
           this.fetchStatus();
           this.fetchAseStatus();
@@ -1326,7 +1397,23 @@ const App = {
             this.receiveAgentEvent(data.agent_event, { sessionId });
             return;
           }
-          if (source !== this._sseSource || sessionId !== this.currentSessionId || this.currentGroupId) return;
+          if (source !== this._sseSource) return;
+          if (data.type === 'connected' && data.proactive_notices) {
+            this.reconcileProactiveNotices(data.proactive_notices);
+            return;
+          }
+          if (data.type === 'proactive_message') {
+            this.receiveProactiveNotice(data.session_id, data);
+            return;
+          }
+          if (sessionId !== this.currentSessionId || this.currentGroupId) return;
+
+          if (data.type === 'proactive_stream_discard') {
+            if (this._aseStreaming && this.messages[this.messages.length - 1]?._streaming) this.messages.pop();
+            this._aseStreaming = false;
+            this._aseStreamBuf = '';
+            return;
+          }
 
           // ── ASE proactive token stream ─────────────────────────────────────
           // Normal chat tokens come via HTTP response; only ASE/heartbeat tokens
@@ -3209,6 +3296,9 @@ const App = {
   },
 
   watch: {
+    unreadProactiveCount(count) {
+      document.title = count ? `(${count}) Shikigami Protocol` : 'Shikigami Protocol';
+    },
     // Synchronous invalidation also covers A -> B -> A within one Vue tick.
     todoViewKey: { flush: 'sync', handler() { this.resetTodoView(); } },
     todoToolRevision() {
@@ -3246,6 +3336,7 @@ const App = {
   },
 
   computed: {
+    unreadProactiveCount() { return this.sessions.filter(session => this.hasUnreadProactive(session.id)).length; },
     todoViewKey() { return JSON.stringify([this.currentSessionId, this.currentGroupId]); },
     visibleTodos() {
       return this.currentGroupId ? [] : this.todos.filter(item => (item.owner ?? 'user') === this.todoOwner);

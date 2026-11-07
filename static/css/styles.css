@@ -530,11 +530,18 @@ html, body {
   background: var(--accent-dim);
 }
 .sidebar-role-button {
+  position: relative;
   flex: 0 0 42px;
   min-height: 44px;
   border-radius: var(--radius-md);
 }
 .sidebar-role-button:hover { background: var(--accent-dim); }
+.proactive-dot { display: inline-block; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.sidebar-role-button .proactive-dot { position: absolute; top: 3px; right: 3px; box-shadow: 0 0 0 2px var(--bg-sidebar); }
+.proactive-pill { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0;
+  padding: 3px var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--accent-dim); color: var(--text-primary); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.proactive-pill:hover, .proactive-pill:focus-visible { border-color: var(--accent); }
 .sidebar-role-button .session-avatar {
   width: 34px;
   height: 34px;
