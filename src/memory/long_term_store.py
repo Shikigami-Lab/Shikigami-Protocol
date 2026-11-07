@@ -498,6 +498,11 @@ class LongTermStore:
         with _WRITE_LOCK:
             return self._curation.get("index_cleanup_pending")
 
+    def legacy_vectors_cleared(self) -> bool:
+        self._refresh()
+        with _WRITE_LOCK:
+            return self._curation.get("legacy_vectors_cleared") is True
+
     def mark_curation_index_clean(self, token: str) -> bool:
         revision, cursors, facts, state = self.curation_snapshot()
         if state.get("index_cleanup_pending") != token:

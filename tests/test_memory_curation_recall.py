@@ -436,9 +436,11 @@ class CurationRecallTests(TestCase):
         write_facts(manager, fact("existing", "Current tea note"))
         self.assertEqual(manager.facts.clear_all(), 1)
         manager._offline_index = OfflineVectors({"id": "manual", "metadata": {}, "document": "Old tea note"})
+        asyncio.run(manager.prune_curation_index())
+        self.assertEqual(manager._offline_index.rows, [])
+        self.assertIsNone(manager.facts.curation_index_token())
         manager.import_legacy_vectors()
         self.assertEqual(manager.facts.get_all(), [])
-        self.assertEqual(manager._offline_index.rows, [])
 
     def test_offline_index_migrates_and_prunes_while_chat_uses_keywords(self):
         manager = self.manager
@@ -453,3 +455,18 @@ class CurationRecallTests(TestCase):
         self.assertNotIn(row.content, command(manager, "tea"))
         asyncio.run(manager.maintain_fact_index())
         self.assertEqual(manager._offline_index.rows, [])
+
+    def test_legacy_note_matching_cold_memory_keeps_its_own_archived_record(self):
+        manager = self.manager
+        cold = archive(fact("cold", "Boardwalk sunrise together", kind="experience"), "cold_memory")
+        write_facts(manager, cold)
+        manager.vectors = OfflineVectors(
+            vector(cold), {"id": "manual", "metadata": {}, "document": cold.content},
+        )
+        manager.import_legacy_vectors()
+        [original, imported] = manager.facts.get_all()
+        self.assertEqual(original.archive_reason, "cold_memory")
+        self.assertTrue(imported.is_manual and imported.archived)
+        asyncio.run(manager.maintain_fact_index())
+        self.assertEqual([row["id"] for row in manager.vectors.rows], [cold.id])
+        self.assertIn(cold.content, command(manager, "boardwalk"))

@@ -261,7 +261,7 @@ class MemoryManager:
             legacy = [row for row in legacy if (row.get("document") or "").strip()]
             imported = state.setdefault("legacy_vector_imports", {})
             pool = RecallCandidates(self.facts)
-            by_text = {fact.content.strip(): fact for fact in pool.indexable.values()}
+            by_text = {fact.content.strip(): fact for fact in pool.active.values()}
             forgotten_texts = {fact.content.strip() for fact in facts} - by_text.keys()
             links = {}
             for row in legacy:
@@ -339,8 +339,9 @@ class MemoryManager:
         # Prefer the stable ID to an older duplicate of the same fact.
         vectors.sort(key=lambda row: row["id"] != (row.get("metadata") or {}).get("fact_id"))
         current = {row["id"] for row in self.current_vector_rows(vectors, pool)}
+        clear_legacy = self.facts.legacy_vectors_cleared()
         obsolete = [row["id"] for row in vectors if row["id"] not in current
-                    and "fact_id" in (row.get("metadata") or {})]
+                    and (clear_legacy or "fact_id" in (row.get("metadata") or {}))]
         return len(pool.active), expired, obsolete
 
     def preview_fact_index(self) -> dict:
