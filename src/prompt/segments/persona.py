@@ -6,6 +6,7 @@ from typing import Any, Dict
 from src.config.prompt_loader import get_locale
 from src.prompt.base import BuildContext, PromptSegment, SegmentResult
 from src.prompt.registry import register
+from src.utils.persona_context import persona_prompt_parts
 
 
 def _user_agency_text(locale: str) -> str:
@@ -51,23 +52,7 @@ class PersonaSegment(PromptSegment):
         if profile.get("anti_assistant_mode"):
             parts.append(self.ANTI_ASSISTANT_ZH)
 
-        # 演化仅在 enabled 时使用 persona_evolved 中的稿子；关闭演化则始终用人格卡根字段
-        evolved = profile.get("persona_evolved") or {}
-        if evolved.get("enabled", True):
-            base = (evolved.get("base_prompt") or profile.get("base_prompt") or "").strip()
-            style = (evolved.get("style_constraint") or profile.get("style_constraint") or "").strip()
-        else:
-            base = (profile.get("base_prompt") or "").strip()
-            style = (profile.get("style_constraint") or "").strip()
-        if base:
-            parts.append(base)
-
-        if style:
-            parts.append(style)
-
-        code_expr = (profile.get("code_expression_constraint") or "").strip()
-        if code_expr:
-            parts.append(code_expr)
+        parts.extend(persona_prompt_parts(profile))
 
         parts.append(_user_agency_text(get_locale()))
 

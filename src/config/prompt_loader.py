@@ -10,7 +10,7 @@
     text = get_prompt("vlm.screenshot")
 
     # 带变量的 prompt
-    text = render("memory.day_summary", date_str="2026-03-14", conv_text="...")
+    text = render("memory.day_summary_input", date_str="2026-03-14", conv_text="...")
 
     # 显式指定 locale
     text = get_prompt("reflection.user_instruction", locale="en")

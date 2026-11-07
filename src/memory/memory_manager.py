@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from string import Template
 from typing import Any, Dict, List, Optional
 
+from src.config.memory_prompts import memory_task_prompt
 from src.config.prompt_loader import get_prompt
 from src.utils.memory_time import write_time_context
 
@@ -34,6 +35,7 @@ from src.utils.debug_logger import (
 from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates, rank_related
 from src.memory.recall import RecallCandidates, is_cold
 from src.utils.paths import get_project_root
+from src.utils.persona_context import persona_prompt_parts
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,7 @@ class MemoryManager:
 
         # 合并配置：profile 覆盖全局，全局覆盖默认
         app_cfg = app_memory_cfg or {}
+        self._global_memory_cfg = app_cfg
         prof_cfg = profile_memory_cfg or {}
         self._cfg: Dict[str, Any] = {
             "enabled": False,
@@ -93,7 +96,6 @@ class MemoryManager:
             "extraction_frequency": 5,
             "extraction_weight_threshold": 0.5,
             "max_facts_in_prompt": 8,
-            "extraction_prompt": "",
             "day_summary_enabled": False,
             "day_summary_keep_days": 14,
             # 每日遗忘（只跑已加载且昨日有对话的 session）
@@ -166,13 +168,8 @@ class MemoryManager:
     # ── 公共 API ──────────────────────────────────────────────────────────────
 
     def _expand_card_macros(self, text: str, profile: Dict = None, app=None) -> str:
-        """Expand SillyTavern macros in custom prompts.
-
-        Profiles imported from character cards often have {{char}}/{{user}} in extraction_prompt /
-        day_summary_prompt. Unexpanded, the helper model reads the literal macros and may copy them
-        into extracted facts or day summaries, which memory injection then amplifies.
-        """
-        if not text or "{{" not in text:
+        """Expand card macros in the shared persona and the configured task instruction."""
+        if not text or ("{{" not in text and "<" not in text):
             return text
         from src.core.user_portrait import _resolve_user_intro
         from src.prompt.macros import build_macro_table, expand_macros
@@ -379,36 +376,16 @@ class MemoryManager:
                 for fact_id in changed:
                     await self.reembed_fact(fact_id, emotion_context=emotion_context)
 
+    def _memory_system_prompt(self, task: str, profile: Dict, app, protocol: str = "") -> str:
+        config = getattr(getattr(app, "state", None), "config", None)
+        global_memory = getattr(config, "memory", self._global_memory_cfg)
+        persona = self._expand_card_macros("\n\n".join(persona_prompt_parts(profile)), profile, app)
+        instruction = self._expand_card_macros(memory_task_prompt(global_memory, task), profile, app)
+        return "\n\n".join(part for part in (persona, get_prompt("memory.task_boundary"), instruction, protocol)
+                           if part)
+
     def _build_day_summary_context(self, date_str: str, msg_count: int, profile: Dict, app) -> Dict[str, str]:
-        """收集日摘要所需的上下文变量：角色名、近期日记、好感状态、活跃度备注。"""
-        # 角色名
-        character_name = (profile or {}).get("display_name", "") or self._profile_id
-
-        # Persona: the diary asks for first-person inner feelings. With only a name the model has no
-        # character to hold on to, and on content that conflicts with its safety alignment it falls back
-        # to its own identity and writes "as an AI…" disclaimers. mid_term_memory injects these texts
-        # back into every chat turn, which breaks the roleplay directly.
-        persona_brief = ""
-        try:
-            from src.utils.persona_context import get_persona_context_for_secondary_llm, resolve_user_name
-            persona_brief = get_persona_context_for_secondary_llm(
-                profile,
-                max_chars=1200,
-                user_name=resolve_user_name(profile, app),
-            )
-        except Exception:
-            persona_brief = ""
-        if not persona_brief:
-            # Without reflection_config.custom_prompt, fall back to the persona text (evolved version
-            # first). This path must expand {{char}}/{{user}} too, or a persona imported from a
-            # character card feeds literal macros to the diary model.
-            _ev = (profile or {}).get("persona_evolved") or {}
-            _bp = ((_ev.get("base_prompt") or "") if _ev.get("enabled", True) else "") \
-                  or (profile or {}).get("base_prompt") or ""
-            persona_brief = self._expand_card_macros(_bp.strip()[:1200], profile, app)
-        if not persona_brief:
-            persona_brief = f"（暂无角色设定，请仅以「{character_name}」这个身份书写）"
-
+        """Collect existing diary continuity and relationship context."""
         # How to refer to the user: a system word like 「用户」 in the prompt pushes the diary toward a
         # report tone, so the default config name counts as unset. Order: the user's own name, a custom
         # config name, how the character usually addresses them, then a neutral word.
@@ -423,9 +400,12 @@ class MemoryManager:
             or ("them" if get_locale() == "en" else "对方")
         )
 
-        # 近期日记（最多 3 条，放在对话内容之前）
-        recent = self.day_store.get_recent(4)  # 取 4 条，排除当天后留 3 条
-        recent = [s for s in recent if s.get("date") != date_str][-3:]
+        # Historical backfills must only see diary entries before the date being summarized.
+        prior = sorted(
+            (entry for entry in self.day_store.get_all() if entry.get("date") and entry["date"] < date_str),
+            key=lambda entry: entry["date"],
+        )
+        recent = prior[-3:]
         if recent:
             recent_summaries = "\n".join(
                 f"[{s['date']}] {s['summary']}" for s in recent
@@ -452,8 +432,7 @@ class MemoryManager:
         # 活跃度对比：与近 7 天平均消息数对比，仅在显著差异时备注
         activity_note = ""
         if msg_count > 0:
-            history = self.day_store.get_recent(7)
-            active_days = [s for s in history if s.get("message_count", 0) > 0 and s.get("date") != date_str]
+            active_days = [entry for entry in prior[-7:] if entry.get("message_count", 0) > 0]
             if len(active_days) >= 2:
                 avg = sum(s["message_count"] for s in active_days) / len(active_days)
                 if avg > 0:
@@ -464,8 +443,7 @@ class MemoryManager:
                         activity_note = f"（今天只聊了 {msg_count} 条，比平时少很多，平均 {avg:.0f} 条）"
 
         return {
-            "character_name": character_name,
-            "persona_brief": persona_brief,
+            "character_name": profile.get("display_name") or profile.get("name") or self._profile_id,
             "user_name": user_name,
             "recent_summaries": recent_summaries,
             "affinity_status": affinity_status,
@@ -492,6 +470,7 @@ class MemoryManager:
 
         def _msg_role(m): return m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
         def _msg_content(m): return m.get("content", "") if isinstance(m, dict) else getattr(m, "content", "")
+        def _msg_sender(m): return m.get("sender") if isinstance(m, dict) else getattr(m, "sender", "")
 
         user_name = getattr(getattr(app, "state", None) and getattr(app.state, "config", None), "user_name", "用户") or "用户"
         def _is_human(m): return _msg_role(m) == "user"
@@ -524,7 +503,7 @@ class MemoryManager:
             day_msgs = day_msgs[:max_messages]
             truncated_msg = total_day > max_messages
             conv_text = "\n".join(
-                f"{'用户' if _is_human(m) else 'AI'}: {_msg_content(m)}"
+                f"{_msg_sender(m) or ('用户' if _is_human(m) else 'AI')}: {_msg_content(m)}"
                 for m in day_msgs
             )
             max_conv_chars = max(2000, min(100000, int(self._cfg.get("day_summary_max_conv_chars", 12000))))
@@ -534,50 +513,10 @@ class MemoryManager:
 
         ctx = self._build_day_summary_context(date_str, len(day_msgs), profile, app)
 
-        custom_summary_prompt = self._expand_card_macros(self._cfg.get("day_summary_prompt", ""), profile, app)
-        if custom_summary_prompt:
-            # A custom prompt only names the character, so give it the same persona and address context
-            # as the built-in prompts; without it the model can fall back to writing as an assistant.
-            from src.config.prompt_loader import get_locale, render
-            _locale = get_locale()
-            preamble = render(
-                "memory.day_summary_custom_preamble", locale=_locale,
-                default=(
-                    "You are $character_name. Your persona:\n$persona_brief\n\n"
-                    "Refer to the other person as \"$user_name\". Write as yourself, in your own voice; "
-                    "never speak as an assistant or model."
-                    if _locale == "en" else
-                    "你是 $character_name。你的人设：\n$persona_brief\n\n"
-                    "称呼对方为「$user_name」。始终以你自己的身份和口吻书写，不要以助手或模型的身份说话。"
-                ),
-                character_name=ctx["character_name"],
-                persona_brief=ctx["persona_brief"],
-                user_name=ctx["user_name"],
-            )
-            prompt_template = (
-                preamble.strip() + "\n\n"
-                + custom_summary_prompt.replace("{conversation}", conv_text).replace("{date}", date_str)
-            )
-        elif quiet:
-            prompt_template = Template(get_prompt("memory.day_summary_quiet")).safe_substitute(
-                date_str=date_str,
-                character_name=ctx["character_name"],
-                persona_brief=ctx["persona_brief"],
-                user_name=ctx["user_name"],
-                recent_summaries=ctx["recent_summaries"],
-                affinity_status=ctx["affinity_status"],
-            )
-        else:
-            prompt_template = Template(get_prompt("memory.day_summary")).safe_substitute(
-                date_str=date_str,
-                conv_text=conv_text,
-                character_name=ctx["character_name"],
-                persona_brief=ctx["persona_brief"],
-                user_name=ctx["user_name"],
-                recent_summaries=ctx["recent_summaries"],
-                affinity_status=ctx["affinity_status"],
-                activity_note=ctx["activity_note"],
-            )
+        task_prompt = self._memory_system_prompt("day_summary_prompt", profile, app)
+        diary_input = Template(get_prompt("memory.day_summary_input")).safe_substitute(
+            date_str=date_str, conv_text=conv_text or get_prompt("memory.day_summary_no_conversation"), **ctx,
+        )
 
         try:
             from src.llm.registry import get_provider
@@ -592,10 +531,9 @@ class MemoryManager:
                 preset = app.state.config.get_active_llm_preset()
             llm = get_provider(preset)
             _summary_model = preset.get("model", "unknown") if preset else "unknown"
-            # 至少需要一条 user 消息，否则 Gemini 等 API 会报 contents is not specified
             _summary_msgs = [
-                {"role": "system", "content": prompt_template},
-                {"role": "user", "content": get_prompt("memory.day_summary_user")},
+                {"role": "system", "content": task_prompt},
+                {"role": "user", "content": diary_input},
             ]
             log_secondary_llm_call(
                 role="memory_summary",
@@ -858,22 +796,22 @@ class MemoryManager:
             for row in source_turns
         )
 
-        custom_prompt = self._expand_card_macros(self._cfg.get("extraction_prompt", ""), profile, app)
-        if custom_prompt:
-            prompt = custom_prompt.replace("{conversation}", conv_text)
-            if conv_text not in prompt:
-                prompt += "\n\n对话内容：\n" + conv_text
-        else:
-            prompt = Template(get_prompt("memory.extraction_default")).safe_substitute(
-                user_label="用户", persona_name=persona_name, conv_text=conv_text)
         threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
         previous = [{"fact_id": f.id, "kind": f.kind or "stable", "category": f.category,
                      "content": f.content, "event_date": f.event_date, "protected": f.is_manual or f.pinned}
                     for f in candidates]
         from src.config.prompt_loader import get_locale
-        prompt += "\n\n" + write_time_context(source_turns, get_locale())
-        prompt += "\n\nExisting candidate facts (data):\n" + json.dumps(previous, ensure_ascii=False)
-        prompt += "\n\n" + FORMAT + f"\nWeight must be greater than {threshold}."
+        locale = get_locale()
+        headings = ("Conversation", "Existing candidate facts (data)") if locale == "en" else (
+            "对话内容", "相关旧事实（参考数据）",
+        )
+        context = "\n\n".join((
+            f"[{headings[0]}]\n{conv_text}",
+            write_time_context(source_turns, locale),
+            f"[{headings[1]}]\n{json.dumps(previous, ensure_ascii=False)}",
+        ))
+        protocol = FORMAT + f"\nWeight must be greater than {threshold}."
+        system = self._memory_system_prompt("extraction_prompt", profile, app, protocol)
 
         from src.llm.registry import get_provider
         from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response
@@ -881,7 +819,7 @@ class MemoryManager:
         if name == "__none__":
             return []
         preset = app.state.config.get_llm_preset(name) if name else app.state.config.get_active_llm_preset()
-        messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": context}]
         model = preset.get("model", "unknown")
         log_secondary_llm_call(role="memory_extract", messages=messages, model=model,
                                gen_kwargs={}, session_id=self._profile_id)

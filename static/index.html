@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107curation3"></script>
+  <script src="js/i18n.js?v=20261107memoryprompts2"></script>
 </head>
 <body>
 
@@ -2382,21 +2382,21 @@
 
           <!-- Right: profile detail with sub-tabs -->
           <div class="profile-detail-col">
-            <div v-if="!selectedProfileId" style="color:var(--text-secondary);font-size:13px;padding-top:20px;">
-              {{ t('lblSelectProfileHint') }}
-            </div>
-            <div v-else>
-
-              <div class="settings-profile-save-state"><settings-save-status :state="settingsSaveState('profile', selectedProfileId)"></settings-save-status></div>
-              <!-- Sub-tab nav -->
-              <div class="profile-subtab-nav">
-                <button type="button" :aria-pressed="profileSubTab === 'basic'" :class="['profile-subtab-btn', { active: profileSubTab === 'basic' }]" @click="profileSubTab = 'basic'">{{ t('profileSubTabBasic') }}</button>
-                <button type="button" :aria-pressed="profileSubTab === 'prompts'" :class="['profile-subtab-btn', { active: profileSubTab === 'prompts' }]" @click="profileSubTab = 'prompts'">{{ t('profileSubTabPrompts') }}</button>
+            <div v-if="selectedProfileId" class="settings-profile-save-state"><settings-save-status :state="settingsSaveState('profile', selectedProfileId)"></settings-save-status></div>
+            <div class="profile-subtab-nav">
+              <button v-if="selectedProfileId" type="button" :aria-pressed="profileSubTab === 'basic'" :class="['profile-subtab-btn', { active: profileSubTab === 'basic' }]" @click="profileSubTab = 'basic'">{{ t('profileSubTabBasic') }}</button>
+              <button id="persona-prompt-tab" type="button" :aria-pressed="profileSubTab === 'prompts'" :class="['profile-subtab-btn', { active: profileSubTab === 'prompts' }]" @click="profileSubTab = 'prompts'">{{ t('profileSubTabPrompts') }}</button>
+              <template v-if="selectedProfileId">
                 <button type="button" :aria-pressed="profileSubTab === 'lorebook'" :class="['profile-subtab-btn', { active: profileSubTab === 'lorebook' }]" @click="openProfileLorebookTab()">{{ t('profileSubTabLorebook') }}</button>
                 <button type="button" :aria-pressed="profileSubTab === 'behavior'" :class="['profile-subtab-btn', { active: profileSubTab === 'behavior' }]" @click="profileSubTab = 'behavior'">{{ locale === 'en' ? 'Behavior' : '行为' }}</button>
                 <button type="button" :aria-pressed="profileSubTab === 'tts'" :class="['profile-subtab-btn', { active: profileSubTab === 'tts' }]" @click="profileSubTab = 'tts'">{{ t('profileSubTabTts') }}</button>
                 <button type="button" :aria-pressed="profileSubTab === 'tools'" :class="['profile-subtab-btn', { active: profileSubTab === 'tools' }]" @click="profileSubTab = 'tools'">{{ t('profileSubTabTools') }}</button>
-              </div>
+              </template>
+            </div>
+            <div v-if="!selectedProfileId && profileSubTab !== 'prompts'" style="color:var(--text-secondary);font-size:13px;padding-top:20px;">
+              {{ t('lblSelectProfileHint') }}
+            </div>
+            <div v-if="selectedProfileId">
 
               <!-- ─── 基础设定 ─── -->
               <div v-if="profileSubTab === 'basic'" class="profile-subtab-panel">
@@ -2792,28 +2792,6 @@
                     <button class="s-btn s-btn-secondary" style="font-size:12px;" @click="beginAddCustomSeg" :disabled="!!newCustomSeg">{{ t('btnAddCustomSeg') }}</button>
                   </div>
                   </template>
-                </collapsible-section>
-
-                <!-- 记忆提取 Prompt（从记忆设置移入） -->
-                <collapsible-section :title="t('secMemoryExtractPrompts')" v-model:open="memPromptExpanded">
-                    <div class="mem-cfg-item">
-                      <div class="param-row" style="align-items:flex-start;">
-                        <span class="param-label">{{ t('lblCustomExtractionPrompt') }}</span>
-                        <textarea class="form-input" rows="4" v-model="memoryProfileForm.extraction_prompt"
-                                  :placeholder="t('phCustomExtractionPrompt')"
-                                  style="flex:1;min-width:0;resize:vertical;"></textarea>
-                      </div>
-                      <p class="mem-cfg-hint">{{ t('hintCustomExtractionPrompt') }}</p>
-                    </div>
-                    <div class="mem-cfg-item">
-                      <div class="param-row" style="align-items:flex-start;">
-                        <span class="param-label">{{ t('lblDaySummaryPrompt') }}</span>
-                        <textarea class="form-input" rows="3" v-model="memoryProfileForm.day_summary_prompt"
-                                  :placeholder="t('phDaySummaryPrompt')"
-                                  style="flex:1;min-width:0;resize:vertical;"></textarea>
-                      </div>
-                      <p class="mem-cfg-hint">{{ t('hintDaySummaryPrompt') }}</p>
-                    </div>
                 </collapsible-section>
 
               </div><!-- end Prompt 编辑 -->
@@ -4129,7 +4107,33 @@
               </div><!-- end 工具配置 -->
 
 
-            </div>
+            </div><!-- end profile-specific settings -->
+            <collapsible-section v-if="profileSubTab === 'prompts'" id="global-memory-prompts" tabindex="-1"
+                                 :title="t('secMemoryExtractPrompts')" v-model:open="memPromptExpanded">
+              <p class="form-hint">{{ t('hintGlobalMemoryPrompts') }}</p>
+              <p v-if="memoryPromptsError" class="form-hint" role="alert">{{ t(memoryPromptsError) }}</p>
+              <p v-if="memoryPromptsBusy" class="form-hint" role="status">
+                {{ t(memoryPromptsRequest === 'saving' ? 'memoryPromptsSaving' : 'memoryPromptsLoading') }}
+              </p>
+              <button v-if="memoryPromptsError === 'memoryPromptsLoadFailed'" id="memory-prompts-retry" type="button"
+                      class="s-btn s-btn-secondary" @click="loadMemoryPrompts()">{{ t('btnRefresh') }}</button>
+              <template v-if="memoryPrompts">
+                <div v-for="(label, key) in { extraction_prompt: 'lblExtractionPrompt', day_summary_prompt: 'lblDaySummaryPrompt' }"
+                     :key="key" class="form-field">
+                  <label class="form-label" :for="'memory-prompt-' + key">{{ t(label) }}</label>
+                  <textarea :id="'memory-prompt-' + key" class="form-input" rows="4" style="resize:vertical;"
+                            v-model="memoryPromptDraft[key]" :disabled="memoryPromptsBusy"></textarea>
+                  <div class="btn-row" style="margin-top:6px;">
+                    <button :id="'memory-prompt-' + key + '-save'" type="button" class="s-btn s-btn-primary"
+                            :disabled="memoryPromptsBusy || !memoryPromptIsDirty(key)"
+                            @click="saveMemoryPrompt(key)">{{ t('btnSaveLLM') }}</button>
+                    <button :id="'memory-prompt-' + key + '-reset'" type="button" class="s-btn s-btn-secondary"
+                            :disabled="memoryPromptsBusy || (memoryPrompts.overrides[key] === null && !memoryPromptIsDirty(key))"
+                            @click="saveMemoryPrompt(key, true)">{{ t('btnResetMemoryPrompt') }}</button>
+                  </div>
+                </div>
+              </template>
+            </collapsible-section>
           </div>
 
         </div>
@@ -5414,6 +5418,16 @@
             </div>
             <p class="mem-cfg-hint" style="margin-bottom:14px;">{{ t('hintProfileOverrideDesc') }}</p>
 
+            <div class="mem-cfg-item" style="margin-top:4px;">
+              <div class="prompt-moved-notice">
+                <span>{{ t('hintPromptMovedToProfile') }}</span>
+                <button id="memory-prompts-jump" type="button" class="s-btn s-btn-secondary" style="font-size:12px;"
+                        @click="memPromptExpanded = true; openSettingsSection('profiles', 'global-memory-prompts', 'prompts')">
+                  {{ t('btnGoToProfilePrompts') }}
+                </button>
+              </div>
+            </div>
+
             <fieldset :disabled="!memoryTabProfileLoaded" style="border:0;margin:0;padding:0;min-width:0;">
             <p v-if="memoryProfileId && !memoryTabProfileLoaded" class="form-hint" role="status">{{ t('memoryProfileNotLoaded') }}</p>
               <div class="form-field">
@@ -5588,17 +5602,6 @@
               </div>
             </div>
 
-            <!-- Prompt link -->
-            <div class="mem-cfg-item" style="margin-top:4px;">
-              <div class="prompt-moved-notice">
-                <span>{{ t('hintPromptMovedToProfile') }}</span>
-                <button class="s-btn s-btn-secondary" style="font-size:12px;"
-                        @click="activeTab = 'profiles'; profileSubTab = 'prompts'; memPromptExpanded = true">
-                  {{ t('btnGoToProfilePrompts') }}
-                </button>
-              </div>
-            </div>
-
             <!-- Budget breakdown -->
             <div class="mem-cfg-item" style="margin-top:12px;padding:8px 10px;background:var(--bg-app);border-radius:6px;border:1px solid var(--border);">
               <p class="mem-cfg-hint" style="margin:0;"><app-icon name="chart-no-axes-column" :size="14"></app-icon> {{ memoryBudgetBreakdown }}</p>
@@ -5656,10 +5659,6 @@
               <input type="checkbox" v-model="profileWizardDisableReflection" :disabled="profileWizardGenerating" />
               {{ t('wizardDisableReflection') }}
             </label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-              <input type="checkbox" v-model="profileWizardDisableMemory" :disabled="profileWizardGenerating" />
-              {{ t('wizardDisableMemory') }}
-            </label>
           </div>
           <div v-if="profileWizardError" style="color:var(--danger,#e55);font-size:12px;margin-top:6px;">{{ profileWizardError }}</div>
 
@@ -5685,8 +5684,7 @@
               <span v-if="profileWizardResult.emotion_prompts && Object.keys(profileWizardResult.emotion_prompts).length">{{ t('wizardFieldEmotions') }} · </span>
               <span v-if="profileWizardResult.energy_prompts">{{ t('wizardFieldEnergy') }} · </span>
               <span v-if="profileWizardResult.affinity_prompts">{{ t('wizardFieldAffinity') }} · </span>
-              <span v-if="profileWizardResult.reflection_custom_prompt">{{ t('wizardFieldReflection') }} · </span>
-              <span v-if="profileWizardResult.memory_extraction_prompt">{{ t('wizardFieldMemory') }}</span>
+              <span v-if="profileWizardResult.reflection_custom_prompt">{{ t('wizardFieldReflection') }}</span>
             </div>
           </div>
 
@@ -5744,12 +5742,12 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261107curation1"></script>
+<script src="js/api-paths.js?v=20261107memoryprompts1"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107curation3"></script>
+<script src="js/settings.js?v=20261107memoryprompts2"></script>
 <script src="js/agent-ui.js?v=20261105chatlayout1"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
-<script src="js/app.js?v=20261105lucide1"></script>
+<script src="js/app.js?v=20261107memoryprompts2"></script>
 </body>
 </html>

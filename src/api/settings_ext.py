@@ -27,9 +27,10 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config.emotion_keys import emotion_keys_csv_for_wizard
+from src.config.memory_prompts import memory_prompt_settings
 from src.llm.registry import get_provider
 from src.lorebooks.entry_utils import normalize_lorebook_entry_for_storage
 from src.memory.embedding import (
@@ -1641,13 +1642,15 @@ async def delete_profile(profile_id: str, request: Request):
 
 # ── Profile Wizard (LLM-based profile generation) ────────────────────────────
 
+_LEGACY_WIZARD_MEMORY_FIELDS = ("memory_extraction_prompt", "memory_day_summary_prompt")
+
+
 class ProfileWizardBody(BaseModel):
     description: str
     preset_name: str = ""
     disable_emotion:    bool = False
     disable_affinity:   bool = False
     disable_reflection: bool = False
-    disable_memory:     bool = False
 
 
 def _prepare_llm_json(response: str):
@@ -1833,24 +1836,6 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
                 "IMPORTANT: the 'thought' field output must be ≤30 Chinese chars (≤20 English words) — keep instructions concise so the model stays brief.\n"
             )
 
-    if not body.disable_memory:
-        if locale == "zh":
-            system_prompt += (
-                "  memory_extraction_prompt（字符串）：200-350 字。必须以相同的 ~150 字人格摘要开头 "
-                "'【角色要点】你是{名字}: {关键特质}\\n\\n'，然后是以 AI 自身口吻提取记忆的第一人称指令——"
-                "例如 '你是{名字}的潜意识，从对话中提取关于主人的重要事实，以第一人称记录如「我记得...」'——非旁观者视角。\n"
-                "  memory_day_summary_prompt（字符串）：150-250 字。必须以 '【角色要点】你是{名字}: {关键特质}\\n\\n' 开头，"
-                "然后是第一人称日记指令——例如 '你是{名字}。以第一人称（「我」）写下今天的记忆碎片，口吻{角色语气}，像日记而非报告'\n"
-            )
-        else:
-            system_prompt += (
-                "  memory_extraction_prompt (string): 200-350 chars. MUST start with the same ~150-char persona summary block "
-                "'【角色要点】你是{name}: {key traits}\\n\\n', then first-person extraction instructions where the AI extracts "
-                "memories as itself — e.g. '你是{name}的潜意识，从对话中提取关于主人的重要事实，以第一人称记录如「我记得...」' — NOT an outside observer.\n"
-                "  memory_day_summary_prompt (string): 150-250 chars. MUST start with '【角色要点】你是{name}: {key traits}\\n\\n', "
-                "then first-person diary instruction — e.g. '你是{name}。以第一人称（「我」）写下今天的记忆碎片，口吻{character tone}，像日记而非报告'\n"
-            )
-
     user_msg = f"请为以下描述生成人格：{body.description}" if locale == "zh" else f"Create a persona for: {body.description}"
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1878,6 +1863,9 @@ async def wizard_generate_profile(body: ProfileWizardBody, request: Request):
             return raw
 
         profile_data = json.loads(raw, strict=False)
+        if isinstance(profile_data, dict):
+            for key in _LEGACY_WIZARD_MEMORY_FIELDS:
+                profile_data.pop(key, None)
         return {"ok": True, "profile": profile_data, "preset_used": preset_name}
     except json.JSONDecodeError as e:
         return {"ok": False, "error": f"LLM output was not valid JSON: {e}", "raw": response[:500]}
@@ -1893,7 +1881,6 @@ _SCOPE_TO_TOP_KEYS = {
     "energy": ("energy_prompts",),
     "affinity": ("affinity_prompts",),
     "reflection": ("reflection_custom_prompt",),
-    "memory": ("memory_extraction_prompt", "memory_day_summary_prompt"),
     "style": ("style_constraint",),
     "anchor": ("core_anchor",),
 }
@@ -2024,20 +2011,6 @@ def _filter_autofill_patch(
                 out["reflection_custom_prompt"] = s
                 filled.append("reflection_custom_prompt")
 
-    if "memory_extraction_prompt" in allowed_keys and patch.get("memory_extraction_prompt") is not None:
-        s = str(patch.get("memory_extraction_prompt") or "").strip()
-        if s:
-            if not fill_empty_only or _is_empty_short_string(snapshot.get("memory_extraction_prompt"), 25):
-                out["memory_extraction_prompt"] = s
-                filled.append("memory_extraction_prompt")
-
-    if "memory_day_summary_prompt" in allowed_keys and patch.get("memory_day_summary_prompt") is not None:
-        s = str(patch.get("memory_day_summary_prompt") or "").strip()
-        if s:
-            if not fill_empty_only or _is_empty_short_string(snapshot.get("memory_day_summary_prompt"), 20):
-                out["memory_day_summary_prompt"] = s
-                filled.append("memory_day_summary_prompt")
-
     if "style_constraint" in allowed_keys and patch.get("style_constraint") is not None:
         s = str(patch.get("style_constraint") or "").strip()
         if s:
@@ -2065,11 +2038,11 @@ class PromptAutofillBody(BaseModel):
 
 @router.post("/profiles/prompt_autofill")
 async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
-    """Fill empty emotion / energy / affinity / reflection / memory / style prompts from base_prompt."""
+    """Fill empty emotion, energy, affinity, reflection, and style prompts from base_prompt."""
     import re
     from src.llm.registry import get_provider
 
-    snap = body.snapshot or {}
+    snap = {key: value for key, value in body.snapshot.items() if key not in _LEGACY_WIZARD_MEMORY_FIELDS}
     base = (snap.get("base_prompt") or "").strip()
     if len(base) < 15:
         raise HTTPException(status_code=400, detail="base_prompt too short (need at least ~15 chars for context)")
@@ -2090,7 +2063,7 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
 
     allowed = _autofill_allowed_top_keys(body.scopes or None)
     if not allowed:
-        raise HTTPException(status_code=400, detail="no valid scopes; use emotion, emotion_zh, energy, affinity, reflection, memory, style or leave empty for all")
+        raise HTTPException(status_code=400, detail="no valid scopes; use emotion, emotion_zh, energy, affinity, reflection, style, anchor or leave empty for all")
 
     mode_note = (
         "The user chose FILL EMPTY FIELDS ONLY: output new content only for keys that are empty or clearly placeholder-short in the snapshot. "
@@ -2134,8 +2107,6 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
         "Be prescriptive, not descriptive. These are hard behavioral constraints read directly by the AI.\n"
         "String keys:\n"
         "  reflection_custom_prompt: 200-400 chars. Start with ~150 chars persona summary '【角色要点】你是{name}: ...' then first-person introspection instructions for the AI. Note: the 'thought' output must be ≤30 Chinese chars (≤20 English words) — keep instructions concise.\n"
-        "  memory_extraction_prompt: 200-400 chars. Same 【角色要点】 prefix, then first-person memory extraction instructions.\n"
-        "  memory_day_summary_prompt: 150-280 chars. Same 【角色要点】 prefix, then first-person diary-style day summary instruction.\n"
         "  style_constraint: 150-400 chars. Tone, length limit, forbidden patterns, address term — only if missing in snapshot.\n"
         "  core_anchor: 3-6 semicolon-separated trait statements (max ~20 chars each). These are the character's IMMUTABLE traits — never-changing regardless of experience. Use concrete behavioral statements, not single adjectives. Include flaws/contradictions. Do NOT include formatting rules or reply-length constraints.\n"
         "Rules: Output ONLY raw JSON — no markdown fences, no commentary. Use the same language as base_prompt when possible (Chinese if base_prompt is Chinese).\n"
@@ -2929,6 +2900,41 @@ async def get_memory_config(request: Request):
     config = request.app.state.config
     memory = config.get_memory_config()
     return {**memory, "embedding": _public_embedding_fields(memory.get("embedding", {}))}
+
+
+class MemoryPromptsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    extraction_prompt: Optional[str] = None
+    day_summary_prompt: Optional[str] = None
+
+
+@router.get("/settings/memory/prompts")
+async def get_memory_prompts(request: Request):
+    return memory_prompt_settings(request.app.state.config.memory)
+
+
+@router.patch("/settings/memory/prompts")
+async def save_memory_prompts(request: Request, body: MemoryPromptsPatch):
+    config = request.app.state.config
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        return memory_prompt_settings(config.memory)
+
+    yaml, data = _load_yaml()
+    data = data or {}
+    memory = data.setdefault("memory", {})
+    prompts = memory_prompt_settings(memory)["overrides"]
+    prompts.update(updates)
+    overrides = {key: value for key, value in prompts.items() if value and value.strip()}
+    if overrides:
+        memory["task_prompts"] = overrides
+    else:
+        memory.pop("task_prompts", None)
+    _save_yaml(yaml, data)
+
+    # Managers read task prompts from the live global config at request time.
+    config.memory = {**config.memory, "task_prompts": overrides}
+    return memory_prompt_settings(config.memory)
 
 
 class MemoryConfigBody(BaseModel):

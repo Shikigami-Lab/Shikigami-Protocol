@@ -100,14 +100,11 @@ If `custom_prompt` is absent, reflection still runs but without persona context;
 
 ---
 
-## memory_extraction_prompt / memory_day_summary_prompt (top-level fields)
+## Fact extraction and diary prompts
 
-These two fields sit at the top level of the profile JSON (outside `emotion_config`):
+Edit the two global task instructions under **Settings → Profiles → Prompt editor → Global memory prompts**. Each memory request includes the character's full current persona and the context for that task. Chat and memory use the same rule to select the original or evolved persona.
 
-| Field | Description |
-|---|---|
-| `memory_extraction_prompt` | 200–400 chars. Must open with `【角色要点】你是{name}: {key traits}\n\n` (~150 chars), then first-person extraction instructions where the AI extracts memories as itself |
-| `memory_day_summary_prompt` | 150–280 chars. Same `【角色要点】` prefix, then first-person diary-style day-summary instruction |
+Legacy memory prompt fields remain in character files for rollback. This version reads the global instructions when assembling a memory request.
 
 ---
 

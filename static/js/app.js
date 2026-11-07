@@ -423,13 +423,7 @@ const App = {
         this.locale = inferred;
         localStorage.setItem('locale', inferred);
         document.documentElement.lang = inferred;
-        try {
-          await fetch(getBaseUrl() + '/api/preferences', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ locale: inferred }),
-          });
-        } catch (_) {}
+        await this.persistLocale(inferred);
       }
     }
 
@@ -649,17 +643,22 @@ const App = {
       this.locale = lang;
       localStorage.setItem('locale', lang);
       document.documentElement.lang = lang;
-      // Persist to server so all browser sessions (phone, desktop) share the same locale
-      fetch(getBaseUrl() + '/api/preferences', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ locale: lang })
-      }).catch(() => {});
+      this.persistLocale(lang);
       // Update statusText to reflect new locale if it is the "ready" state
       if (this.statusText === this.t('statusReady') ||
           (lang === 'zh' && this.statusText === 'Ready') ||
           (lang === 'en' && this.statusText === '就绪')) {
         this.statusText = (window.LOCALES[lang] && window.LOCALES[lang].statusReady) || '就绪';
       }
+    },
+    persistLocale(lang) {
+      const write = this.queueSettingsWrite('ui-locale', () => fetch(getBaseUrl() + '/api/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locale: lang }),
+      }).catch(() => {}));
+      if (this.memoryPromptsVisible) this.loadMemoryPrompts();
+      return write;
     },
 
     /* ─────────────────── Sessions ─────────────────── */

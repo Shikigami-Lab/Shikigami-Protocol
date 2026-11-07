@@ -48,14 +48,9 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.manager = memory.MemoryManager("synthetic", str(self.root / "memory"),
             profile_memory_cfg={"enabled": True, "extraction_frequency": 1, "day_summary_enabled": True})
         self.guards.enter_context(patch.object(self.manager, "_build_day_summary_context", return_value={
-            "character_name": "Fixture", "persona_brief": "Synthetic persona", "user_name": "Human",
+            "character_name": "Fixture", "user_name": "Human",
             "recent_summaries": "", "affinity_status": "", "activity_note": ""}))
-        templates = {"memory.extraction_default": "Extract from:\n$conv_text",
-                     "memory.day_summary": "Summarize:\n$conv_text",
-                     "memory.day_summary_quiet": "Quiet synthetic day"}
-        self.guards.enter_context(patch.object(memory, "get_prompt", side_effect=lambda key: templates.get(key, "")))
         self.guards.enter_context(patch("src.config.prompt_loader.get_locale", return_value="en"))
-        self.guards.enter_context(patch("src.config.prompt_loader.render", return_value="Synthetic persona"))
         self.calls = []
         self.response = "Synthetic summary"
 
@@ -126,7 +121,7 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
         mid = original[0]["id"]
         self.response = json.dumps([{"op": "add", "content": "Synthetic user likes mathematical puzzles",
                                      "category": "preference", "weight": 1.5, "evidence": [f"single:{mid}"]}])
-        self.manager._cfg["extraction_prompt"] = "Custom extraction without placeholder"
+        self.app.state.config.memory = {"task_prompts": {"extraction_prompt": "Shared extraction instruction"}}
         await self.manager.auto_extract(sources, {}, self.app)
         self.assert_clean_prompt(["USER_KEPT", "COMPLETE_KEPT", "GROUP_USER_KEPT", "GROUP_COMPLETE_KEPT"])
         self.assertEqual(self.manager.facts.get_all()[0].content, "Synthetic user likes mathematical puzzles")
@@ -136,8 +131,8 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.populate()
         for merged in (False, True):
             rows = get_merged_messages_for_date(self.session, self.app, {}, DAY) if merged else None
-            for custom in ("", "Custom summary {conversation}"):
-                self.manager._cfg["day_summary_prompt"] = custom
+            for custom in (None, "Shared diary instruction"):
+                self.app.state.config.memory = {"task_prompts": {"day_summary_prompt": custom}}
                 result = await self.manager.generate_day_summary(DAY, self.store, {}, self.app,
                     force=True, day_msgs_override=rows)
                 self.assertEqual(result["message_count"], 4 if merged else 2)
@@ -200,14 +195,15 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_fact_extraction_keeps_original_dates_with_custom_prompts(self):
         rows = [{"role": "user", "content": "下个礼拜二有面试", "timestamp": TS, "sender": "Human"},
                 {"role": "assistant", "content": "一起准备", "timestamp": TS + 86400}]
-        self.manager._cfg['extraction_prompt'] = 'Custom rules: {conversation}'
+        self.app.state.config.memory = {"task_prompts": {"extraction_prompt": "Shared extraction instruction"}}
         self.response = '[]'
         await self.manager._extract_facts_llm(rows, {}, self.app)
-        prompt = self.calls[-1][0]['content']
-        self.assertIn('2026-01-15', prompt)
-        self.assertIn('2026-01-16', prompt)
-        self.assertIn('下个礼拜二有面试', prompt)
-        self.assertIn('YYYY-MM-DD', prompt)
+        instruction, evidence = [message["content"] for message in self.calls[-1]]
+        self.assertIn("Shared extraction instruction", instruction)
+        self.assertIn('2026-01-15', evidence)
+        self.assertIn('2026-01-16', evidence)
+        self.assertIn('下个礼拜二有面试', evidence)
+        self.assertIn('YYYY-MM-DD', instruction)
 
     async def test_chat_background_memory_task_preserves_source_timestamps(self):
         from src.api.chat import _fire_memory_tasks
@@ -266,7 +262,8 @@ class MemoryTaskProvenanceTests(unittest.IsolatedAsyncioTestCase):
         result = await self.manager.generate_day_summary(DAY, self.store, {}, self.app,
             day_msgs_override=rows, force=True, quiet=True)
         self.assertEqual(result["message_count"], 0)
-        self.assertIn("Quiet synthetic day", self.calls[-1][0]["content"])
+        self.assertIn("There was no conversation that day.", self.calls[-1][1]["content"])
+        self.assertNotIn("LEGACY_USER", self.calls[-1][1]["content"])
 
 
 if __name__ == "__main__":

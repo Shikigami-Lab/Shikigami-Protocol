@@ -10,6 +10,8 @@ const EMOTION_KEYS_FALLBACK = [
   'sad', 'disappointed', 'angry', 'sarcastic', 'vulnerable', 'tired',
 ];
 
+const MEMORY_PROMPT_KEYS = ['extraction_prompt', 'day_summary_prompt'];
+
 const PRESET_TEMPLATES = {
   openai: {
     name: 'openai_new', type: 'openai_compat',
@@ -367,7 +369,6 @@ const SettingsMixin = {
       chatHistoryContextStart: 0,
       memoryStatus: null,
       memoryGlobalExpanded: false,
-      memoryProfileExpanded: false,
       memoryGlobalForm: {
         enabled: false,
         vector_enabled: false,
@@ -415,26 +416,23 @@ const SettingsMixin = {
       _embeddingSaveTimer: null,
       embedTestResult: null,
       embedTestLoading: false,
-      memoryProfileForm: {
-        extraction_prompt: '',
-        day_summary_prompt: '',
-      },
-      memoryProfileSaving: false,
+      memoryPrompts: null,
+      memoryPromptDraft: {},
+      memoryPromptsRequest: '',
+      memoryPromptsRefreshQueued: false,
+      memoryPromptsError: '',
       memoryTabProfileForm: {},
       memoryTabFormProfileId: '',
       memoryTabProfileSaving: false,
       memoryTabProfileLoaded: false,
       memoryTabProfileLoadSequence: 0,
-      personaMemoryLoadSequence: 0,
       memGlobalSaveState: null,
       memProfileSaveState: null,
       memoryGlobalFormLoaded: false,
       _memGlobalSaveStateTimer: null,
-      _memProfileFormLoaded: false,
       _memProfileSaveStateTimer: null,
       memGlobalAdvOpen: { ltm: false, vector: false, daySummary: false },
       memProfileAdvOpen: { extract: false, vector: false },
-      memoryFormProfileId: '',      // 记忆设置表单所属人格，load 完成后设置，save 时用此 id 避免盖错人
       memoryContentProfileId: '',   // 记忆内容（事实/向量/摘要/历史）所属人格，load 完成后设置
       memoryFacts: [],
       memoryFactForm: { content: '', category: 'other', weight: 1.0 },
@@ -785,6 +783,12 @@ const SettingsMixin = {
     isMemoryBrowser() {
       return this.activeTab === 'memory-content';
     },
+    memoryPromptsVisible() {
+      return this.settingsOpen && this.activeTab === 'profiles' && this.profileSubTab === 'prompts' && this.memPromptExpanded;
+    },
+    memoryPromptsBusy() {
+      return this.memoryPromptsRequest !== '';
+    },
     currentTabLabel() {
       if (this.isMemoryBrowser) return this.t('memSubTabContent');
       const tab = this.settingsTabs.find(t => t.id === this.activeTab);
@@ -814,13 +818,8 @@ const SettingsMixin = {
         this.saveMemoryGlobalConfig(true, true);
       },
     },
-    memoryProfileForm: {
-      deep: true,
-      flush: 'sync',
-      handler() {
-        if (!this._memProfileFormLoaded) return;
-        this.saveMemoryProfileConfig(true, true);
-      },
+    memoryPromptsVisible(visible) {
+      if (visible) return this.loadMemoryPrompts();
     },
     memoryTabProfileForm: {
       deep: true,
@@ -2230,7 +2229,6 @@ const SettingsMixin = {
       this.loadReflectionProfileConfig(profileId);
       this.loadPersonaEvolution(profileId);
       this.loadUserPortrait(profileId);
-      this.loadMemoryProfileConfig(profileId);
       // Populate prompt override form
       const ec = pending || p.emotion_config || {};
       const standardEmotionKeys = (this.emotionStandardKeys && this.emotionStandardKeys.length)
@@ -3349,7 +3347,6 @@ const SettingsMixin = {
       this.profileWizardDisableEmotion    = false;
       this.profileWizardDisableAffinity   = false;
       this.profileWizardDisableReflection = false;
-      this.profileWizardDisableMemory     = false;
     },
 
     applyPromptAutofillPatch(patch) {
@@ -3386,12 +3383,6 @@ const SettingsMixin = {
       if (patch.reflection_custom_prompt != null && String(patch.reflection_custom_prompt).trim()) {
         this.reflectionProfileForm.custom_prompt = String(patch.reflection_custom_prompt).trim();
       }
-      if (patch.memory_extraction_prompt != null && String(patch.memory_extraction_prompt).trim()) {
-        this.memoryProfileForm.extraction_prompt = String(patch.memory_extraction_prompt).trim();
-      }
-      if (patch.memory_day_summary_prompt != null && String(patch.memory_day_summary_prompt).trim()) {
-        this.memoryProfileForm.day_summary_prompt = String(patch.memory_day_summary_prompt).trim();
-      }
       if (patch.core_anchor != null && String(patch.core_anchor).trim()) {
         this.personaEvolutionForm.core_anchor = String(patch.core_anchor).trim();
       }
@@ -3417,15 +3408,13 @@ const SettingsMixin = {
           energy_prompts: { ...this.profilePromptForm.energy_prompts },
           affinity_prompts: { ...this.profilePromptForm.affinity_prompts },
           reflection_custom_prompt: this.reflectionProfileForm?.custom_prompt || '',
-          memory_extraction_prompt: this.memoryProfileForm?.extraction_prompt || '',
-          memory_day_summary_prompt: this.memoryProfileForm?.day_summary_prompt || '',
         };
         const res = await fetch(getBaseUrl() + API_PATHS.profilePromptAutofill(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fill_empty_only: !this.promptAutofillAllowOverwrite,
-            scopes: [],
+            scopes: ['emotion', 'emotion_zh', 'energy', 'affinity', 'reflection', 'style', 'anchor'],
             snapshot,
           }),
         });
@@ -3468,7 +3457,6 @@ const SettingsMixin = {
             disable_emotion:    !!this.profileWizardDisableEmotion,
             disable_affinity:   !!this.profileWizardDisableAffinity,
             disable_reflection: !!this.profileWizardDisableReflection,
-            disable_memory:     !!this.profileWizardDisableMemory,
           }),
         });
         const data = await res.json();
@@ -3483,8 +3471,6 @@ const SettingsMixin = {
             energy_prompts:            p.energy_prompts || {},
             affinity_prompts:          p.affinity_prompts || {},
             reflection_custom_prompt:  p.reflection_custom_prompt || '',
-            memory_extraction_prompt:  p.memory_extraction_prompt || '',
-            memory_day_summary_prompt: p.memory_day_summary_prompt || '',
           };
           this.profileWizardPresetUsed = data.preset_used || '';
         } else {
@@ -3554,17 +3540,6 @@ const SettingsMixin = {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ core_anchor: String(r.core_anchor).trim() }),
-        });
-      }
-      // 3. Save memory extraction/day-summary prompt
-      if (!this.profileWizardDisableMemory && (r.memory_extraction_prompt || r.memory_day_summary_prompt)) {
-        await fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            extraction_prompt: r.memory_extraction_prompt || '',
-            day_summary_prompt: r.memory_day_summary_prompt || '',
-          }),
         });
       }
     },
@@ -4371,27 +4346,74 @@ const SettingsMixin = {
       }
     },
 
-    async loadMemoryProfileConfig(profileId) {
-      if (!profileId) return;
-      const sequence = ++this.personaMemoryLoadSequence;
-      this._memProfileFormLoaded = false;
-      this.memoryFormProfileId = '';
+    loadMemoryPrompts() {
+      if (this.memoryPromptsBusy) {
+        this.memoryPromptsRefreshQueued = true;
+        return;
+      }
+      return this.requestMemoryPrompts();
+    },
+
+    memoryPromptIsDirty(key) {
+      if (!this.memoryPrompts) return false;
+      const { defaults, overrides } = this.memoryPrompts;
+      return this.memoryPromptDraft[key] !== (overrides[key] ?? defaults[key]);
+    },
+
+    saveMemoryPrompt(key, reset = false) {
+      if (!this.memoryPrompts || !MEMORY_PROMPT_KEYS.includes(key)) return;
+      const dirty = this.memoryPromptIsDirty(key);
+      if (!dirty && !(reset && this.memoryPrompts.overrides[key] !== null)) return;
+      return this.requestMemoryPrompts({ [key]: reset ? null : this.memoryPromptDraft[key] });
+    },
+
+    async requestMemoryPrompts(patch) {
+      // Global state survives persona and tab changes. Allow only one request at a time.
+      if (this.memoryPromptsBusy) return;
+      this.memoryPromptsRequest = patch ? 'saving' : 'loading';
+      this.memoryPromptsError = '';
       try {
-        const pending = this.flushSettingsWrite(`persona-memory:${profileId}`);
-        if (pending) await pending;
-        const res = await fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId));
-        if (!res.ok) return;
+        if (!patch) {
+          // The endpoint resolves built-in text using the server's saved locale.
+          let pendingLocale = this.flushSettingsWrite('ui-locale');
+          while (pendingLocale) {
+            await pendingLocale;
+            pendingLocale = this.flushSettingsWrite('ui-locale');
+          }
+          this.memoryPromptsRefreshQueued = false;
+        }
+        const url = getBaseUrl() + API_PATHS.memoryPrompts();
+        const res = patch
+          ? await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          })
+          : await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (sequence !== this.personaMemoryLoadSequence || profileId !== this.selectedProfileId) return;
-        const cfg = data.memory_config || {};
-        this.memoryProfileForm = {
-          extraction_prompt: cfg.extraction_prompt ?? '',
-          day_summary_prompt: cfg.day_summary_prompt ?? '',
-        };
-        this.memoryFormProfileId = profileId;
-        this._memProfileFormLoaded = true;
-      } catch (e) {
-        console.error('[settings] loadMemoryProfileConfig:', e);
+        if (!patch && this.memoryPromptsRefreshQueued && this.memoryPromptsVisible) return;
+        if (!MEMORY_PROMPT_KEYS.every(key => typeof data?.defaults?.[key] === 'string' &&
+          (data?.overrides?.[key] === null || typeof data?.overrides?.[key] === 'string'))) {
+          throw new Error('Invalid memory prompts response');
+        }
+        const { defaults, overrides } = data;
+        for (const key of MEMORY_PROMPT_KEYS) {
+          if ((patch && Object.hasOwn(patch, key)) || !this.memoryPromptIsDirty(key)) {
+            this.memoryPromptDraft[key] = overrides[key] ?? defaults[key];
+          }
+        }
+        this.memoryPrompts = data;
+        if (patch) this.showToast(this.t('toastSaved'), 'success');
+      } catch {
+        this.memoryPromptsError = patch ? 'settingsSaveFailed' : 'memoryPromptsLoadFailed';
+        if (patch) this.showToast(this.t('settingsSaveFailed'), 'error');
+      } finally {
+        this.memoryPromptsRequest = '';
+        if (this.memoryPromptsRefreshQueued) {
+          this.memoryPromptsRefreshQueued = false;
+          if (this.memoryPromptsVisible) await this.loadMemoryPrompts();
+        }
       }
     },
 
@@ -4444,17 +4466,6 @@ const SettingsMixin = {
       }
     },
 
-    saveMemoryProfileConfig(silent = false, debounce = false) {
-      const profileId = this.memoryFormProfileId;
-      if (!profileId || profileId !== this.selectedProfileId) return;
-      const body = JSON.stringify({
-        extraction_prompt: this.memoryProfileForm.extraction_prompt.trim(),
-        day_summary_prompt: this.memoryProfileForm.day_summary_prompt,
-      });
-      return this.queueSettingsWrite(`persona-memory:${profileId}`,
-        () => this.writeMemoryProfileConfig(profileId, body, silent, false), debounce);
-    },
-
     saveMemoryTabProfileConfig(silent = false, debounce = false) {
       const profileId = this.memoryTabFormProfileId;
       if (!profileId || profileId !== this.memoryProfileId) return;
@@ -4496,17 +4507,16 @@ const SettingsMixin = {
       const body = JSON.stringify(cfg);
       const generation = this.memoryViewGeneration;
       return this.queueSettingsWrite(`memory-tab:${profileId}`,
-        () => this.writeMemoryProfileConfig(profileId, body, silent, true, generation), debounce);
+        () => this.writeMemoryProfileConfig(profileId, body, silent, generation), debounce);
     },
 
-    async writeMemoryProfileConfig(profileId, body, silent, memoryTab, generation) {
-      const current = () => memoryTab && profileId === this.memoryProfileId && generation === this.memoryViewGeneration;
+    async writeMemoryProfileConfig(profileId, body, silent, generation) {
+      const current = () => profileId === this.memoryProfileId && generation === this.memoryViewGeneration;
       if (current()) {
         clearTimeout(this._memProfileSaveStateTimer);
         this.memoryTabProfileSaving = true;
         this.memProfileSaveState = 'saving';
       }
-      if (!memoryTab) this.memoryProfileSaving = true;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.profileMemoryConfig(profileId),
           { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }
@@ -4525,7 +4535,6 @@ const SettingsMixin = {
         this.showToast(`保存失败: ${e.message}`, 'error');
       } finally {
         if (current()) this.memoryTabProfileSaving = false;
-        if (!memoryTab) this.memoryProfileSaving = false;
       }
     },
 

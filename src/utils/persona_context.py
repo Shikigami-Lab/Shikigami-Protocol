@@ -8,6 +8,16 @@ from __future__ import annotations
 from typing import Any, Dict
 
 
+def persona_prompt_parts(profile: Dict[str, Any]) -> list[str]:
+    """Return the complete authored persona used in chat, without chat-only instructions."""
+    evolved = profile.get("persona_evolved") or {}
+    current = evolved if evolved.get("enabled", True) else {}
+    base = current.get("base_prompt") or profile.get("base_prompt") or ""
+    style = current.get("style_constraint") or profile.get("style_constraint") or ""
+    expression = profile.get("code_expression_constraint") or ""
+    return [text.strip() for text in (base, style, expression) if text.strip()]
+
+
 def resolve_user_name(profile: Dict[str, Any] | None, app) -> str:
     """The user's name for helper-model prompts, in the chat pipeline's order: the profile's
     user persona, then the global user persona, then config.user_name ("" when none is known)."""

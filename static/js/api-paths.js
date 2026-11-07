@@ -67,6 +67,7 @@ window.API_PATHS = {
   profileGenerateVoice: (id) => `/profiles/${encodeURIComponent(id)}/generate-voice`,
   profileSaveGeneratedVoice: (id) => `/profiles/${encodeURIComponent(id)}/save-generated-voice`,
 
+  memoryPrompts: () => '/settings/memory/prompts',
   memoryFactsAll: (pid) => `/memory/${encodeURIComponent(pid)}/facts/all`,
   memoryVectorsAll: (pid) => `/memory/${encodeURIComponent(pid)}/vectors/all`,
   memorySummaries: (pid) => `/memory/${encodeURIComponent(pid)}/summaries`,
