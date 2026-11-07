@@ -398,7 +398,7 @@ class SettingsIntegrityTests(unittest.TestCase):
             get_by_id=Mock(return_value=SimpleNamespace(conversation_store=SimpleNamespace(clear=clear))),
         )
         with patch.object(memory, "_require_manager", return_value=SimpleNamespace(
-            facts=SimpleNamespace(clear_all=Mock(return_value=1)),
+            facts=SimpleNamespace(clear_all=Mock(return_value=1)), prune_curation_index=AsyncMock(),
         )) as manager, patch.object(memory, "log_fact_clear_all"):
             for path in ("/memory/example/facts/all", "/sessions/example/history"):
                 self.assertEqual(403, self.client.delete(path, headers={"Origin": "http://8.8.8.8"}).status_code)

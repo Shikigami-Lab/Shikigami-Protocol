@@ -35,19 +35,30 @@ class OfflineVectors:
             self.before_results()
         return self.rows[:limit]
 
-    def get_all(self):
+    def get_all(self, *, strict=False):
         return self.rows.copy()
 
     def delete(self, vector_id):
         self.rows = [row for row in self.rows if row["id"] != vector_id]
         return True
 
-    def delete_by_fact_ids(self, ids):
-        self.rows = [row for row in self.rows if row["metadata"].get("fact_id") not in ids]
+    def delete_by_fact_ids(self, ids, *, keep_id=None):
+        self.rows = [row for row in self.rows
+                     if row["id"] == keep_id or (row.get("metadata") or {}).get("fact_id") not in ids]
 
-    def add(self, document, metadata, *, skip_dedup):
-        self.added.append(metadata["fact_id"])
-        return metadata["fact_id"]
+    def upsert_fact(self, document, metadata):
+        fact_id = metadata["fact_id"]
+        self.added.append(fact_id)
+        self.delete(fact_id)
+        self.rows.append({"id": fact_id, "document": document, "metadata": metadata, "distance": 0.15})
+        return fact_id
+
+    def link_fact(self, vector_id, fact_id):
+        for row in self.rows:
+            if row["id"] == vector_id:
+                row["metadata"] = {**(row.get("metadata") or {}), "fact_id": fact_id}
+                return True
+        return False
 
 
 def fact(fact_id, content, **fields):
@@ -188,7 +199,7 @@ class CurationRecallTests(TestCase):
         expired = archive(fact("expired", "A previous plan", expires_at=time.time() - 1), "cold_memory")
         write_facts(manager, canonical, alias, cold, unknown, expired)
         manager.vectors = OfflineVectors(
-            vector(unknown), vector(expired), vector(alias, 0.25), vector(cold, 0.8),
+            vector(unknown), vector(expired), vector(canonical, 0.25), vector(cold, 0.8),
         )
 
         rendered = render(manager, "boardwalk")
@@ -267,7 +278,7 @@ class CurationRecallTests(TestCase):
                     self.assertEqual(target.content in rendered, should_resolve)
                     self.assertNotIn(stored_alias.content, rendered)
 
-    def test_recall_preserves_standalone_vectors_with_no_facts(self):
+    def test_legacy_manual_vector_is_imported_without_embedding_and_cannot_revive(self):
         manager = self.manager
         self.assertEqual(manager.facts.get_all(), [])
         document = "Standalone manual note about the coast"
@@ -276,12 +287,22 @@ class CurationRecallTests(TestCase):
             {"id": "malformed", "metadata": {"fact_id": ""}, "distance": 0.15, "document": "Malformed linked text"},
             {"id": "manual", "metadata": {"created_at": time.time()}, "distance": 0.2, "document": document},
         )
+        manager.import_legacy_vectors()
+        manager.import_legacy_vectors()
+        [manual] = manager.facts.get_all()
+        self.assertTrue(manual.is_manual)
+        self.assertEqual(manager.vectors.added, [])
         rendered = command(manager, "1 coast")
         self.assertIn(document, rendered)
         self.assertNotIn("Deleted text", rendered)
         self.assertNotIn("Malformed linked text", rendered)
-        self.assertEqual(manager.vectors.queries, ["coast"])
-        self.assertNotIn(document, chat(manager, "coast"))
+        self.assertIn(document, chat(manager, "coast"))
+        self.assertTrue(manager.facts.delete(manual.id))
+        self.assertNotIn(document, command(manager, "coast"))
+        asyncio.run(manager.maintain_fact_index())
+        manager.import_legacy_vectors()
+        self.assertEqual(manager.facts.get_all(), [])
+        self.assertEqual(manager.vectors.rows, [])
 
     def test_single_bounded_search_gets_past_stale_archive_hits(self):
         manager = self.manager
@@ -329,10 +350,10 @@ class CurationRecallTests(TestCase):
         assert old.content not in rendered
         assert "New unrelated text" not in rendered
         assert now_archived.content not in rendered
-        self.assertEqual("Standalone manual vector text" in rendered, render is command)
+        self.assertNotIn("Standalone manual vector text", rendered)
 
 
-    def test_index_cleanup_and_sync_preserve_current_cold_and_useful_alias_vectors(self):
+    def test_index_cleanup_and_sync_keep_one_row_per_recallable_fact(self):
         manager = self.manager
         canonical = fact("main", "Prefers walks by the sea")
         alias = merge_alias(fact("alias", "Likes boardwalks"), canonical)
@@ -343,10 +364,92 @@ class CurationRecallTests(TestCase):
         broken = archive(fact("broken", "Broken boardwalk alias"), "merged", "deleted")
         write_facts(manager, canonical, alias, cold, missing_cold, missing_alias, low, broken)
         manager.vectors = OfflineVectors(
-            vector(canonical), vector(alias), vector(cold), vector(low), vector(broken),
+            vector(canonical), vector(canonical, vector_id="duplicate"), vector(alias), vector(cold), vector(low), vector(broken),
             vector(cold, document="Previous cold text", vector_id="stale"),
         )
-        assert asyncio.run(manager.maintain_fact_index()) == {"active": 1, "expired": 0, "vectors_removed": 3}
-        assert {row["id"] for row in manager.vectors.rows} == {"main", "alias", "cold"}
+        assert asyncio.run(manager.maintain_fact_index()) == {"active": 1, "expired": 0, "vectors_removed": 5}
+        assert {row["id"] for row in manager.vectors.rows} == {"main", "cold"}
         assert asyncio.run(manager.sync_facts_to_vectors()) == 1
         assert manager.vectors.added == ["missing-cold"]
+
+        assert asyncio.run(manager.sync_facts_to_vectors()) == 0
+        assert {row["id"] for row in manager.vectors.rows} == {"main", "cold", "missing-cold"}
+
+    def test_keyword_recall_without_vector_survives_sync_then_stops_after_forgetting(self):
+        manager = self.manager
+        row = fact("tea", "用户喝乌龙茶不加糖")
+        write_facts(manager, row)
+        self.assertIn(row.content, chat(manager, "乌龙茶"))
+        self.assertIn(row.content, command(manager, "乌龙茶"))
+        manager.vectors = OfflineVectors()
+        self.assertEqual(asyncio.run(manager.sync_facts_to_vectors()), 1)
+        self.assertEqual(asyncio.run(manager.sync_facts_to_vectors()), 0)
+        write_facts(manager, archive(row, "low_value"))
+        self.assertNotIn(row.content, chat(manager, "乌龙茶"))
+        self.assertNotIn(row.content, command(manager, "乌龙茶"))
+        asyncio.run(manager.maintain_fact_index())
+        self.assertEqual(manager.vectors.rows, [])
+        self.assertEqual(len(manager.facts.get_all()), 1)
+
+    def test_retrying_legacy_link_after_fact_deletion_does_not_restore_the_note(self):
+        manager = self.manager
+        manager.vectors = OfflineVectors({"id": "manual", "metadata": {}, "document": "Old tea note"})
+        with patch.object(manager.vectors, "link_fact", return_value=False):
+            manager.import_legacy_vectors()
+        [row] = manager.facts.get_all()
+        self.assertTrue(manager.facts.delete(row.id))
+        with patch("src.memory.memory_manager.log_memory_startup"):
+            reopened = MemoryManager("fixture", self.root)
+        reopened.vectors = manager.vectors
+        reopened.import_legacy_vectors()
+        asyncio.run(reopened.maintain_fact_index())
+        self.assertEqual(reopened.facts.get_all(), [])
+        self.assertEqual(reopened.vectors.rows, [])
+
+    def test_legacy_note_matching_forgotten_text_is_preserved_without_reviving_it(self):
+        manager = self.manager
+        row = fact("old", "Tea without sugar")
+        write_facts(manager, archive(row, "low_value"))
+        manager.vectors = OfflineVectors({"id": "manual", "metadata": {}, "document": row.content})
+        manager.import_legacy_vectors()
+        [original, imported] = manager.facts.get_all()
+        self.assertTrue(original.archived)
+        self.assertTrue(imported.archived)
+        self.assertTrue(imported.is_manual)
+        self.assertNotEqual(original.id, imported.id)
+        self.assertNotIn(row.content, command(manager, "Tea"))
+        asyncio.run(manager.maintain_fact_index())
+        self.assertEqual(manager.vectors.rows, [])
+
+    def test_failed_index_scan_leaves_curation_cleanup_pending(self):
+        manager = self.manager
+        manager.vectors = OfflineVectors()
+        revision, cursors, facts, state = manager.facts.curation_snapshot()
+        state["index_cleanup_pending"] = "pending-fixture"
+        self.assertTrue(manager.facts.apply_curation(revision, facts, cursors, state))
+        with patch.object(manager.vectors, "get_all", side_effect=OSError("index is busy")):
+            asyncio.run(manager.prune_curation_index())
+        self.assertEqual(manager.facts.curation_index_token(), "pending-fixture")
+
+    def test_clear_facts_while_index_is_unavailable_prevents_later_legacy_import(self):
+        manager = self.manager
+        write_facts(manager, fact("existing", "Current tea note"))
+        self.assertEqual(manager.facts.clear_all(), 1)
+        manager._offline_index = OfflineVectors({"id": "manual", "metadata": {}, "document": "Old tea note"})
+        manager.import_legacy_vectors()
+        self.assertEqual(manager.facts.get_all(), [])
+        self.assertEqual(manager._offline_index.rows, [])
+
+    def test_offline_index_migrates_and_prunes_while_chat_uses_keywords(self):
+        manager = self.manager
+        manager._offline_index = OfflineVectors({"id": "manual", "metadata": {}, "document": "Old tea note"})
+        manager.import_legacy_vectors()
+        [row] = manager.facts.get_all()
+        self.assertIsNone(manager.vectors)
+        self.assertIn(row.content, chat(manager, "tea"))
+        self.assertIn(row.content, command(manager, "tea"))
+        self.assertEqual(manager._offline_index.queries, [])
+        write_facts(manager, archive(row, "low_value"))
+        self.assertNotIn(row.content, command(manager, "tea"))
+        asyncio.run(manager.maintain_fact_index())
+        self.assertEqual(manager._offline_index.rows, [])

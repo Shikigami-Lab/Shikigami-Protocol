@@ -96,10 +96,9 @@ test('clear and reset reject an unsuccessful JSON result even on HTTP 200', asyn
   await model._doClearHistory('a');
   await model._doClearShortMem('a');
   await model._doClearFacts('a');
-  await model._doClearVectors('a');
   await model._doClearSummaries('a');
   assert.deepEqual([model.messages.length, model.memoryFacts.length, model.memoryVectors.length, model.memorySummaries.length], [1, 1, 1, 1]);
-  assert.deepEqual(toasts.map(toast => toast.type), Array(5).fill('error'));
+  assert.deepEqual(toasts.map(toast => toast.type), Array(4).fill('error'));
 });
 
 test('failed history paging retries the same offset and keeps the applied search', async () => {
@@ -1156,4 +1155,18 @@ test('a queued curation toggle saves to the edited persona while old config and 
   assert.equal(model.memoryCurationResult, null);
   model.selectMemoryProfile('c');
   assert.equal(model.memoryStatus, null);
+});
+
+test('vector sync reports incomplete coverage and refreshes the index view', async () => {
+  const calls = [];
+  const { model } = harness(async url => {
+    calls.push(url);
+    return response(url.startsWith('memoryVectorsSyncFacts') ? { vector_count: 2, total: 3 } : {});
+  });
+  model.t = key => key === 'vectorSyncCoverage' ? '{indexed} of {total}' : key;
+  model.memoryProfileId = 'a';
+  await model.syncFactsToVectors();
+  assert.equal(model.syncFactsResult.text, '2 of 3');
+  assert.equal(model.syncFactsResult.ok, false);
+  assert.deepEqual(calls, ['memoryVectorsSyncFacts/a', 'memoryVectors/a', 'memoryStatus/a']);
 });

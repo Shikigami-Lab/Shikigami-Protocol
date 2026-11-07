@@ -59,6 +59,7 @@ class RecallCandidates:
         self.active = {fact.id: fact for fact in self.facts
                        if fact.id in active_ids and fact.is_active(self.now)}
         self.cold = {fact.id: fact for fact in self.facts if is_cold(fact, self.now)}
+        self.indexable = {**self.active, **self.cold}
         self.aliases = {}
         for fact in self.facts:
             target_id = fact.merged_into
@@ -92,31 +93,16 @@ class RecallCandidates:
                 seen.add(fact.id)
                 yield fact, distance
 
-    def vector_text_hits(self, sources, rows, matches, max_distance, *, cold_distance):
-        """Yield explicit recall text in search order, including standalone manual vectors."""
-        for row in rows:
-            metadata = row.get("metadata")
-            if metadata is None or isinstance(metadata, dict) and "fact_id" not in metadata:
-                document = row.get("document")
-                distance = _vector_distance(row, max_distance)
-                if isinstance(document, str) and document.strip() and distance is not None:
-                    yield document.strip(), distance
-            else:
-                hit = self._fact_vector_hit(sources, row, matches, max_distance, cold_distance)
-                if hit:
-                    fact, distance = hit
-                    yield fact.content, distance
-
     def _fact_vector_hit(self, sources, row, matches, max_distance, cold_distance):
         metadata = row.get("metadata")
         fact_id = metadata.get("fact_id") if isinstance(metadata, dict) else None
-        source = sources.get(fact_id) if isinstance(fact_id, str) else None
+        source = self.indexable.get(fact_id) if isinstance(fact_id, str) and fact_id in sources else None
         if source is None:
             return None
         threshold = cold_distance if cold_distance is not None and fact_id in self.cold else max_distance
         distance = _vector_distance(row, threshold)
         if distance is not None and matches(source, row):
-            return self.resolve(fact_id), distance
+            return source, distance
         return None
 
 

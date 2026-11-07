@@ -1,15 +1,7 @@
-"""向量记忆存储 — ChromaDB PersistentClient
-
-search-before-write 策略（阈值由配置 vector_dedup_distance_threshold 控制，默认 0.1）：
-  distance < 阈值  → 删旧写新（仅几乎相同才覆盖，精炼向量库）
-  ≥ 阈值           → 并存（不删）
-
-ChromaDB 是可选依赖，未安装时 is_available() 返回 False，所有操作静默无效。
-"""
+"""ChromaDB index for the current facts of one profile."""
 import logging
 import os
 import time
-import uuid
 import gc
 from typing import Dict, List, Optional, Set
 
@@ -18,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class VectorMemoryStore:
 
-    def __init__(self, storage_root: str, embed_config: dict):
+    def __init__(self, storage_root: str, embed_config: dict, *, existing_only: bool = False):
         self._chroma_path = os.path.join(storage_root, "chroma_db")
         self._embed_config = embed_config
         self._client = None
@@ -26,7 +18,23 @@ class VectorMemoryStore:
         self._embed_fn = None
         self._available = False
         self._actual_provider_name: str = embed_config.get("provider", "none")
-        self._init()
+        if existing_only:
+            self._open_existing_index()
+        else:
+            self._init()
+
+    def _open_existing_index(self):
+        """Open an old index for migration and cleanup without loading an embedding model."""
+        if not os.path.isfile(os.path.join(self._chroma_path, "chroma.sqlite3")):
+            return
+        try:
+            import chromadb  # type: ignore
+
+            self._client = chromadb.PersistentClient(path=self._chroma_path)
+            self._collection = self._client.get_collection(name="memories", embedding_function=None)
+            self._available = True
+        except Exception as error:
+            logger.warning("[VectorStore] Existing index unavailable: %s", error)
 
     def _init(self):
         try:
@@ -59,47 +67,27 @@ class VectorMemoryStore:
     def is_available(self) -> bool:
         return self._available
 
-    def add(self, text: str, metadata: Optional[Dict] = None, *, skip_dedup: bool = False) -> Optional[str]:
-        """写入记忆。默认含 search-before-write：距离小于配置阈值时删旧写新（精炼向量库）。
-        阈值由 embed_config.vector_dedup_distance_threshold 控制，默认 0.1。skip_dedup=True 时直接写入。"""
+    def upsert_fact(self, text: str, metadata: Dict) -> Optional[str]:
+        """Index one fact under its stable ID. An embedding failure keeps the old row."""
         if not self._available or not text.strip():
             return None
-        threshold = float(self._embed_config.get("vector_dedup_distance_threshold", 0.1))
+        fact_id = metadata["fact_id"]
         try:
-            if not skip_dedup:
-                # search-before-write：仅当与已有条目几乎相同（dist < 阈值）时才删旧写新
-                results = self._collection.query(
-                    query_texts=[text],
-                    n_results=3,
-                    include=["distances"],
-                )
-                distances = results.get("distances", [[]])[0]
-                ids = results.get("ids", [[]])[0]
-
-                if distances and ids:
-                    min_dist = distances[0]
-                    min_id = ids[0]
-                    if min_dist < threshold:
-                        # 几乎相同 → 删旧写新
-                        self._collection.delete(ids=[min_id])
-                        logger.debug("[VectorStore] 覆盖语义相似条目 dist=%.3f < %.3f id=%s content=%.60s",
-                                     min_dist, threshold, min_id, text)
-
-            mem_id = "v_" + uuid.uuid4().hex[:12]
-            meta = {"created_at": time.time()}
-            if metadata:
-                meta.update(metadata)  # metadata 中的 created_at 会覆盖默认值
-            self._collection.add(
-                documents=[text],
-                metadatas=[meta],
-                ids=[mem_id],
-            )
-            logger.debug("[VectorStore] 写入向量 id=%s fact_id=%s content=%.80s",
-                         mem_id, meta.get("fact_id", ""), text)
-            return mem_id
-        except Exception as e:
-            logger.error("[VectorStore] add 失败: %s", e)
+            self._collection.upsert(documents=[text], metadatas=[metadata], ids=[fact_id])
+            self.delete_by_fact_ids([fact_id], keep_id=fact_id)
+            return fact_id
+        except Exception as error:
+            logger.error("[VectorStore] upsert failed for %s: %s", fact_id, error)
             return None
+
+    def link_fact(self, vector_id: str, fact_id: str) -> bool:
+        """Associate a legacy row with its saved fact without regenerating the embedding."""
+        try:
+            self._collection.update(ids=[vector_id], metadatas=[{"fact_id": fact_id}])
+            return True
+        except Exception as error:
+            logger.warning("[VectorStore] legacy link failed for %s: %s", vector_id, error)
+            return False
 
     def search(self, query: str, limit: int = 5) -> List[Dict]:
         """语义检索，返回 [{id, document, distance}]。"""
@@ -129,7 +117,7 @@ class VectorMemoryStore:
             logger.error("[VectorStore] search 失败: %s", e)
             return []
 
-    def get_all(self) -> List[Dict]:
+    def get_all(self, *, strict: bool = False) -> List[Dict]:
         """返回全部记忆条目 [{id, document, metadata}]。"""
         if not self._available:
             return []
@@ -145,6 +133,8 @@ class VectorMemoryStore:
             return items
         except Exception as e:
             logger.error("[VectorStore] get_all 失败: %s", e)
+            if strict:
+                raise
             return []
 
     def delete(self, memory_id: str) -> bool:
@@ -157,17 +147,16 @@ class VectorMemoryStore:
             logger.error("[VectorStore] delete 失败: %s", e)
             return False
 
-    def delete_by_fact_ids(self, fact_ids: List[str]) -> int:
+    def delete_by_fact_ids(self, fact_ids: List[str], *, keep_id: Optional[str] = None) -> int:
         """删除 metadata.fact_id 在 fact_ids 中的向量（用于孤儿清理、合并时删旧）。返回删除条数。"""
         if not self._available or not fact_ids:
             return 0
-        fact_id_set = set(fact_ids)
         try:
-            all_items = self.get_all()
-            to_delete = [r["id"] for r in all_items if r.get("metadata", {}).get("fact_id") in fact_id_set]
+            rows = self._collection.get(where={"fact_id": {"$in": fact_ids}}, include=[])
+            to_delete = [vector_id for vector_id in rows["ids"] if vector_id != keep_id]
             if to_delete:
                 self._collection.delete(ids=to_delete)
-                logger.info("[VectorStore] delete_by_fact_ids 删除 %d 条 fact_ids=%s", len(to_delete), list(fact_id_set)[:5])
+                logger.info("[VectorStore] delete_by_fact_ids 删除 %d 条 fact_ids=%s", len(to_delete), fact_ids[:5])
             return len(to_delete)
         except Exception as e:
             logger.error("[VectorStore] delete_by_fact_ids 失败: %s", e)

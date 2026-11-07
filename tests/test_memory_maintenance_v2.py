@@ -38,7 +38,7 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
             },
             maintain_fact_index=AsyncMock(return_value=self.counts),
             preview_fact_index=Mock(return_value={"active": 2, "expired": 1, "vectors_removed": 3}),
-            vectors=SimpleNamespace(is_available=lambda: True),
+            fact_index=object(),
         )
         self.get_manager = self.enterContext(patch.object(job, "_get_manager_for_session", return_value=self.manager))
         self.summary = self.enterContext(patch.object(job, "run_day_summary_for_profile", new_callable=AsyncMock))
@@ -92,7 +92,7 @@ class MemoryMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(Path(self.root).iterdir()), [])
 
     async def test_preview_can_count_expiry_without_a_vector_store(self):
-        self.manager.vectors = None
+        self.manager.fact_index = None
         self.manager.preview_fact_index.return_value = {"active": 0, "expired": 1, "vectors_removed": 0}
 
         preview = job.preview_forgetting_for_profile(PROFILE, self.app, YESTERDAY)

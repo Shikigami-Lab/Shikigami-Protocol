@@ -89,11 +89,12 @@ async def handle_recall(query: str, session, app) -> CommandResult:
 
     if vector_rows:
         cold_distance = min(_VEC_DIST_THRESHOLD, float(mgr._cfg.get("semantic_distance", 0.45)))
-        for content, distance in pool.vector_text_hits(
+        for fact, distance in pool.vector_hits(
             sources, vector_rows, mgr.fact_vector_matches, _VEC_DIST_THRESHOLD, cold_distance=cold_distance,
         ):
             if len(results) >= limit:
                 break
+            content = fact.content
             if content not in seen_contents:
                 sim_pct = max(0, 100 - int(distance * 100))
                 results.append(f"- [语义相关·相似度{sim_pct}%] {content}")

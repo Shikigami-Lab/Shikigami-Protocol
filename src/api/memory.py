@@ -7,9 +7,7 @@
   PUT    /memory/{profile_id}/facts/{id}
   DELETE /memory/{profile_id}/facts/{id}
   GET    /memory/{profile_id}/vectors       ?query=
-  POST   /memory/{profile_id}/vectors
   POST   /memory/{profile_id}/vectors/sync_facts  — 批量同步 facts → 向量库
-  DELETE /memory/{profile_id}/vectors/{memory_id}
   GET    /memory/{profile_id}/summaries     ?days=3
   DELETE /memory/{profile_id}/summaries/{date}
   POST   /memory/{profile_id}/summaries/generate  — 写日记：按日期范围生成摘要
@@ -32,7 +30,6 @@ from src.utils.debug_logger import (
     log_fact_add,
     log_fact_delete,
     log_fact_clear_all,
-    log_vector_delete,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +212,7 @@ async def create_fact(profile_id: str, body: FactCreate, request: Request):
         updated_at=fact.updated_at,
         is_manual=fact.is_manual,
     )
+    await mgr.reembed_fact(fact.id)
     return fact.to_dict()
 
 
@@ -228,10 +226,14 @@ async def update_fact(profile_id: str, fact_id: str, body: FactUpdate, request: 
             raise HTTPException(status_code=404, detail="Memory profile not found")
         revision = _require_current_fact_revision(mgr, fact_id, body.expected_revision)
         kwargs["expected_revision"] = revision
+    before = mgr.facts.get_by_id(fact_id)
     if not mgr.facts.update(fact_id, **kwargs):
         if revision is not None:
             raise HTTPException(status_code=409, detail="The memory changed or cannot be edited")
         raise HTTPException(status_code=404, detail="Fact not found")
+    after = mgr.facts.get_by_id(fact_id)
+    if before and after and (before.content, before.tags) != (after.content, after.tags):
+        await mgr.reembed_fact(fact_id)
     return {"ok": True}
 
 
@@ -240,6 +242,7 @@ async def clear_all_facts(profile_id: str, request: Request):
     """清空该人格的全部长期事实（不可撤销）。"""
     mgr = _require_manager(request, profile_id)
     deleted = mgr.facts.clear_all()
+    await mgr.prune_curation_index()
     log_fact_clear_all(profile_id, deleted, source="api")
     logger.info("[memory API] 清空事实库 profile=%s deleted=%d", profile_id, deleted)
     return {"ok": True, "deleted": deleted}
@@ -252,9 +255,9 @@ async def delete_fact(profile_id: str, fact_id: str, request: Request):
     if not fact:
         raise HTTPException(status_code=404, detail="Fact not found")
     log_fact_delete(profile_id, fact_id, fact.content, "api")
-    ok = mgr.facts.delete(fact_id)
-    if not ok:
+    if not mgr.facts.delete(fact_id):
         raise HTTPException(status_code=404, detail="Fact not found")
+    await mgr.reembed_fact(fact_id)
     return {"ok": True}
 
 
@@ -394,11 +397,6 @@ async def restore_archived_fact(profile_id: str, fact_id: str, body: ArchiveRest
 
 
 
-class VectorCreate(BaseModel):
-    text: str
-    metadata: dict = {}
-
-
 @router.get("/{profile_id}/vectors")
 async def get_vectors(profile_id: str, request: Request, query: Optional[str] = None):
     mgr = _require_manager(request, profile_id)
@@ -408,60 +406,21 @@ async def get_vectors(profile_id: str, request: Request, query: Optional[str] = 
         items = await asyncio.to_thread(mgr.vectors.search, query, limit=10)
     else:
         items = await asyncio.to_thread(mgr.vectors.get_all)
+    items = mgr.current_vector_rows(items)
     return {"available": True, "vectors": items, "items": items}
 
 
 @router.post("/{profile_id}/vectors/sync_facts")
 async def sync_facts_to_vectors(profile_id: str, request: Request):
-    """将 facts store 中所有事实增量同步到向量库。
-
-    已有对应向量（同 fact_id）的跳过，不重复写入。
-    返回：{synced, total, vector_count}
-    """
+    """Repair the index and report coverage of recallable facts."""
     mgr = _require_manager(request, profile_id)
     if not mgr.vectors or not mgr.vectors.is_available():
         raise HTTPException(status_code=503, detail="向量库不可用，请先开启 vector_enabled 并配置 embedding")
     count = await mgr.sync_facts_to_vectors()
-    return {
-        "synced": count,
-        "total": mgr.facts.count(),
-        "vector_count": await asyncio.to_thread(mgr.vectors.count),
-    }
-
-
-@router.post("/{profile_id}/vectors", status_code=201)
-async def create_vector(profile_id: str, body: VectorCreate, request: Request):
-    mgr = _require_manager(request, profile_id)
-    if not mgr.vectors or not mgr.vectors.is_available():
-        raise HTTPException(status_code=503, detail="Vector store not available")
-    mem_id = await asyncio.to_thread(mgr.vectors.add, body.text, metadata=body.metadata)
-    if mem_id is None:
-        raise HTTPException(status_code=500, detail="Failed to add vector")
-    return {"id": mem_id}
-
-
-@router.delete("/{profile_id}/vectors/all")
-async def clear_all_vectors(profile_id: str, request: Request):
-    """清空该人格向量库中所有条目（不可撤销）。"""
-    mgr = _require_manager(request, profile_id)
-    if not mgr.vectors or not mgr.vectors.is_available():
-        raise HTTPException(status_code=503, detail="向量库不可用")
-    deleted = await asyncio.to_thread(mgr.vectors.clear_all)
-    if deleted:
-        log_vector_delete(profile_id, deleted, "api_clear_all")
-    logger.info("[memory API] 清空向量库 profile=%s deleted=%d", profile_id, deleted)
-    return {"ok": True, "deleted": deleted}
-
-
-@router.delete("/{profile_id}/vectors/{memory_id}")
-async def delete_vector(profile_id: str, memory_id: str, request: Request):
-    mgr = _require_manager(request, profile_id)
-    if not mgr.vectors:
-        raise HTTPException(status_code=503, detail="Vector store not available")
-    ok = await asyncio.to_thread(mgr.vectors.delete, memory_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Vector memory not found")
-    return {"ok": True}
+    items = await asyncio.to_thread(mgr.vectors.get_all)
+    pool = RecallCandidates(mgr.facts)
+    indexed = len(mgr.current_vector_rows(items, pool))
+    return {"synced": count, "total": len(pool.indexable), "vector_count": indexed}
 
 
 # ── Summaries ─────────────────────────────────────────────────────────────────

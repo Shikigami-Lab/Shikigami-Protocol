@@ -441,7 +441,6 @@ const SettingsMixin = {
       memoryFactForm: { content: '', category: 'other', weight: 1.0 },
       memoryEditingFact: null,
       memoryVectors: [],
-      memoryVectorText: '',
       memorySummaries: [],
       memorySummaryDays: 30,
       diaryStartDate: (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(),
@@ -3009,7 +3008,6 @@ const SettingsMixin = {
         clearHistory: 'btnClearHistory',
         clearShortMem: 'btnResetShortMem',
         clearFacts: 'btnClearFacts',
-        clearVectors: 'btnClearVectors',
         clearSummaries: 'btnClearSummaries',
         backup: 'btnBackup',
       };
@@ -3027,7 +3025,6 @@ const SettingsMixin = {
       if (key === 'clearHistory')        await this._doClearHistory(data.profileId);
       else if (key === 'clearShortMem')  await this._doClearShortMem(data.profileId);
       else if (key === 'clearFacts')     await this._doClearFacts(data.profileId);
-      else if (key === 'clearVectors')   await this._doClearVectors(data.profileId);
       else if (key === 'clearSummaries') await this._doClearSummaries(data.profileId);
       else if (key === 'backup')         await this._doBackupMemory(data.profileId);
       else if (key === 'deleteProfile')  await this._doDeleteProfile(data.profileId);
@@ -3164,23 +3161,6 @@ const SettingsMixin = {
           }
           this.showToast(`已清空事实库（${data.deleted} 条）`, 'success');
           await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId), this.loadMemoryChangelog(profileId)]);
-        } else {
-          this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
-        }
-      } catch (e) { this.showToast(`清空失败: ${e.message}`, 'error'); }
-    },
-
-    async _doClearVectors(profileId) {
-      try {
-        const res = await fetch(
-          getBaseUrl() + API_PATHS.memoryVectorsAll(profileId),
-          { method: 'DELETE' }
-        );
-        const data = await res.json();
-        if (res.ok && data.ok) {
-          if (profileId === this.memoryProfileId) this.memoryVectors = [];
-          this.showToast(`已清空向量库（${data.deleted} 条）`, 'success');
-          await Promise.all([this.loadMemoryVectors(profileId), this.loadMemoryStatus(profileId)]);
         } else {
           this.showToast(`清空失败: ${data.detail || data.error || ''}`, 'error');
         }
@@ -4463,7 +4443,6 @@ const SettingsMixin = {
           semantic_fact_quota: _pn(cfg.semantic_fact_quota),
           recent_days:       _pn(cfg.recent_days),
           semantic_distance: _pn(cfg.semantic_distance),
-          vector_dedup_distance_threshold: _pn(cfg.vector_dedup_distance_threshold),
           group_chat_self_recap_max_groups: _pn(cfg.group_chat_self_recap_max_groups),
           group_chat_merge_into_history: cfg.group_chat_merge_into_history ?? null,
           daily_forgetting_enabled: cfg.daily_forgetting_enabled ?? null,
@@ -4504,7 +4483,6 @@ const SettingsMixin = {
         semantic_fact_quota: [parseInt],
         recent_days: [parseInt],
         semantic_distance: [parseFloat],
-        vector_dedup_distance_threshold: [parseFloat, 0.01, 0.5],
         daily_decay_factor: [parseFloat],
         daily_decay_min_weight: [parseFloat],
         daily_consolidation_after_days: [parseInt],
@@ -4580,7 +4558,6 @@ const SettingsMixin = {
       this.memoryEditingFact = null;
       this.memoryFactForm = { content: '', category: 'other', weight: 1.0 };
       this.memoryVectors = [];
-      this.memoryVectorText = '';
       this.memorySummaries = [];
       this.memorySummaryDays = 30;
       this.factsDisplayLimit = this.vectorsDisplayLimit = this.summariesDisplayLimit = 30;
@@ -5018,7 +4995,7 @@ const SettingsMixin = {
     },
 
     memoryArchiveReasonLabel(reason) {
-      const reasons = ['merged', 'cold_memory', 'low_value', 'unsupported'];
+      const reasons = ['merged', 'cold_memory', 'low_value', 'unsupported', 'legacy_duplicate'];
       return this.t(reasons.includes(reason) ? 'memArchiveReason_' + reason : 'memArchiveReasonUnknown');
     },
 
@@ -5194,47 +5171,6 @@ const SettingsMixin = {
       }
     },
 
-    async addMemoryVector() {
-      const profileId = this.memoryProfileId;
-      if (!this.memoryVectorText.trim() || !profileId) return;
-      const generation = this.memoryViewGeneration;
-      const draft = this.memoryVectorText;
-      try {
-        const res = await fetch(getBaseUrl() + API_PATHS.memoryVectors(profileId), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: this.memoryVectorText.trim() }),
-        });
-        const data = await res.json();
-        if (res.ok && data.id) {
-          if (this.memoryViewGeneration === generation && this.memoryVectorText === draft) this.memoryVectorText = '';
-          await this.loadMemoryVectors(profileId);
-          this.loadMemoryStatus(profileId);
-          this.showToast('向量已添加', 'success');
-        } else {
-          this.showToast(`添加失败: ${data.error || ''}`, 'error');
-        }
-      } catch (e) { this.showToast(`添加失败: ${e.message}`, 'error'); }
-    },
-
-    async deleteMemoryVector(memId) {
-      const profileId = this.memoryProfileId;
-      if (!profileId) return;
-      try {
-        const res = await fetch(
-          getBaseUrl() + API_PATHS.memoryVectorById(profileId, memId),
-          { method: 'DELETE' }
-        );
-        const data = await res.json();
-        if (res.ok && data.ok) {
-          this.showToast('向量已删除', 'success');
-          await Promise.all([this.loadMemoryVectors(profileId), this.loadMemoryStatus(profileId)]);
-        } else {
-          this.showToast(`删除失败: ${data.error || ''}`, 'error');
-        }
-      } catch (e) { this.showToast(`删除失败: ${e.message}`, 'error'); }
-    },
-
     async syncFactsToVectors() {
       const profileId = this.memoryProfileId;
       if (this.syncFactsLoading) return;
@@ -5249,7 +5185,10 @@ const SettingsMixin = {
         );
         const data = await res.json();
         if (res.ok) {
-          if (current()) this.syncFactsResult = { text: `新增 ${data.synced} 条（共 ${data.total} 条事实，向量库 ${data.vector_count} 条）`, ok: true };
+          if (current()) this.syncFactsResult = {
+            text: this.t('vectorSyncCoverage').replace('{indexed}', String(data.vector_count)).replace('{total}', String(data.total)),
+            ok: data.vector_count === data.total,
+          };
           await this.loadMemoryVectors(profileId);
           await this.loadMemoryStatus(profileId);
         } else if (current()) {

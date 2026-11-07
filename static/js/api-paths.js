@@ -69,7 +69,6 @@ window.API_PATHS = {
 
   memoryPrompts: () => '/settings/memory/prompts',
   memoryFactsAll: (pid) => `/memory/${encodeURIComponent(pid)}/facts/all`,
-  memoryVectorsAll: (pid) => `/memory/${encodeURIComponent(pid)}/vectors/all`,
   memorySummaries: (pid) => `/memory/${encodeURIComponent(pid)}/summaries`,
   memoryStatus: (pid) => `/memory/${encodeURIComponent(pid)}/status`,
   memoryFacts: (pid) => `/memory/${encodeURIComponent(pid)}/facts`,
@@ -82,7 +81,6 @@ window.API_PATHS = {
   memoryFactReview: (pid, id) => `/memory/${encodeURIComponent(pid)}/facts/${encodeURIComponent(id)}/review`,
   memoryFactVersionRestore: (pid, id) => `/memory/${encodeURIComponent(pid)}/facts/${encodeURIComponent(id)}/versions/restore`,
   memoryVectorsSyncFacts: (pid) => `/memory/${encodeURIComponent(pid)}/vectors/sync_facts`,
-  memoryVectorById: (pid, memId) => `/memory/${encodeURIComponent(pid)}/vectors/${encodeURIComponent(memId)}`,
   memorySummaryByDate: (pid, dateStr) => `/memory/${encodeURIComponent(pid)}/summaries/${encodeURIComponent(dateStr)}`,
   memoryCurationPreview: (pid) => `/memory/${encodeURIComponent(pid)}/curation/preview`,
   memoryCurationBulkPreview: (pid) => `/memory/${encodeURIComponent(pid)}/curation/bulk-preview`,

@@ -158,6 +158,7 @@ async def handle_add(content_raw: str, session, app) -> CommandResult:
         is_manual=fact.is_manual,
     )
 
+    await mgr.reembed_fact(fact.id)
     return CommandResult(
         context_for_llm=(
             f"[命令执行结果 · /fact add]\n"
@@ -189,6 +190,7 @@ async def handle_delete(target: str, session, app) -> CommandResult:
             fact = facts_sorted[idx]
             log_fact_delete(session.profile_id, fact.id, fact.content, "command")
             mgr.facts.delete(fact.id)
+            await mgr.reembed_fact(fact.id)
             return CommandResult(
                 context_for_llm=(
                     f"[命令执行结果 · /fact delete]\n"
@@ -210,6 +212,7 @@ async def handle_delete(target: str, session, app) -> CommandResult:
             if f.id == target or f.id == "f_" + target:
                 log_fact_delete(session.profile_id, f.id, f.content, "command")
                 mgr.facts.delete(f.id)
+                await mgr.reembed_fact(f.id)
                 return CommandResult(
                     context_for_llm=(
                         f"[命令执行结果 · /fact delete]\n"
@@ -223,6 +226,7 @@ async def handle_delete(target: str, session, app) -> CommandResult:
     if len(matches) == 1:
         log_fact_delete(session.profile_id, matches[0].id, matches[0].content, "command")
         mgr.facts.delete(matches[0].id)
+        await mgr.reembed_fact(matches[0].id)
         return CommandResult(
             context_for_llm=(
                 f"[命令执行结果 · /fact delete]\n"

@@ -10,9 +10,11 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import time
 import traceback
+import uuid
 from datetime import date, timedelta
 from string import Template
 from typing import Any, Dict, List, Optional
@@ -21,7 +23,7 @@ from src.config.memory_prompts import memory_task_prompt
 from src.config.prompt_loader import get_prompt
 from src.utils.memory_time import write_time_context
 
-from src.memory.long_term_store import LongTermStore
+from src.memory.long_term_store import LongTermFact, LongTermStore
 from src.memory.day_store import DaySummaryStore
 from src.memory.extraction_batches import is_memory_turn as _is_memory_turn, plan_batch
 from src.memory.merged_history import memory_group_sources_allowed
@@ -35,7 +37,7 @@ from src.utils.debug_logger import (
     log_summary_generate,
 )
 from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates, rank_related
-from src.memory.recall import RecallCandidates, experience_links_by_day, is_cold
+from src.memory.recall import RecallCandidates, experience_links_by_day
 from src.utils.paths import get_project_root
 from src.utils.persona_context import persona_prompt_parts
 
@@ -61,8 +63,6 @@ def _vector_metadata_for_fact(fact: Any, extra: Optional[Dict[str, Any]] = None)
         "created_at": fact.updated_at,
         "emotional_note": (fact.emotional_note or "")[:64],
     }
-    if getattr(fact, "tags", None):
-        meta["tags"] = list(fact.tags)
     if extra:
         meta.update(extra)
     return meta
@@ -104,7 +104,6 @@ class MemoryManager:
             "semantic_fact_quota": 2,    # 语义槽位最多条数
             "recent_days": 3,            # 多少天以内算"近期"（facts 槽位共用）
             "semantic_distance": 0.45,   # facts 语义槽的 distance 阈值
-            "vector_dedup_distance_threshold": 0.1,  # 写入向量时：距离小于此值视为「几乎相同」删旧写新；0.1=仅近同才覆盖
             "embedding": {
                 "provider": "gemini",
                 "gemini_model": "gemini-embedding-001",
@@ -123,11 +122,16 @@ class MemoryManager:
         self.facts = LongTermStore(storage_root)
         self.day_store = DaySummaryStore(storage_root)
 
-        # 向量库（可选）：传入 embedding 配置 + 写入去重阈值（可从 memory 配置覆盖）
+        # Search is optional. The old index can still be migrated and cleaned locally.
         self.vectors: Optional[VectorMemoryStore] = None
         if self._cfg.get("vector_enabled"):
-            embed_cfg = {**self._cfg.get("embedding", {}), "vector_dedup_distance_threshold": float(self._cfg.get("vector_dedup_distance_threshold", 0.1))}
+            embed_cfg = self._cfg.get("embedding", {})
             self.vectors = VectorMemoryStore(storage_root, embed_cfg)
+        self._offline_index: Optional[VectorMemoryStore] = None
+        if not (self.vectors and self.vectors.is_available()) and os.path.isfile(
+            os.path.join(storage_root, "chroma_db", "chroma.sqlite3"),
+        ):
+            self._offline_index = VectorMemoryStore(storage_root, {}, existing_only=True)
 
         # BM25 关键词检索（可选依赖 rank_bm25，缺失时静默降级）
         self.bm25 = BM25Retriever()
@@ -136,6 +140,8 @@ class MemoryManager:
         self._meta_path = os.path.join(storage_root, "memory_meta.json")
         self._extraction_lock = asyncio.Lock()
         self._fact_index_lock = asyncio.Lock()
+        if self.fact_index:
+            self.import_legacy_vectors()
 
         # 启动日志
         vec_ok = bool(self.vectors and self.vectors.is_available())
@@ -174,7 +180,7 @@ class MemoryManager:
 
     def status(self) -> Dict[str, Any]:
         vec_ok = bool(self.vectors and self.vectors.is_available())
-        vec_count = self.vectors.count() if vec_ok else 0
+        vec_count = len(self.current_vector_rows(self.vectors.get_all())) if vec_ok else 0
         vec_provider = (getattr(self.vectors, "_actual_provider_name",
                                 self.vectors._embed_config.get("provider", "none"))
                         if self.vectors else "none")
@@ -230,26 +236,89 @@ class MemoryManager:
             })
         return result
 
-    async def sync_facts_to_vectors(self) -> int:
-        """将 facts store 中尚未入向量库的事实批量同步过去。返回新增条数。
+    @property
+    def fact_index(self) -> Optional[VectorMemoryStore]:
+        for index in (self.vectors, self._offline_index):
+            if index and index.is_available():
+                return index
+        return None
 
-        增量操作：已有 fact_id 对应向量的跳过，不覆盖。
-        """
+    def import_legacy_vectors(self) -> None:
+        """Save vector-only notes as manual facts before attaching their existing index rows."""
+        index = self.fact_index
+        if index is None:
+            return
+        try:
+            legacy = [row for row in index.get_all(strict=True)
+                      if "fact_id" not in (row.get("metadata") or {})]
+            if not legacy:
+                return
+            revision, cursors, facts, state = self.facts.curation_snapshot()
+            if state.get("legacy_vectors_cleared"):
+                for row in legacy:
+                    index.delete(row["id"])
+                return
+            legacy = [row for row in legacy if (row.get("document") or "").strip()]
+            imported = state.setdefault("legacy_vector_imports", {})
+            pool = RecallCandidates(self.facts)
+            by_text = {fact.content.strip(): fact for fact in pool.indexable.values()}
+            forgotten_texts = {fact.content.strip() for fact in facts} - by_text.keys()
+            links = {}
+            for row in legacy:
+                vector_id = row["id"]
+                if vector_id not in imported:
+                    text = row["document"].strip()
+                    fact = by_text.get(text)
+                    if fact is None:
+                        forgotten = text in forgotten_texts
+                        fact = LongTermFact(
+                            content=text, archived=forgotten,
+                            archive_reason="legacy_duplicate" if forgotten else "",
+                            archive_revision=uuid.uuid4().hex if forgotten else "",
+                        )
+                        created = (row.get("metadata") or {}).get("created_at")
+                        if type(created) in (float, int) and math.isfinite(created):
+                            fact.updated_at = created
+                        facts.append(fact)
+                        by_text[text] = fact
+                    links[vector_id] = fact.id
+            if links:
+                imported.update(links)
+                if not self.facts.apply_curation(revision, facts, cursors, state):
+                    return
+            for row in legacy:
+                index.link_fact(row["id"], imported[row["id"]])
+        except Exception:
+            logger.warning("Legacy vector import will be retried for profile %s", self._profile_id)
+
+    def current_vector_rows(self, rows, pool=None) -> list:
+        """Keep a single current vector for each recallable fact, in input order."""
+        if pool is None:
+            pool = RecallCandidates(self.facts)
+        seen = set()
+        result = []
+        for row in rows:
+            fact_id = (row.get("metadata") or {}).get("fact_id")
+            fact = pool.indexable.get(fact_id)
+            if fact and fact_id not in seen and self.fact_vector_matches(fact, row):
+                seen.add(fact_id)
+                result.append(row)
+        return result
+
+    async def sync_facts_to_vectors(self) -> int:
+        """Repair the existing index and embed missing recallable facts on request."""
         if not self.vectors or not self.vectors.is_available():
-            logger.warning("[MemoryManager] sync_facts_to_vectors: 向量库不可用")
             return 0
-        existing = await asyncio.to_thread(self.vectors.get_all)
-        by_id = {row["metadata"]["fact_id"]: row for row in existing
-                 if (row.get("metadata") or {}).get("fact_id")}
-        count = 0
-        pool = RecallCandidates(self.facts)
-        for fact in pool.facts:
-            if not (fact.is_active(pool.now) or fact.id in pool.cold):
-                continue
-            if fact.id in by_id and self.fact_vector_matches(fact, by_id[fact.id]):
-                continue
-            count += int(await self.reembed_fact(fact.id))
-        return count
+        async with self._fact_index_lock:
+            await asyncio.to_thread(self.import_legacy_vectors)
+            await self._prune_fact_index()
+            existing = await asyncio.to_thread(self.vectors.get_all, strict=True)
+            pool = RecallCandidates(self.facts)
+            indexed = {row["metadata"]["fact_id"] for row in self.current_vector_rows(existing, pool)}
+            count = 0
+            for fact_id in pool.indexable.keys() - indexed:
+                count += int(await self._write_fact_vector(fact_id))
+            return count
 
     def get_current_address_fact(self):
         return next((fact for fact in self.facts.get_active() if fact.kind == "address"), None)
@@ -261,21 +330,18 @@ class MemoryManager:
         return (document == _vector_document_for_fact(fact)
                 or (not fact.kind and document == fact.content.strip()))
 
-    def _fact_index_cleanup(self):
-        vectors = self.vectors.get_all() if self.vectors and self.vectors.is_available() else []
+    def _fact_index_cleanup(self, *, strict: bool = False):
+        index = self.fact_index
+        vectors = index.get_all(strict=strict) if index else []
         pool = RecallCandidates(self.facts)
-        active = {fact.id: fact for fact in pool.facts if fact.is_active(pool.now)}
-        # Keep existing aliases only while they can lead to a current representative.
-        indexable = {**active, **pool.cold}
-        indexable.update((fact.id, fact) for fact in pool.facts if fact.id in pool.aliases)
         expired = sum(not f.archived and f.expires_at is not None and f.expires_at <= pool.now
                       for f in pool.facts)
-        obsolete = []
-        for vector in vectors:
-            fact_id = (vector.get("metadata") or {}).get("fact_id")
-            if fact_id and (fact_id not in indexable or not self.fact_vector_matches(indexable[fact_id], vector)):
-                obsolete.append(vector["id"])
-        return len(active), expired, obsolete
+        # Prefer the stable ID to an older duplicate of the same fact.
+        vectors.sort(key=lambda row: row["id"] != (row.get("metadata") or {}).get("fact_id"))
+        current = {row["id"] for row in self.current_vector_rows(vectors, pool)}
+        obsolete = [row["id"] for row in vectors if row["id"] not in current
+                    and "fact_id" in (row.get("metadata") or {})]
+        return len(pool.active), expired, obsolete
 
     def preview_fact_index(self) -> dict:
         active, expired, obsolete = self._fact_index_cleanup()
@@ -284,17 +350,21 @@ class MemoryManager:
     async def maintain_fact_index(self) -> dict:
         """Prune vectors for unavailable or changed facts without requesting embeddings."""
         async with self._fact_index_lock:
-            token = self.facts.curation_index_token()
-            active, expired, obsolete = await asyncio.to_thread(self._fact_index_cleanup)
-            removed = 0
-            for vector_id in obsolete:
-                removed += int(bool(await asyncio.to_thread(self.vectors.delete, vector_id)))
-            if token and self.vectors and self.vectors.is_available() and removed == len(obsolete):
-                await asyncio.to_thread(self.facts.mark_curation_index_clean, token)
+            return await self._prune_fact_index()
+
+    async def _prune_fact_index(self) -> dict:
+        token = self.facts.curation_index_token()
+        index = self.fact_index
+        active, expired, obsolete = await asyncio.to_thread(self._fact_index_cleanup, strict=True)
+        removed = 0
+        for vector_id in obsolete:
+            removed += int(bool(await asyncio.to_thread(index.delete, vector_id)))
+        if token and index and removed == len(obsolete):
+            await asyncio.to_thread(self.facts.mark_curation_index_clean, token)
         return {"active": active, "expired": expired, "vectors_removed": removed}
 
     async def prune_curation_index(self) -> None:
-        if not self.vectors or not self.vectors.is_available() or not self.facts.curation_index_token():
+        if not self.fact_index or not self.facts.curation_index_token():
             return
         try:
             await self.maintain_fact_index()
@@ -572,29 +642,37 @@ class MemoryManager:
         return None
 
     async def reembed_fact(self, fact_id: str, emotion_context: Optional[Dict] = None) -> bool:
-        """Replace the index for a changed fact, including legacy rollback callers."""
+        """Refresh a fact's unique vector, or drop it when the fact is no longer recallable."""
         if not (self.vectors and self.vectors.is_available()):
+            if self.fact_index:
+                try:
+                    await self.maintain_fact_index()
+                except Exception:
+                    logger.warning("Offline index cleanup will be retried for profile %s", self._profile_id)
             return False
         async with self._fact_index_lock:
-            fact = self.facts.get_by_id(fact_id)
-            if not fact:
-                return False
-            try:
+            return await self._write_fact_vector(fact_id, emotion_context)
+
+    async def _write_fact_vector(self, fact_id: str, emotion_context: Optional[Dict] = None) -> bool:
+        try:
+            fact = RecallCandidates(self.facts).indexable.get(fact_id)
+            if fact is None:
                 await asyncio.to_thread(self.vectors.delete_by_fact_ids, [fact_id])
-                fact = self.facts.get_by_id(fact_id)
-                now = time.time()
-                if not fact or not (fact.is_active(now) or is_cold(fact, now)):
-                    return False
-                extra = {}
-                if emotion_context:
-                    extra["ai_emotion"] = emotion_context.get("primary_emotion", "")
-                    extra["ai_energy"] = emotion_context.get("energy_level", 80.0)
-                meta = _vector_metadata_for_fact(fact, extra)
-                return bool(await asyncio.to_thread(self.vectors.add, _vector_document_for_fact(fact),
-                                                    metadata=meta, skip_dedup=True))
-            except Exception:
-                logger.warning("[MemoryManager] Reindex failed for fact %s", fact_id)
                 return False
+            extra = {}
+            if emotion_context:
+                extra["ai_emotion"] = emotion_context.get("primary_emotion", "")
+                extra["ai_energy"] = emotion_context.get("energy_level", 80.0)
+            document = _vector_document_for_fact(fact)
+            saved = await asyncio.to_thread(self.vectors.upsert_fact, document, _vector_metadata_for_fact(fact, extra))
+            current = RecallCandidates(self.facts).indexable.get(fact_id)
+            if current is None or _vector_document_for_fact(current) != document:
+                await asyncio.to_thread(self.vectors.delete_by_fact_ids, [fact_id])
+                return False
+            return bool(saved)
+        except Exception:
+            logger.warning("[MemoryManager] Reindex failed for fact %s", fact_id)
+            return False
 
     def get_summary_range_preview(
         self,
@@ -878,14 +956,13 @@ class MemoryManager:
         主目标：尽量释放向量库（ChromaDB）的持久化客户端文件句柄，
         避免 Windows 上删除 profile 目录时 chroma_db 仍被占用而残留。
         """
-        try:
-            if self.vectors and hasattr(self.vectors, "close"):
-                self.vectors.close()
-        except Exception as e:
-            logger.debug("[MemoryManager] shutdown vectors failed (ignored): %s", e)
-
-        # Help GC and prevent further vector access.
-        self.vectors = None
+        for index in (self.vectors, self._offline_index):
+            try:
+                if index and hasattr(index, "close"):
+                    index.close()
+            except Exception as error:
+                logger.debug("[MemoryManager] shutdown vectors failed (ignored): %s", error)
+        self.vectors = self._offline_index = None
 
 
 def _msg_date(msg) -> str:

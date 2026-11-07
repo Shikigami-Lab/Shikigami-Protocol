@@ -532,12 +532,13 @@ class LongTermStore:
 
     def clear_all(self) -> int:
         """清空所有事实，返回删除数量。"""
-        self._refresh()
-        n = len(self._facts)
-        if not self._commit([], self._cursors):
+        revision, cursors, facts, state = self.curation_snapshot()
+        state["legacy_vectors_cleared"] = True
+        state["index_cleanup_pending"] = uuid.uuid4().hex
+        if not self.apply_curation(revision, [], cursors, state):
             return 0
-        logger.info("[LongTermStore] 清空全部事实 (%d 条)", n)
-        return n
+        logger.info("[LongTermStore] 清空全部事实 (%d 条)", len(facts))
+        return len(facts)
 
     def count_by_source(self) -> dict:
         self._refresh()

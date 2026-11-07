@@ -5265,7 +5265,6 @@
               <div class="memory-maintenance-actions">
                 <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearHistory', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearHistory') }}</button>
                 <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearFacts', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearFacts') }}</button>
-                <button class="s-btn s-btn-secondary memory-btn-danger" :disabled="!(memoryStatus && memoryStatus.vector_ok)" @click="initMemoryAction('clearVectors', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearVectors') }}</button>
                 <button class="s-btn s-btn-secondary memory-btn-danger" @click="initMemoryAction('clearSummaries', memoryProfileId)" :title="t('titleIrreversible')">{{ t('btnClearSummaries') }}</button>
               </div>
             </details>
@@ -5277,10 +5276,7 @@
               <button class="s-btn" style="font-size:12px;" :disabled="!(memoryStatus && memoryStatus.vector_ok) || syncFactsLoading" @click="syncFactsToVectors()"><app-icon :name="syncFactsLoading ? 'loader-circle' : 'refresh-cw'" :size="14"></app-icon> {{ syncFactsLoading ? t('btnSyncing') : t('btnSyncFactsToVectors') }}</button>
               <span v-if="syncFactsResult" style="font-size:11px;color:var(--text-secondary);"><app-icon name="check" :size="14" v-if="syncFactsResult.ok"></app-icon> {{ syncFactsResult.text }}</span>
             </div>
-            <div class="mem-add-form">
-              <textarea class="form-input" style="flex:1;min-height:56px;font-size:12px;resize:vertical;" v-model="memoryVectorText" :placeholder="t('phAddVector')"></textarea>
-              <button class="s-btn s-btn-primary" style="font-size:12px;align-self:flex-end;" @click="addMemoryVector()">{{ t('btnAddVector') }}</button>
-            </div>
+            <div class="form-hint">{{ t('hintVectorIndexOnly') }}</div>
             <div class="mem-sort-bar">
               <span class="mem-sort-label">{{ t('lblVectorSortBy') }}</span>
               <button :class="['mem-sort-btn', vectorSortBy==='time'?'active':'']" @click="vectorSortBy='time'">{{ t('btnSortByTime') }}</button>
@@ -5293,7 +5289,6 @@
                 <span class="mem-fact-content" style="flex:1;">{{ vec.document }}</span>
                 <span v-if="vec.metadata && vec.metadata.emotional_note" class="mem-emotional-badge">{{ vec.metadata.emotional_note }}</span>
                 <span v-if="vec.metadata && vec.metadata.created_at" style="font-size:10px;opacity:0.6;">{{ new Date(vec.metadata.created_at * 1000).toLocaleDateString() }}</span>
-                <button class="icon-btn danger" :title="t('titleDeleteFact')" @click="deleteMemoryVector(vec.id)"><app-icon name="x" :size="14"></app-icon></button>
               </div>
             </div>
             <div class="mem-list-footer">
@@ -5441,7 +5436,7 @@
                   </label>
                 </div>
                 <div class="form-hint" style="margin-top:4px;">{{ t('hintEnableVectorSearch') }}</div>
-                <div class="settings-param-block" style="margin-top:8px;" :class="{ disabled: !memoryGlobalForm.vector_enabled }">
+                <div class="settings-param-block" style="margin-top:8px;">
                   <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.vector"
                        @click="memGlobalAdvOpen.vector = !memGlobalAdvOpen.vector" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;">
                     {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.vector ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
@@ -5450,7 +5445,7 @@
                     <div class="param-row" style="margin-top:8px;">
                       <span class="param-label">{{ t('lblSemanticFactQuota') }}</span>
                       <input type="number" class="seg-num-input" min="0" max="20"
-                             v-model.number="memoryGlobalForm.semantic_fact_quota" style="width:64px;" :disabled="!memoryGlobalForm.vector_enabled" />
+                             v-model.number="memoryGlobalForm.semantic_fact_quota" style="width:64px;" :disabled="!memoryGlobalForm.enabled" />
                     </div>
                     <div class="form-hint">{{ t('hintSemanticFactQuota') }}</div>
                     <div class="param-row" style="margin-top:8px;">
@@ -5459,12 +5454,6 @@
                              v-model.number="memoryGlobalForm.semantic_distance" style="width:64px;" :disabled="!memoryGlobalForm.vector_enabled" />
                     </div>
                     <div class="form-hint">{{ t('hintSemanticDistance') }}</div>
-                    <div class="param-row" style="margin-top:8px;">
-                      <span class="param-label">{{ t('lblVectorDedupThreshold') }}</span>
-                      <input type="number" class="seg-num-input" min="0.01" max="0.5" step="0.01"
-                             v-model.number="memoryGlobalForm.vector_dedup_distance_threshold" style="width:64px;" :disabled="!memoryGlobalForm.vector_enabled" />
-                    </div>
-                    <div class="form-hint">{{ t('hintVectorDedupThreshold') }}</div>
                   </div>
                 </div>
               </div>
@@ -5677,13 +5666,13 @@
                 <div class="form-hint">{{ t('hintProfileExtractionWeightThreshold') }}</div>
 
                 <!-- Vector slots inside extract advanced -->
-                <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;" :class="{ disabled: !memoryProfileEffectiveVectorEnabled }">
+                <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
                   <div class="form-hint" style="margin-bottom:6px;font-weight:500;">{{ t('memSectProfileFactVectorSlots') }}</div>
                   <p v-if="!memoryProfileEffectiveVectorEnabled" class="mem-cfg-hint mem-cfg-block-hint">{{ t('hintProfileVectorDisabledSlots') }}</p>
                   <div class="param-row">
                     <span class="param-label">{{ t('lblProfileSemanticFactQuota') }}</span>
                     <input type="number" class="seg-num-input" min="0" max="20"
-                           v-model="memoryTabProfileForm.semantic_fact_quota" :placeholder="memoryGlobalForm.semantic_fact_quota ?? 2" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
+                           v-model="memoryTabProfileForm.semantic_fact_quota" :placeholder="memoryGlobalForm.semantic_fact_quota ?? 2" style="width:64px;" :disabled="!memoryProfileEffectiveEnabled" />
                   </div>
                   <div class="form-hint">{{ t('hintProfileSemanticFactQuota') }}</div>
                   <div class="param-row" style="margin-top:8px;">
@@ -5692,12 +5681,6 @@
                            v-model="memoryTabProfileForm.semantic_distance" :placeholder="memoryGlobalForm.semantic_distance ?? 0.45" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
                   </div>
                   <div class="form-hint">{{ t('hintProfileSemanticDistance') }}</div>
-                  <div class="param-row" style="margin-top:8px;">
-                    <span class="param-label">{{ t('lblProfileVectorDedupThreshold') }}</span>
-                    <input type="number" class="seg-num-input" min="0.01" max="0.5" step="0.01"
-                           v-model="memoryTabProfileForm.vector_dedup_distance_threshold" :placeholder="memoryGlobalForm.vector_dedup_distance_threshold ?? 0.1" style="width:64px;" :disabled="!memoryProfileEffectiveVectorEnabled" />
-                  </div>
-                  <div class="form-hint">{{ t('hintProfileVectorDedupThreshold') }}</div>
                 </div>
               </div>
             </div>

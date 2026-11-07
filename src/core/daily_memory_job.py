@@ -182,7 +182,7 @@ def preview_forgetting_for_profile(
     counts = mgr.preview_fact_index()
     out["expired_fact_count"] = counts["expired"]
     out["orphan_cleanup"] = {
-        "enabled": bool(mgr.vectors and mgr.vectors.is_available()),
+        "enabled": mgr.fact_index is not None,
         "would_delete_count": counts["vectors_removed"],
     }
     return out

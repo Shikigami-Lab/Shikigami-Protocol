@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from src.api import memory
 from src.memory.long_term_store import LongTermFact
 from src.memory.memory_manager import MemoryManager
+from test_memory_curation_recall import OfflineVectors
 
 
 class ReviewApiTests(IsolatedAsyncioTestCase):
@@ -154,3 +155,22 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
         })
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(await links(), {"2026-01-15": ["experience"], "2026-01-16": []})
+
+    async def test_fact_crud_updates_the_index_through_the_normal_api(self):
+        manager = self.manager
+        manager.vectors = OfflineVectors()
+        base = "/memory/fixture"
+        created = await self.client.post(f"{base}/facts", json={"content": "Tea without sugar"})
+        self.assertEqual(created.status_code, 201)
+        fact_id = created.json()["id"]
+        vectors = (await self.client.get(f"{base}/vectors")).json()["items"]
+        self.assertEqual([(row["metadata"]["fact_id"], row["document"]) for row in vectors],
+                         [(fact_id, "Tea without sugar")])
+        self.assertEqual((await self.client.put(f"{base}/facts/{fact_id}",
+                                               json={"content": "Tea with sugar"})).status_code, 200)
+        [updated] = manager.vectors.rows
+        self.assertEqual(updated["id"], vectors[0]["id"])
+        self.assertEqual(updated["document"], "Tea with sugar")
+        self.assertEqual((await self.client.delete(f"{base}/facts/{fact_id}")).status_code, 200)
+        self.assertEqual(manager.vectors.rows, [])
+        self.assertIsNone(manager.facts.get_by_id(fact_id))
