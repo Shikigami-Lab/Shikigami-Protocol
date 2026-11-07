@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memorysearch"></script>
+  <script src="js/i18n.js?v=20261107memoryreviewsearch"></script>
 </head>
 <body>
 
@@ -5085,7 +5085,17 @@
                       <span v-else class="mem-cat-badge">{{ t('memCurationAction_' + item.action) }}</span>
                       <span>{{ item.fact_id }}</span>
                     </div>
-                    <div class="mem-curation-original">{{ item.content }}</div>
+                    <div v-if="item.action === 'update' && item.new_content" class="mem-fact-version-comparison">
+                      <div>
+                        <span class="mem-curation-meta">{{ t('memFactVersionBefore') }}</span>
+                        <div class="mem-curation-original">{{ item.content }}</div>
+                      </div>
+                      <div>
+                        <span class="mem-curation-meta">{{ t('memFactVersionAfter') }}</span>
+                        <div class="mem-curation-original">{{ item.new_content }}</div>
+                      </div>
+                    </div>
+                    <div v-else class="mem-curation-original">{{ item.content }}</div>
                     <div v-if="item.archive_reason" class="mem-curation-meta">{{ memoryArchiveReasonLabel(item.archive_reason) }}</div>
                     <div v-if="item.reason" class="mem-curation-meta">{{ item.reason }}</div>
                     <div v-if="item.target_id || item.target_content" class="mem-curation-meta">
@@ -5108,7 +5118,7 @@
                 </p>
               </div>
 
-              <details id="memory-bulk-curation" class="mem-curation-preview">
+              <details id="memory-bulk-curation" class="mem-curation-preview" :aria-busy="memoryBulkCurationPending">
                 <summary class="mem-diary-preview-title">{{ t('memBulkCurationTitle') }}</summary>
                 <p id="memory-bulk-curation-hint" class="mem-cfg-hint">{{ t('hintMemoryBulkCuration') }}</p>
                 <template v-if="memoryBulkCurationPage">
@@ -5126,14 +5136,30 @@
                         <span class="mem-cat-badge">{{ t('memCurationAction_' + item.action) }}</span>
                         <span>{{ item.fact_id }}</span>
                       </div>
-                      <div class="mem-curation-original">{{ item.content }}</div>
+                      <div v-if="item.action === 'update' && item.new_content" class="mem-fact-version-comparison">
+                        <div>
+                          <span class="mem-curation-meta">{{ t('memFactVersionBefore') }}</span>
+                          <div class="mem-curation-original">{{ item.content }}</div>
+                        </div>
+                        <div>
+                          <span class="mem-curation-meta">{{ t('memFactVersionAfter') }}</span>
+                          <div class="mem-curation-original">{{ item.new_content }}</div>
+                        </div>
+                      </div>
+                      <div v-else class="mem-curation-original">{{ item.content }}</div>
                       <div v-if="item.archive_reason" class="mem-curation-meta">{{ memoryArchiveReasonLabel(item.archive_reason) }}</div>
                       <div v-if="item.reason" class="mem-curation-meta">{{ item.reason }}</div>
                       <div v-if="item.target_id || item.target_content" class="mem-curation-meta">
                         {{ t('memCurationMergeTarget') }} · {{ item.target_content || item.target_id }}
                         <span v-if="item.target_content && item.target_id">({{ item.target_id }})</span>
                       </div>
-                      <div v-if="memoryBulkCurationPage.page_token && isMemoryCurationChange(item)" class="memory-maintenance-actions">
+                      <div v-if="item.action === 'pending'" class="memory-maintenance-actions">
+                        <button type="button" class="s-btn s-btn-secondary"
+                                :aria-label="t('btnMemoryBulkCurationReview') + ' · ' + item.content"
+                                :disabled="!!memoryCurationPending || memoryBulkCurationPending || !!memoryRestoringFactId"
+                                @click="loadMemoryBulkCurationPage(memoryProfileId, memoryBulkCurationPage.page_cursor, item.fact_id)">{{ t('btnMemoryBulkCurationReview') }}</button>
+                      </div>
+                      <div v-else-if="memoryBulkCurationPage.page_token && isMemoryCurationChange(item)" class="memory-maintenance-actions">
                         <button type="button" class="s-btn s-btn-secondary mem-bulk-curation-promote"
                                 :disabled="!!memoryCurationPending || memoryBulkCurationPending || !!memoryRestoringFactId"
                                 @click="promoteMemoryBulkCurationItem(memoryBulkCurationPage, item)">{{ t('memBulkCurationPromote') }}</button>
@@ -5150,14 +5176,14 @@
                           id="memory-bulk-curation-page" type="button" class="s-btn s-btn-secondary"
                           aria-describedby="memory-bulk-curation-hint" :disabled="memoryBulkCurationPending || memoryCurationPending === 'promote' || !memoryProfileId"
                           @click="loadMemoryBulkCurationPage(memoryProfileId)">
-                    {{ t(memoryBulkCurationPending ? 'btnMemoryCurationGenerating'
+                    {{ t(memoryBulkCurationPending ? 'loading'
                          : memoryBulkCurationPage ? 'btnMemoryBulkCurationNext'
                          : memoryBulkCurationRestartRequired ? 'btnMemoryBulkCurationRestart' : 'btnMemoryBulkCurationFirst') }}
                   </button>
                   <button v-if="memoryBulkCurationPage && (memoryBulkCurationError || memoryBulkCurationPage.next_cursor === null)"
                           id="memory-bulk-curation-restart" type="button" class="s-btn s-btn-secondary"
                           aria-describedby="memory-bulk-curation-hint" :disabled="memoryBulkCurationPending || memoryCurationPending === 'promote'"
-                          @click="loadMemoryBulkCurationPage(memoryProfileId, true)">
+                          @click="loadMemoryBulkCurationPage(memoryProfileId, null)">
                     {{ t('btnMemoryBulkCurationRestart') }}
                   </button>
                 </div>
@@ -5172,6 +5198,7 @@
                       {{ new Date(memoryStatus.curation.latest.at * 1000).toLocaleString() }}
                     </p>
                     <div class="mem-curation-counts">
+                      <span v-if="memoryStatus.curation.latest.counts.trimmed != null" class="mem-cat-badge">{{ t('memCurationResultTrimmed') }} · {{ memoryStatus.curation.latest.counts.trimmed }}</span>
                       <span class="mem-cat-badge">{{ t('memCurationAction_merge') }} · {{ memoryStatus.curation.latest.counts.merged }}</span>
                       <span class="mem-cat-badge">{{ t('memCurationAction_archive') }} · {{ memoryStatus.curation.latest.counts.archived }}</span>
                       <span class="mem-cat-badge">{{ t('memCurationAction_review') }} · {{ memoryStatus.curation.latest.counts.reviewed }}</span>
@@ -5202,6 +5229,7 @@
               <div v-if="memoryCurationResult" class="mem-curation-preview" role="status">
                 <div class="mem-diary-preview-title">{{ t('memCurationResultTitle') }}</div>
                 <div class="mem-curation-counts">
+                  <span v-if="memoryCurationResult.trimmed != null" class="mem-cat-badge">{{ t('memCurationResultTrimmed') }} · {{ memoryCurationResult.trimmed }}</span>
                   <span class="mem-cat-badge">{{ t('memCurationAction_merge') }} · {{ memoryCurationResult.merged }}</span>
                   <span class="mem-cat-badge">{{ t('memCurationAction_archive') }} · {{ memoryCurationResult.archived }}</span>
                   <span class="mem-cat-badge">{{ t('memCurationAction_review') }} · {{ memoryCurationResult.reviewed }}</span>
@@ -5861,7 +5889,7 @@
 <script src="js/api-paths.js?v=20261107memorycompletion1"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memorysearch"></script>
+<script src="js/settings.js?v=20261107memoryreviewsearch"></script>
 <script src="js/agent-ui.js?v=20261107memorysearch"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
 <script src="js/app.js?v=20261107memoryprompts2"></script>

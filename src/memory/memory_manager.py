@@ -15,6 +15,7 @@ import os
 import time
 import traceback
 import uuid
+from weakref import WeakValueDictionary
 from datetime import date, timedelta
 from string import Template
 from typing import Any, Dict, List, Optional
@@ -36,14 +37,17 @@ from src.utils.debug_logger import (
     log_memory_startup,
     log_summary_generate,
 )
-from src.memory.fact_operations import FORMAT, apply_operations, choose_candidates, rank_related
-from src.memory.recall import RecallCandidates, experience_links_by_day
+from src.memory.fact_operations import (
+    EXTRACTION_CANDIDATE_LIMIT, FORMAT, apply_operations, choose_candidates, extraction_candidate_query, rank_related,
+)
+from src.memory.recall import RecallCandidates, experience_links_by_day, search_vectors
 from src.utils.paths import get_project_root
 from src.utils.persona_context import persona_prompt_parts
 
 logger = logging.getLogger(__name__)
 
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
+_FACT_INDEX_LOCKS = WeakValueDictionary()
 
 
 def _vector_document_for_fact(fact: Any) -> str:
@@ -139,7 +143,8 @@ class MemoryManager:
         # turn_counter（用于 auto_extract 频率控制）
         self._meta_path = os.path.join(storage_root, "memory_meta.json")
         self._extraction_lock = asyncio.Lock()
-        self._fact_index_lock = asyncio.Lock()
+        index_path = os.path.normcase(os.path.realpath(storage_root))
+        self._fact_index_lock = _FACT_INDEX_LOCKS.setdefault(index_path, asyncio.Lock())
         if self.fact_index:
             self.import_legacy_vectors()
 
@@ -372,6 +377,23 @@ class MemoryManager:
         except Exception:
             logger.warning("Curation index cleanup will be retried for profile %s", self._profile_id)
 
+    async def choose_extraction_candidates(self, facts: list[LongTermFact], rows: list[Dict]) -> list[LongTermFact]:
+        """Choose write candidates from the supplied fact snapshot and dialogue batch."""
+        try:
+            max_distance = float(self._cfg.get("semantic_distance", 0.45))
+        except (TypeError, ValueError, OverflowError):
+            return choose_candidates(facts, rows)
+        query = extraction_candidate_query(rows)
+        if (not facts or not query.strip() or not (0 < max_distance < math.inf)
+                or not self.vectors or not self.vectors.is_available()):
+            return choose_candidates(facts, rows)
+        vector_rows = await asyncio.to_thread(search_vectors, self.vectors, query, EXTRACTION_CANDIDATE_LIMIT)
+        return choose_candidates(
+            facts, rows, vector_rows=vector_rows,
+            vector_matches=lambda fact, row: row.get("document") == _vector_document_for_fact(fact),
+            max_distance=max_distance,
+        )
+
     async def auto_extract(self, sources: Dict[str, Any], profile: Dict, app,
                            emotion_context: Optional[Dict] = None, *, first_message=None) -> None:
         """Extract each source's new messages once, committing facts and cursors together."""
@@ -415,7 +437,7 @@ class MemoryManager:
             if not memory_group_sources_allowed(app, self._profile_id, originals):
                 return
             references = {row["reference"]: row for row in rows}
-            candidates = choose_candidates(facts, rows)
+            candidates = await self.choose_extraction_candidates(facts, rows)
             try:
                 operations = await self._extract_facts_llm(rows, profile, app, candidates=candidates)
             except Exception:
@@ -870,7 +892,7 @@ class MemoryManager:
         )
 
         threshold = float(self._cfg.get("extraction_weight_threshold", 0.5))
-        previous = [{"fact_id": f.id, "kind": f.kind or "stable", "category": f.category,
+        previous = [{"fact_id": f.id, "kind": f.kind or ("event" if f.event_date else "stable"), "category": f.category,
                      "content": f.content, "event_date": f.event_date,
                      "occurred_from": f.occurred_from, "occurred_to": f.occurred_to,
                      "record_version": f.record_version,

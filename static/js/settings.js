@@ -633,9 +633,9 @@ const SettingsMixin = {
     sortedMemoryFacts() {
       let facts = this.memoryFacts.filter(fact => {
         if (this.factFilterStatus === 'review') return !!fact.review_note;
-        const archivedOrExpired = fact.archived || this.memoryFactExpired(fact);
-        if (this.factFilterStatus === 'archived') return archivedOrExpired;
-        return !archivedOrExpired && (fact.kind === 'experience') === (this.factFilterStatus === 'experiences');
+        const recallable = fact.recallable ?? !(fact.archived || this.memoryFactExpired(fact));
+        if (this.factFilterStatus === 'archived') return !recallable;
+        return recallable && (fact.kind === 'experience') === (this.factFilterStatus === 'experiences');
       });
       if (this.factFilterEmotional === 'with_note') {
         facts = facts.filter(f => (f.emotional_note || '').trim().length > 0);
@@ -667,7 +667,7 @@ const SettingsMixin = {
     },
 
     memoryCurationCounts() {
-      const counts = { keep: 0, merge: 0, archive: 0, review: 0 };
+      const counts = { keep: 0, update: 0, merge: 0, archive: 0, review: 0 };
       for (const item of this.memoryCurationPreview?.items || []) {
         if (Object.hasOwn(counts, item.action)) counts[item.action]++;
       }
@@ -5258,7 +5258,7 @@ const SettingsMixin = {
     },
 
     isMemoryCurationChange(item) {
-      return ['merge', 'archive', 'review'].includes(item.action);
+      return ['update', 'merge', 'archive', 'review'].includes(item.action);
     },
 
     acceptMemoryCurationPreview(data, profileId, promoted = false) {
@@ -5290,26 +5290,30 @@ const SettingsMixin = {
       }
     },
 
-    async loadMemoryBulkCurationPage(profileId, restart = false) {
+    async loadMemoryBulkCurationPage(profileId, pageCursor, factId) {
       const page = this.memoryBulkCurationPage;
+      const reviewing = factId !== undefined;
+      const cursor = pageCursor === undefined ? page?.next_cursor ?? null : pageCursor;
       if (this.memoryBulkCurationPending || this.memoryCurationPending === 'promote'
           || this.memoryPanelLoading || profileId !== this.memoryContentProfileId
-          || (!restart && page?.next_cursor === null)) return;
+          || (pageCursor === undefined && page?.next_cursor === null)) return;
+      if (reviewing && (this.memoryCurationPending || this.memoryRestoringFactId
+          || page?.profile_id !== profileId || page.page_cursor !== cursor
+          || !page.items.some(item => item.fact_id === factId && item.action === 'pending'))) return;
       const current = this.beginMemoryRequest(profileId, 'bulkCuration');
       if (!current) return;
-      const cursor = restart ? null : page?.next_cursor ?? null;
       this.memoryBulkCurationPending = true;
       this.memoryBulkCurationError = false;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryCurationBulkPreview(profileId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cursor }),
+          body: JSON.stringify(reviewing ? { cursor, fact_id: factId } : { cursor }),
         });
         const data = res.ok ? await res.json() : null;
         if (!current()) return;
         const { total, offset, covered } = data?.coverage || {};
-        if (data?.profile_id === profileId && Array.isArray(data.items)
+        if (data?.profile_id === profileId && data.page_cursor === cursor && Array.isArray(data.items)
             && [total, offset, covered].every(Number.isInteger) && 0 <= offset && offset <= covered && covered <= total
             && (data.next_cursor === null || (typeof data.next_cursor === 'string' && data.next_cursor !== cursor))) {
           this.memoryBulkCurationPage = data;

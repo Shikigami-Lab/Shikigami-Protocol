@@ -2,8 +2,9 @@
 import logging
 import os
 import time
+import uuid
 import gc
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,18 @@ class VectorMemoryStore:
             return fact_id
         except Exception as error:
             logger.error("[VectorStore] upsert failed for %s: %s", fact_id, error)
+            return None
+
+    def stage_fact(self, text: str, metadata: Dict) -> Optional[str]:
+        """Index replacement text without replacing the current row before commit."""
+        if not self._available or not text.strip():
+            return None
+        staged = "staged_" + uuid.uuid4().hex
+        try:
+            self._collection.add(documents=[text], metadatas=[metadata], ids=[staged])
+            return staged
+        except Exception as error:
+            logger.warning("Replacement fact could not be indexed: %s", type(error).__name__)
             return None
 
     def link_fact(self, vector_id: str, fact_id: str) -> bool:
@@ -162,69 +175,12 @@ class VectorMemoryStore:
             logger.error("[VectorStore] delete_by_fact_ids 失败: %s", e)
             return 0
 
-    def get_all_fact_ids(self) -> set:
-        """返回向量库中所有条目 metadata.fact_id 的集合（用于增量同步检测）。"""
-        return {
-            r["metadata"].get("fact_id")
-            for r in self.get_all()
-            if r.get("metadata", {}).get("fact_id")
-        }
-
-    def count_orphans(self, valid_fact_ids: Set[str]) -> int:
-        """统计孤儿向量数量（仅统计不删除，用于预览）。"""
-        if not self._available:
-            return 0
-        valid = set(valid_fact_ids)
-        try:
-            all_items = self.get_all()
-            return sum(
-                1 for r in all_items
-                if r.get("metadata", {}).get("fact_id") and r["metadata"].get("fact_id") not in valid
-            )
-        except Exception as e:
-            logger.error("[VectorStore] count_orphans 失败: %s", e)
-            return 0
-
-    def delete_orphans(self, valid_fact_ids: Set[str]) -> int:
-        """删除 metadata.fact_id 不在 valid_fact_ids 中的向量（孤儿向量清理）。返回删除条数。"""
-        if not self._available:
-            return 0
-        valid = set(valid_fact_ids)
-        try:
-            all_items = self.get_all()
-            to_delete = [
-                r["id"] for r in all_items
-                if r.get("metadata", {}).get("fact_id") and r["metadata"].get("fact_id") not in valid
-            ]
-            if to_delete:
-                self._collection.delete(ids=to_delete)
-                logger.info("[VectorStore] delete_orphans 删除 %d 条", len(to_delete))
-            return len(to_delete)
-        except Exception as e:
-            logger.error("[VectorStore] delete_orphans 失败: %s", e)
-            return 0
-
     def count(self) -> int:
         if not self._available:
             return 0
         try:
             return self._collection.count()
         except Exception:
-            return 0
-
-    def clear_all(self) -> int:
-        """清空向量库中所有条目，返回删除数量。"""
-        if not self._available:
-            return 0
-        try:
-            n = self._collection.count()
-            all_ids = [r["id"] for r in self.get_all()]
-            if all_ids:
-                self._collection.delete(ids=all_ids)
-            logger.info("[VectorStore] 清空全部向量 (%d 条)", n)
-            return n
-        except Exception as e:
-            logger.error("[VectorStore] clear_all 失败: %s", e)
             return 0
 
     def close(self) -> None:

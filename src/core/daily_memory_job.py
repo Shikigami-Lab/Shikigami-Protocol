@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
 from src.memory.curation import (
-    DailyDialogue, curation_for, curation_preset, request_combined_suggestions, request_suggestions,
+    CurationConflict, DailyDialogue, curation_for, curation_preset, request_daily_extraction, request_fixed_review, review_model_key,
 )
 from src.memory.extraction_batches import plan_batch
 from src.memory.fact_operations import choose_candidates
@@ -286,11 +286,16 @@ async def _run_daily_curation(session, today: str, app) -> None:
             )
 
         async def decide(rows):
-            return await request_suggestions(rows, preset)
+            if active_manager() is not manager:
+                raise CurationConflict("Memory review was disabled before the request")
+            return await request_fixed_review(rows, preset)
 
-        async def decide_combined(rows, dialogue):
+        async def decide_dialogue(dialogue, facts):
+            dialogue.candidates = await manager.choose_extraction_candidates(facts, dialogue.rows)
+            if active_manager() is not manager or not dialogue.is_current():
+                raise CurationConflict("Memory extraction changed before the request")
             messages = manager._extraction_messages(dialogue.rows, profile, app, dialogue.candidates)
-            return await request_combined_suggestions(rows, messages, preset)
+            return await request_daily_extraction(messages, preset)
 
         # Serialize with ordinary extraction so the same dialogue is not billed twice.
         async with manager._extraction_lock:
@@ -299,7 +304,7 @@ async def _run_daily_curation(session, today: str, app) -> None:
             preset = curation_preset(manager, app)
             changed = await curation_for(manager).run_daily(
                 today, decide, enabled=lambda: active_manager() is manager,
-                prepare_dialogue=prepare_dialogue, decide_combined=decide_combined,
+                prepare_dialogue=prepare_dialogue, decide_dialogue=decide_dialogue, model_key=review_model_key(preset),
             )
         if changed and manager.vectors and manager.vectors.is_available():
             for fact_id in changed:

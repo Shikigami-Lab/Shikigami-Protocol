@@ -3,6 +3,7 @@
 from datetime import date, datetime, time, timedelta
 import math
 import re
+import time as clock
 import unicodedata
 import uuid
 
@@ -44,6 +45,8 @@ _KINDS = {"stable", "address", "event", "temporary", "experience"}
 _CJK = re.compile(r"[\u3400-\u9fff]+")
 _WORD = re.compile(r"[a-z0-9]+")
 _ISO_DATE = re.compile(r"(?<![0-9])\d{4}-\d{2}-\d{2}(?![0-9])")
+EXTRACTION_CANDIDATE_LIMIT = 16
+_RRF_K = 60
 _STOP = {
     "用户", "喜欢", "之前", "今天", "现在", "一下", "那个", "那次", "起来", "什么", "记得", "自己", "我们", "user",
     "a", "an", "the", "this", "that", "these", "those",
@@ -80,14 +83,93 @@ def rank_related(facts, query, limit):
     return [row[-1] for row in scores[:limit]]
 
 
-def choose_candidates(facts, rows):
-    active = [fact for fact in facts if fact.is_active()]
-    addresses = [fact for fact in active if fact.kind == "address"]
-    eligible = [fact for fact in facts if fact.kind != "address" and (
-        fact.is_active() or _is_cold_experience(fact)
-    )]
-    related = rank_related(eligible, "\n".join(row["content"] for row in rows if row["role"] == "user"), 16)
-    return [*addresses[:1], *related][:16]
+def extraction_candidate_query(rows):
+    return "\n".join(row["content"] for row in rows if row["role"] == "user")
+
+
+def choose_candidates(facts, rows, *, vector_rows=(), vector_matches=None, max_distance=0.45):
+    """Rank writable snapshot facts. Existing callers use the lexical path."""
+    limit = EXTRACTION_CANDIDATE_LIMIT
+    now = clock.time()
+    query = extraction_candidate_query(rows)
+    dates = set(_ISO_DATE.findall(query))
+    eligible = {
+        fact.id: fact for fact in sorted(facts, key=lambda fact: fact.id)
+        if _writable_target(fact, now)
+        and (not dates or not fact.event_date or fact.event_date in dates)
+    }
+    address = next((fact for fact in eligible.values() if fact.kind == "address"), None)
+    ranked_pool = {key: fact for key, fact in eligible.items() if fact.kind != "address"}
+    lexical = rank_related(ranked_pool.values(), query, limit)
+    semantic = _rank_vector_candidates(ranked_pool, vector_rows, vector_matches, max_distance, limit)
+    direct = []
+    if semantic:
+        direct = _direct_source_candidates(ranked_pool.values(), rows)[:limit]
+        scores = {}
+        for ranking in ([fact.id for fact in lexical], semantic):
+            for position, fact_id in enumerate(ranking, start=1):
+                scores[fact_id] = scores.get(fact_id, 0.0) + 1 / (_RRF_K + position)
+        ranked = [ranked_pool[fact_id] for fact_id in sorted(scores, key=lambda fid: (-scores[fid], fid))]
+    else:
+        ranked = lexical
+    ordered = ([address] if address else []) + direct + ranked
+    return list({fact.id: fact for fact in ordered}.values())[:limit]
+
+
+def _rank_vector_candidates(facts, rows, matches, max_distance, limit):
+    if matches is None or not isinstance(rows, (list, tuple)):
+        return []
+    best = {}
+    for row in rows:
+        metadata = row.get("metadata") if isinstance(row, dict) else None
+        fact_id = metadata.get("fact_id") if isinstance(metadata, dict) else None
+        fact = facts.get(fact_id) if isinstance(fact_id, str) else None
+        distance = row.get("distance") if fact is not None else None
+        if (type(distance) in (int, float) and 0 <= distance < max_distance
+                and matches(fact, row)):
+            best[fact_id] = min(distance, best.get(fact_id, math.inf))
+    return sorted(best, key=lambda fid: (best[fid], fid))[:limit]
+
+
+def _direct_source_key(row):
+    source, message_id, timestamp = row.get("source"), row.get("id"), row.get("timestamp")
+    if (not isinstance(source, str) or not source or type(message_id) is not int or message_id <= 0
+            or type(timestamp) not in (int, float) or not 0 < timestamp < math.inf):
+        return None
+    start, end = row.get("start_char"), row.get("end_char")
+    if ("start_char" in row or "end_char" in row) and (
+        type(start) is not int or type(end) is not int or not 0 <= start < end
+    ):
+        return None
+    return source, message_id, start, end, timestamp
+
+
+def _direct_source_candidates(facts, rows):
+    sources = {}
+    for row in rows:
+        key = _direct_source_key(row) if row.get("role") == "user" else None
+        if key is None:
+            continue
+        source, message_id, start, end, _ = key
+        ref = f"{source}:{message_id}" + (f"#{start}-{end}" if start is not None else "")
+        digest = row.get("content_hash")
+        if row.get("reference", ref) == ref and (
+            "content_hash" not in row or (isinstance(digest, str) and digest)
+        ):
+            sources[key] = digest
+    result = []
+    for fact in facts:
+        for ref in fact.evidence:
+            if (not isinstance(ref, dict) or ref.get("speaker_role", ref.get("role")) != "user"
+                    or ref.get("assertion", "self_statement") != "self_statement"):
+                continue
+            key = _direct_source_key(ref)
+            digest = ref.get("content_hash")
+            if key in sources and ("content_hash" not in ref or
+                                   (isinstance(digest, str) and digest and sources[key] == digest)):
+                result.append(fact)
+                break
+    return result
 
 
 def _is_cold_experience(fact):
@@ -212,11 +294,17 @@ def _protected(fact):
     return fact.is_manual or fact.source == "manual" or fact.pinned or fact.curation_protected
 
 
+def _writable_target(fact, now):
+    return (not _protected(fact) and (fact.expires_at is None or fact.expires_at > now)
+            and (fact.is_active(now) or _is_cold_experience(fact)))
+
+
 def apply_operations(facts, operations, rows_by_ref, candidates, threshold):
     """Mutate only a detached snapshot. Return IDs whose indexed text changed."""
     changed = set()
     by_id = {fact.id: fact for fact in facts}
     allowed = {fact.id: fact.record_version for fact in candidates}
+    now = clock.time()
     for operation in operations[:24]:
         if not isinstance(operation, dict):
             continue
@@ -229,24 +317,26 @@ def apply_operations(facts, operations, rows_by_ref, candidates, threshold):
             if not isinstance(target_id, str) or target_id not in allowed or target_id not in by_id:
                 raise ValueError("Operation must target a supplied candidate")
             target = by_id[target_id]
-        kind = operation.get("kind", (target.kind or "stable") if target else "stable")
+        target_kind = (target.kind or ("event" if target.event_date else "stable")) if target else "stable"
+        kind = operation.get("kind", target_kind)
         experience = kind == "experience"
         if target and experience != (target.kind == "experience"):
             raise ValueError("Cannot change a record into or out of an experience")
         evidence = _supported_evidence(operation, rows_by_ref, experience=experience)
         if target:
+            # Older callers may omit the token. They still target the supplied snapshot version.
             expected = operation.get("expected_version", allowed[target.id])
-            if (experience or "expected_version" in operation) and (
-                type(expected) is not int or expected != allowed[target.id] or expected != target.record_version
-            ):
+            if type(expected) is not int or expected != allowed[target.id] or expected != target.record_version:
                 raise ValueError("Operation targets a stale memory version")
-            if _protected(target) or (target.archived and not _is_cold_experience(target)):
+            if not _writable_target(target, now) or (target.event_date and kind != "event"):
                 continue
         if action == "confirm":
             if experience:
                 _experience_dates(operation, target, _user_dates(operation, rows_by_ref), evidence)
-            if target.event_date and operation.get("event_date") != target.event_date:
-                continue
+            if target.event_date:
+                dates = _user_dates(operation, rows_by_ref)
+                if operation.get("event_date") != target.event_date or (dates and target.event_date not in dates):
+                    continue
             _merge_evidence(target, evidence)
             continue
 
@@ -314,7 +404,7 @@ def apply_operations(facts, operations, rows_by_ref, candidates, threshold):
         if duplicate:
             if experience and target:
                 raise ValueError("Experience update conflicts with another record")
-            if not _protected(duplicate) and not duplicate.archived:
+            if _writable_target(duplicate, now) and not duplicate.archived:
                 _merge_evidence(duplicate, evidence)
             continue
         note = operation.get("emotional_note", target.emotional_note if experience and target else "")

@@ -88,31 +88,76 @@ class ReviewApiTests(IsolatedAsyncioTestCase):
         self.assertTrue(other.facts.get_by_id("review").review_note)
 
     async def test_read_only_page_can_be_promoted_and_applied_without_a_second_model_call(self):
-        original = await self.get_row("review")
+        revision, cursors, facts = self.manager.facts.extraction_snapshot()
+        facts.append(LongTermFact("Waved once.", id="transient", source="auto", is_manual=False))
+        self.assertTrue(self.manager.facts.apply_extraction(revision, facts, cursors))
+        original = await self.get_row("transient")
         async def suggest(rows, _preset):
             return [
-                {"fact_id": fact.id, "action": "review" if fact.id == "review" else "keep",
-                 "reason": "Inspect original words"}
+                {"fact_id": fact.id, "action": "archive", "archive_reason": "ephemeral",
+                 "future_use": "", "evidence_quote": fact.content, "reason": "Only a momentary action"}
                 for fact in rows
             ]
 
         base = "/memory/fixture/curation"
-        with patch.object(memory, "request_suggestions", new=AsyncMock(side_effect=suggest)) as model, \
+        with patch.object(memory, "request_fixed_review", new=AsyncMock(side_effect=suggest)) as model, \
              patch.object(memory, "curation_preset", return_value={"model": "fixture"}):
             page = await self.client.post(base + "/bulk-preview", json={})
             self.assertEqual(page.status_code, 200, page.text)
+            model.assert_not_awaited()
+            page = await self.client.post(base + "/bulk-preview", json={"fact_id": "transient"})
+            self.assertEqual(page.status_code, 200, page.text)
             token = page.json()["page_token"]
-            self.assertEqual(await self.get_row("review"), original)
+            self.assertEqual(await self.get_row("transient"), original)
             promoted = await self.client.post(base + "/bulk-preview/promote",
-                                              json={"page_token": token, "fact_id": "review"})
+                                              json={"page_token": token, "fact_id": "transient"})
             self.assertEqual(promoted.status_code, 200, promoted.text)
-            self.assertEqual(await self.get_row("review"), original)
+            self.assertEqual(await self.get_row("transient"), original)
             applied = await self.client.post(base + "/apply", json={
-                "preview_id": promoted.json()["preview_id"], "fact_ids": ["review"],
+                "preview_id": promoted.json()["preview_id"], "fact_ids": ["transient"],
             })
             self.assertEqual(applied.status_code, 200, applied.text)
             model.assert_awaited_once()
-        self.assertEqual((await self.get_row("review"))["review_note"], "Inspect original words")
+        self.assertTrue((await self.get_row("transient"))["archived"])
+
+    async def test_fact_and_archive_views_partition_current_records(self):
+        facts = (await self.client.get("/memory/fixture/facts?view=facts")).json()["facts"]
+        archive = (await self.client.get("/memory/fixture/facts?view=archive")).json()["facts"]
+        self.assertEqual({row["id"] for row in facts}, {"review", "experience"})
+        self.assertEqual({row["id"] for row in archive}, {"archive", "expired"})
+        self.assertTrue(all(row["recallable"] for row in facts))
+        self.assertTrue(all(not row["recallable"] for row in archive))
+
+    async def test_profile_managers_share_the_same_vector_mutation_lock(self):
+        with patch("src.memory.memory_manager.log_memory_startup"):
+            second = MemoryManager("fixture", self.manager._storage_root)
+        self.assertIs(self.manager._fact_index_lock, second._fact_index_lock)
+
+    async def test_excerpt_apply_leaves_old_fact_when_staging_fails(self):
+        revision, cursors, facts = self.manager.facts.extraction_snapshot()
+        original = "用户想用显卡运行本地模型。随后聊了几句闲话。"
+        facts.append(LongTermFact(original, id="trim", source="auto", is_manual=False))
+        self.assertTrue(self.manager.facts.apply_extraction(revision, facts, cursors))
+        excerpt = "用户想用显卡运行本地模型。"
+        model = AsyncMock(return_value=[{
+            "fact_id": "trim", "action": "update", "reason": "保留硬件用途",
+            "future_use": "询问本地模型硬件", "evidence_quote": excerpt, "keep_text": excerpt,
+        }])
+        base = "/memory/fixture/curation"
+        with patch.object(memory, "request_fixed_review", model), \
+             patch.object(memory, "curation_preset", return_value={"model": "fixture"}):
+            page = await self.client.post(base + "/bulk-preview", json={"fact_id": "trim"})
+            preview = await self.client.post(base + "/bulk-preview/promote", json={
+                "page_token": page.json()["page_token"], "fact_id": "trim",
+            })
+        self.manager.vectors = SimpleNamespace(is_available=lambda: True, stage_fact=lambda *_: None)
+        applied = await self.client.post(base + "/apply", json={
+            "preview_id": preview.json()["preview_id"], "fact_ids": ["trim"],
+        })
+        self.assertEqual(applied.status_code, 409, applied.text)
+        current = self.manager.facts.get_by_id("trim")
+        self.assertEqual(current.content, original)
+        self.assertEqual(current.versions, [])
 
     async def test_restore_old_version_uses_index_and_preserves_displaced_current(self):
         self.manager.vectors = SimpleNamespace(is_available=lambda: True)

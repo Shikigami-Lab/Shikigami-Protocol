@@ -21,7 +21,7 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.memory.curation import CurationConflict, curation_for, curation_preset, request_suggestions
+from src.memory.curation import CurationConflict, curation_for, curation_preset, request_fixed_review, review_model_key
 from src.memory.recall import RecallCandidates, experience_links_by_day
 from src.memory.extraction_batches import memory_source_excerpt
 from src.memory.long_term_store import fact_action_revision
@@ -99,15 +99,15 @@ def _require_manager(request: Request, profile_id: str):
 @router.get("/{profile_id}/status")
 async def get_memory_status(profile_id: str, request: Request):
     mgr = _require_manager(request, profile_id)
-    now = time.time()
+    pool = RecallCandidates(mgr.facts)
     counts = dict(facts=0, experiences=0, archived=0, expired=0, review=0)
-    for fact in mgr.facts.get_all():
-        if fact.archived:
-            counts["archived"] += 1
-        elif not fact.is_active(now):
+    for fact in pool.facts:
+        if fact.id in pool.indexable:
+            counts["experiences" if fact.kind == "experience" else "facts"] += 1
+        elif not fact.archived and not fact.is_active(pool.now):
             counts["expired"] += 1
         else:
-            counts["experiences" if fact.kind == "experience" else "facts"] += 1
+            counts["archived"] += 1
         if fact.review_note:
             counts["review"] += 1
     return {**mgr.status(), "curation": mgr.facts.curation_status(), "counts": counts}
@@ -136,13 +136,15 @@ def _profile_action_revision(profile_id: str, revision: str) -> str:
 
 
 @router.get("/{profile_id}/facts")
-async def get_facts(profile_id: str, request: Request):
+async def get_facts(profile_id: str, request: Request, view: Optional[Literal["facts", "archive"]] = None):
     mgr = _require_manager(request, profile_id)
     pool = RecallCandidates(mgr.facts)
     return {"facts": [
         {**fact.to_dict(), "archive_recallable": fact.id in pool.cold or fact.id in pool.aliases,
+         "recallable": fact.id in pool.indexable,
          "action_revision": _profile_action_revision(mgr._profile_id, fact_action_revision(fact))}
         for fact in pool.facts
+        if view is None or (fact.id in pool.indexable) == (view == "facts")
     ]}
 
 
@@ -260,6 +262,7 @@ async def delete_fact(profile_id: str, fact_id: str, request: Request):
 
 class BulkCurationPreview(BaseModel):
     cursor: Optional[str] = Field(default=None, max_length=128)
+    fact_id: Optional[str] = Field(default=None, min_length=1, max_length=512)
 
 
 class BulkCurationPromote(BaseModel):
@@ -300,10 +303,12 @@ def _require_curation(request: Request, profile_id: str):
 async def preview_curation(profile_id: str, request: Request):
     manager, curation = _require_curation(request, profile_id)
     try:
-        async def decide(rows):
-            return await request_suggestions(rows, curation_preset(manager, request.app))
+        preset = curation_preset(manager, request.app)
 
-        return await curation.preview(decide)
+        async def decide(rows):
+            return await request_fixed_review(rows, preset)
+
+        return await curation.preview_fixed(decide, model_key=review_model_key(preset))
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception:
@@ -315,10 +320,19 @@ async def preview_curation(profile_id: str, request: Request):
 async def preview_curation_page(profile_id: str, body: BulkCurationPreview, request: Request):
     manager, curation = _require_curation(request, profile_id)
     try:
-        async def decide(rows):
-            return await request_suggestions(rows, curation_preset(manager, request.app))
+        try:
+            preset = curation_preset(manager, request.app)
+        except CurationConflict:
+            if body.fact_id is not None:
+                raise
+            preset = None
 
-        return await curation.preview_bulk(decide, cursor=body.cursor)
+        async def decide(rows):
+            return await request_fixed_review(rows, preset)
+
+        return await curation.preview_bulk_fixed(
+            decide, cursor=body.cursor, fact_id=body.fact_id, model_key=review_model_key(preset),
+        )
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception:
@@ -372,7 +386,29 @@ async def restore_fact_version(profile_id: str, fact_id: str, body: FactVersionR
 async def apply_curation(profile_id: str, body: CurationApply, request: Request):
     manager, curation = _require_curation(request, profile_id)
     try:
-        receipt = curation.apply(body.preview_id, body.fact_ids)
+        async with manager._fact_index_lock:
+            updates = curation.pending_updates(body.preview_id, body.fact_ids)
+            if updates and (manager.vectors or manager._cfg.get("vector_enabled")):
+                from src.memory.memory_manager import _vector_document_for_fact, _vector_metadata_for_fact
+
+                vectors = manager.vectors
+                if not vectors or not vectors.is_available():
+                    raise CurationConflict("Replacement indexing is unavailable. The original remains active.")
+                staged_ids = []
+                try:
+                    for fact in updates:
+                        staged = await asyncio.to_thread(vectors.stage_fact, _vector_document_for_fact(fact),
+                                                         _vector_metadata_for_fact(fact))
+                        if not staged:
+                            raise CurationConflict("Replacement indexing failed. The original remains active.")
+                        staged_ids.append(staged)
+                    receipt = curation.apply(body.preview_id, body.fact_ids)
+                except BaseException:
+                    for staged in staged_ids:
+                        await asyncio.to_thread(vectors.delete, staged)
+                    raise
+            else:
+                receipt = curation.apply(body.preview_id, body.fact_ids)
     except CurationConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     await manager.prune_curation_index()

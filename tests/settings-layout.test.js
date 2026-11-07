@@ -107,7 +107,7 @@ test('manual memory curation exposes its preview and apply separately from local
   ]) assert.ok(memory.includes(binding), binding);
 });
 
-test('old-store preview labels the per-page cost and exposes read-only controls in Maintenance', () => {
+test('old-store preview separates free browsing from explicit per-row review in Maintenance', () => {
   const window = {};
   for (const filename of ['api-paths.js', 'i18n.js']) {
     runInNewContext(readFileSync(join(__dirname, '../static/js', filename), 'utf8'), { window });
@@ -117,14 +117,23 @@ test('old-store preview labels the per-page cost and exposes read-only controls 
   assert.match(bulk, /id="memory-bulk-curation-hint"/);
   assert.match(bulk, /aria-describedby="memory-bulk-curation-hint"/);
   assert.match(bulk, /@click="loadMemoryBulkCurationPage\(memoryProfileId\)"/);
+  assert.match(bulk, /v-if="item.action === 'pending'"[\s\S]*?<button[^>]*@click="loadMemoryBulkCurationPage\(memoryProfileId, memoryBulkCurationPage.page_cursor, item.fact_id\)"[^>]*>[\s\S]*?btnMemoryBulkCurationReview/);
   assert.match(bulk, /memoryBulkCurationPage.next_cursor !== null/);
   assert.match(bulk, /memoryBulkCurationPage.items/);
   assert.match(bulk, /id="memory-bulk-curation-coverage"/);
   assert.doesNotMatch(bulk, /applyMemoryCuration|type="checkbox"|@toggle/);
   assert.match(window.LOCALES.en.memBulkCurationTitle, /read-only/i);
-  assert.match(window.LOCALES.en.hintMemoryBulkCuration, /each page.*one model request.*charges/i);
+  assert.match(window.LOCALES.en.hintMemoryBulkCuration, /browsing.*free.*review.*one model request.*cache/i);
+  assert.equal(window.LOCALES.en.memCurationAction_pending, 'Unreviewed');
   assert.match(window.LOCALES.zh.memBulkCurationTitle, /只读/);
-  assert.match(window.LOCALES.zh.hintMemoryBulkCuration, /每页.*一次模型请求.*费用/);
+  assert.match(window.LOCALES.zh.hintMemoryBulkCuration, /浏览.*免费.*审阅.*一次模型请求.*缓存/);
+});
+
+test('manual and bulk update previews compare the original and proposed text and show optional trim counts', () => {
+  const compare = /v-if="item.action === 'update' && item.new_content" class="mem-fact-version-comparison"[\s\S]*?memFactVersionBefore[\s\S]*?\{\{ item.content \}\}[\s\S]*?memFactVersionAfter[\s\S]*?\{\{ item.new_content \}\}/g;
+  assert.equal([...html.matchAll(compare)].length, 2);
+  assert.match(html, /v-if="memoryCurationResult.trimmed != null"[^>]*>[\s\S]*?\{\{ memoryCurationResult.trimmed \}\}/);
+  assert.match(html, /v-if="memoryStatus.curation.latest.counts.trimmed != null"/);
 });
 
 test('daily curation controls are independently addressable and Maintenance renders durable and session results', () => {

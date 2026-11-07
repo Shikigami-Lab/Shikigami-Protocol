@@ -68,14 +68,6 @@ def record_run(storage_root: str, entry: Dict[str, Any]) -> None:
         logger.warning("[memory_changelog] record_run 失败: %s", e)
 
 
-def has_meaningful_changes(rollback_data: Dict[str, Any]) -> bool:
-    """判断本次运行是否实际改动了事实（决定是否写日志，空跑不记）。"""
-    if rollback_data.get("decay") or rollback_data.get("reinforce"):
-        return True
-    cons = rollback_data.get("consolidation") or {}
-    return bool(cons.get("added") or cons.get("vectors_removed"))
-
-
 async def rollback(storage_root: str, run_id: str, mgr) -> Dict[str, Any]:
     """回滚指定 run。逐条独立（见模块 docstring）。返回 {ok, restored, skipped, ...}。"""
     log = get_changelog(storage_root)

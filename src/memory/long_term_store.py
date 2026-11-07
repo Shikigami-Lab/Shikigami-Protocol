@@ -350,8 +350,7 @@ class LongTermStore:
             elif k == "pinned":
                 fact.pinned = bool(v)
         if semantic_changed:
-            if fact.kind == "experience":
-                fact.versions.append(previous.snapshot())
+            fact.versions.append(previous.snapshot())
             fact.updated_at = time.time()
             fact.curation_protected = True
             fact.review_note = ""
@@ -519,17 +518,6 @@ class LongTermStore:
         if validated != offsets:
             return False
         return self._commit(facts, cursors, expected_revision=revision, curation=state, offsets=validated)
-
-    def get_top_n(self, n: int) -> List[LongTermFact]:
-        """返回 prompt 用事实：全部 pinned + 按 score 降序填充剩余配额。"""
-        active = self.get_active()
-        pinned = [f for f in active if f.pinned]
-        non_pinned = sorted(
-            (f for f in active if not f.pinned),
-            key=lambda f: f.score(), reverse=True
-        )
-        remaining = max(0, n - len(pinned))
-        return pinned + non_pinned[:remaining]
 
     def count(self) -> int:
         self._refresh()

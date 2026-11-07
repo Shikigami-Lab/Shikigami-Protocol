@@ -381,13 +381,14 @@ test('fact filters keep active records by default and make archived, expired and
     { id: 'expired', expires_at: 1 },
     { id: 'archived', archived: true, archive_reason: 'low_value' },
     { id: 'experience', kind: 'experience' },
+    { id: 'cold-experience', kind: 'experience', archived: true, recallable: true },
     { id: 'experience-archived', kind: 'experience', archived: true, review_note: 'Check original' },
     { id: 'experience-expired', kind: 'experience', expires_at: 1 },
   ];
   const visible = () => Array.from(computed.sortedMemoryFacts.call(model), fact => fact.id);
   assert.deepEqual(visible(), ['active', 'review']);
   model.factFilterStatus = 'experiences';
-  assert.deepEqual(visible(), ['experience']);
+  assert.deepEqual(visible(), ['experience', 'cold-experience']);
   model.factFilterStatus = 'archived';
   assert.deepEqual(visible(), ['expired', 'archived', 'experience-archived', 'experience-expired']);
   model.factFilterStatus = 'review';
@@ -586,11 +587,12 @@ test('curation posts a bodyless preview, counts its actions and only writes afte
     { fact_id: 'two', action: 'merge', content: 'Merge original', reason: 'Same topic', target_id: 'one', target_content: 'Keep original' },
     { fact_id: 'three', action: 'archive', content: 'Archive original', archive_reason: 'low_value' },
     { fact_id: 'four', action: 'review', content: 'Review original', reason: 'Check evidence' },
+    { fact_id: 'five', action: 'update', content: 'Keep this. Remove the aside.', new_content: 'Keep this.' },
   ];
   const { model } = harness(async (url, options) => {
     calls.push([url, options]);
     if (url === 'memoryCurationPreview/a') return response({ profile_id: 'a', preview_id: 'p1', items });
-    if (url === 'memoryCurationApply/a') return response({ ok: true, merged: 1, archived: 0, reviewed: 1 });
+    if (url === 'memoryCurationApply/a') return response({ ok: true, merged: 1, archived: 0, reviewed: 1, trimmed: 1 });
     if (url === 'memoryFacts/a') return response({ facts: [{ id: 'two', archived: true }] });
     return response({});
   });
@@ -601,26 +603,27 @@ test('curation posts a bodyless preview, counts its actions and only writes afte
   assert.equal(calls[0][1].method, 'POST');
   assert.equal(calls[0][1].body, undefined);
   assert.deepEqual(model.memoryCurationPreview.items, items);
-  assert.deepEqual({ ...computed.memoryCurationCounts.call(model) }, { keep: 1, merge: 1, archive: 1, review: 1 });
-  assert.deepEqual([...model.memoryCurationSelection], ['two', 'three', 'four']);
-  model.memoryCurationSelection = ['two', 'four'];
+  assert.deepEqual({ ...computed.memoryCurationCounts.call(model) }, { keep: 1, merge: 1, archive: 1, review: 1, update: 1 });
+  assert.deepEqual([...model.memoryCurationSelection], ['two', 'three', 'four', 'five']);
+  model.memoryCurationSelection = ['two', 'four', 'five'];
   await model.applyMemoryCuration();
   assert.equal(calls[1][0], 'memoryCurationApply/a');
   assert.equal(calls[1][1].method, 'POST');
-  assert.deepEqual(JSON.parse(calls[1][1].body), { preview_id: 'p1', fact_ids: ['two', 'four'] });
+  assert.deepEqual(JSON.parse(calls[1][1].body), { preview_id: 'p1', fact_ids: ['two', 'four', 'five'] });
   assert.equal(model.memoryCurationPreview, null);
   assert.equal(model.memoryCurationResult.merged, 1);
+  assert.equal(model.memoryCurationResult.trimmed, 1);
   assert.equal(model.memoryFacts[0].archived, true);
 });
 
 test('the old-store preview sends one explicit cursor request per page and never creates an applicable preview', async () => {
   const calls = [];
   const first = {
-    profile_id: 'a', items: [{ fact_id: 'one', action: 'archive' }],
+    profile_id: 'a', page_cursor: null, items: [{ fact_id: 'one', action: 'pending' }],
     coverage: { total: 2, offset: 0, covered: 1 }, next_cursor: 'opaque:next',
   };
   const last = {
-    profile_id: 'a', items: [{ fact_id: 'two', action: 'keep' }],
+    profile_id: 'a', page_cursor: 'opaque:next', items: [{ fact_id: 'two', action: 'keep' }],
     coverage: { total: 2, offset: 1, covered: 2 }, next_cursor: null,
   };
   let finishFirst;
@@ -646,6 +649,41 @@ test('the old-store preview sends one explicit cursor request per page and never
   assert.equal(model.memoryBulkCurationPage, last);
   assert.equal(model.memoryCurationPreview, null);
   assert.deepEqual([...model.memoryCurationSelection], []);
+});
+
+test('reviewing one pending row on the last page sends its current cursor and preserves the other pending rows', async () => {
+  const calls = [];
+  const row = { fact_id: 'entry', action: 'pending', content: 'Keep this. Remove the aside.' };
+  const neighbor = { fact_id: 'neighbor', action: 'pending' };
+  const page = {
+    profile_id: 'a', page_cursor: 'opaque:current', page_token: 'before',
+    items: [row, neighbor], coverage: { total: 26, offset: 24, covered: 26 }, next_cursor: null,
+  };
+  const update = { ...row, action: 'update', new_content: 'Keep this.' };
+  const reviewed = { ...page, page_token: 'after', items: [update, neighbor] };
+  let finish;
+  const { model } = harness((url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push([url, options.method, body]);
+    if (body.fact_id !== row.fact_id) return Promise.resolve(response(page));
+    return new Promise(resolve => { finish = resolve; });
+  });
+  model.selectMemoryProfile('a');
+  model.memoryBulkCurationPage = page;
+  await model.loadMemoryBulkCurationPage('a', null, row.fact_id);
+  await model.loadMemoryBulkCurationPage('a', page.page_cursor, 'missing');
+  assert.deepEqual(calls, []);
+
+  const pending = model.loadMemoryBulkCurationPage('a', page.page_cursor, row.fact_id);
+  await model.loadMemoryBulkCurationPage('a', page.page_cursor, row.fact_id);
+  assert.deepEqual(calls, [['memoryCurationBulkPreview/a', 'POST', { cursor: 'opaque:current', fact_id: 'entry' }]]);
+  finish(response(reviewed));
+  await pending;
+  assert.equal(model.memoryBulkCurationPage, reviewed);
+  assert.equal(model.memoryCurationPreview, null);
+  assert.equal(model.memoryBulkCurationPending, false);
+  await model.loadMemoryBulkCurationPage('a', page.page_cursor, row.fact_id);
+  assert.equal(calls.length, 1);
 });
 
 test('review keep sends the visible revision, and archive requires an explicit permitted reason', async () => {
@@ -752,9 +790,9 @@ test('switching personas clears fact confirmations and ignores a late review res
   assert.deepEqual(toasts, []);
 });
 
-test('bulk promotion only sends the current actionable row and still requires standard Apply', async () => {
+test('bulk promotion sends only the current update and still requires standard Apply', async () => {
   const writes = [];
-  const item = { fact_id: 'entry', action: 'archive' };
+  const item = { fact_id: 'entry', action: 'update', content: 'Keep this. Remove the aside.', new_content: 'Keep this.' };
   const keep = { fact_id: 'keep', action: 'keep' };
   const { model } = harness(async (url, options) => {
     if (options?.method === 'POST') writes.push([url, JSON.parse(options.body)]);
@@ -769,6 +807,7 @@ test('bulk promotion only sends the current actionable row and still requires st
   assert.deepEqual(writes, []);
   await model.promoteMemoryBulkCurationItem(page, item);
   assert.deepEqual(writes, [['memoryCurationBulkPromote/a', { page_token: 'page', fact_id: 'entry' }]]);
+  assert.equal(model.memoryCurationPreview.items[0].new_content, 'Keep this.');
   assert.deepEqual([...model.memoryCurationSelection], ['entry']);
   model.memoryCurationSelection = [];
   await model.applyMemoryCuration();
@@ -786,7 +825,7 @@ test('promotion conflict clears a completed bulk page and the next explicit requ
   const { model } = harness(async (url, options) => {
     calls.push([url, JSON.parse(options.body)]);
     if (url === 'memoryCurationBulkPromote/a') return { ...response({}, false), status: 409 };
-    return response({ profile_id: 'a', items: [], coverage: { total: 0, offset: 0, covered: 0 }, next_cursor: null });
+    return response({ profile_id: 'a', page_cursor: null, items: [], coverage: { total: 0, offset: 0, covered: 0 }, next_cursor: null });
   });
   model.selectMemoryProfile('a');
   const page = { profile_id: 'a', page_token: 'page', items: [item], next_cursor: null };
@@ -852,7 +891,7 @@ test('diary links jump to the matching filter, reveal a paginated experience and
 
 test('a failed old-store page keeps the prior results and allows retry or an explicit restart', async () => {
   const page = {
-    profile_id: 'a', items: [],
+    profile_id: 'a', page_cursor: null, items: [],
     coverage: { total: 2, offset: 0, covered: 1 }, next_cursor: 'opaque:next',
   };
   const calls = [];
@@ -868,29 +907,29 @@ test('a failed old-store page keeps the prior results and allows retry or an exp
   assert.equal(model.memoryBulkCurationPage, page);
   assert.equal(model.memoryBulkCurationError, true);
   await model.loadMemoryBulkCurationPage('a');
-  await model.loadMemoryBulkCurationPage('a', true);
+  await model.loadMemoryBulkCurationPage('a', null);
   assert.deepEqual(calls, [null, 'opaque:next', 'opaque:next', null]);
   assert.equal(model.memoryBulkCurationError, false);
 });
 
-test('old-store pages and their pending state are discarded when switching personas and back', async () => {
+test('a pending row review is discarded when switching personas and back', async () => {
   const pending = [];
   const { model } = harness(() => new Promise(resolve => pending.push(resolve)));
-  const payload = fact_id => ({
-    profile_id: 'a', items: [{ fact_id, action: 'keep' }],
+  const payload = (fact_id, action = 'pending') => ({
+    profile_id: 'a', page_cursor: null, items: [{ fact_id, action }],
     coverage: { total: 2, offset: 0, covered: 1 }, next_cursor: 'more',
   });
   model.selectMemoryProfile('a');
   const first = model.loadMemoryBulkCurationPage('a');
   pending[0](response(payload('first')));
   await first;
-  const old = model.loadMemoryBulkCurationPage('a');
+  const old = model.loadMemoryBulkCurationPage('a', null, 'first');
   model.selectMemoryProfile('b');
   assert.equal(model.memoryBulkCurationPage, null);
   assert.equal(model.memoryBulkCurationPending, false);
   model.selectMemoryProfile('a');
   const current = model.loadMemoryBulkCurationPage('a');
-  pending[1](response(payload('old')));
+  pending[1](response(payload('first', 'update')));
   await old;
   assert.equal(model.memoryBulkCurationPage, null);
   assert.equal(model.memoryBulkCurationPending, true);
@@ -907,7 +946,7 @@ test('an old-store preview leaves a normal preview selectable and applicable', a
       profile_id: 'a', preview_id: 'normal', items: [{ fact_id: 'eligible', action: 'archive' }],
     });
     if (url === 'memoryCurationBulkPreview/a') return response({
-      profile_id: 'a', items: [{ fact_id: 'bulk', action: 'review' }],
+      profile_id: 'a', page_cursor: null, items: [{ fact_id: 'bulk', action: 'pending' }],
       coverage: { total: 1, offset: 0, covered: 1 }, next_cursor: null,
     });
     if (url === 'memoryCurationApply/a') {
