@@ -27,8 +27,142 @@
 }
 
 [data-theme="light"] :is(.settings-drawer, .profile-wizard-overlay) { --settings-accent-ink: #fff; }
+[data-theme="light"] .settings-drawer { --settings-palette-hover-tint: #18181a; }
+
+/* Settings palettes are also used by each theme card's swatch. */
+
+:root,
+.theme-card[data-theme-palette="purple"] {
+  --settings-palette-page: #191627;
+  --settings-palette-card: #252035;
+  --settings-palette-nav: #161322;
+  --settings-palette-border: #403653;
+  --settings-palette-primary: #ede8f7;
+  --settings-palette-secondary: #b5a8ca;
+  --settings-palette-accent: #a291d6;
+}
+
+:root[data-theme="light"],
+.theme-card[data-theme-palette="light"] {
+  --settings-palette-page: #f2efe9;
+  --settings-palette-card: #fafaf6;
+  --settings-palette-nav: #ebe6dd;
+  --settings-palette-border: #d6cec0;
+  --settings-palette-primary: #252520;
+  --settings-palette-secondary: #645d53;
+  --settings-palette-accent: #376b94;
+}
+
+:root[data-theme="velvet"],
+.theme-card[data-theme-palette="velvet"] {
+  --settings-palette-page: #14131a;
+  --settings-palette-card: #1d1b24;
+  --settings-palette-nav: #111017;
+  --settings-palette-border: #383343;
+  --settings-palette-primary: #efe8db;
+  --settings-palette-secondary: #b2a9b7;
+  --settings-palette-accent: #c6a46a;
+}
+
+:root[data-theme="cursor"],
+.theme-card[data-theme-palette="cursor"] {
+  --settings-palette-page: #202124;
+  --settings-palette-card: #292b2f;
+  --settings-palette-nav: #191a1d;
+  --settings-palette-border: #3d4147;
+  --settings-palette-primary: #eceef0;
+  --settings-palette-secondary: #a7adb5;
+  --settings-palette-accent: #6a9bc1;
+}
+
+:root[data-theme="midnight"],
+.theme-card[data-theme-palette="midnight"] {
+  --settings-palette-page: #101a28;
+  --settings-palette-card: #182637;
+  --settings-palette-nav: #0e1723;
+  --settings-palette-border: #2b425b;
+  --settings-palette-primary: #e1ebf5;
+  --settings-palette-secondary: #9cb4cc;
+  --settings-palette-accent: #679fd0;
+}
+
+:root[data-theme="nord"],
+.theme-card[data-theme-palette="nord"] {
+  --settings-palette-page: #303845;
+  --settings-palette-card: #3a4553;
+  --settings-palette-nav: #29323e;
+  --settings-palette-border: #505c6c;
+  --settings-palette-primary: #edf2f6;
+  --settings-palette-secondary: #bac8d4;
+  --settings-palette-accent: #8cbec5;
+}
+
+:root[data-theme="matcha"],
+.theme-card[data-theme-palette="matcha"] {
+  --settings-palette-page: #131e19;
+  --settings-palette-card: #1b2a23;
+  --settings-palette-nav: #101b16;
+  --settings-palette-border: #34473a;
+  --settings-palette-primary: #e4ebdf;
+  --settings-palette-secondary: #a7b8ab;
+  --settings-palette-accent: #8daa96;
+}
+
+:root[data-theme="warm"],
+.theme-card[data-theme-palette="warm"] {
+  --settings-palette-page: #211a16;
+  --settings-palette-card: #2d241e;
+  --settings-palette-nav: #1b1512;
+  --settings-palette-border: #49362a;
+  --settings-palette-primary: #efe5d7;
+  --settings-palette-secondary: #bba690;
+  --settings-palette-accent: #ca965d;
+}
+
+:root[data-theme="rose"],
+.theme-card[data-theme-palette="rose"] {
+  --settings-palette-page: #21171e;
+  --settings-palette-card: #2d2029;
+  --settings-palette-nav: #1d141a;
+  --settings-palette-border: #503546;
+  --settings-palette-primary: #f3e7ee;
+  --settings-palette-secondary: #c2a8b8;
+  --settings-palette-accent: #c982a1;
+}
+
+:root[data-theme="synthwave"],
+.theme-card[data-theme-palette="synthwave"] {
+  --settings-palette-page: #181222;
+  --settings-palette-card: #241b30;
+  --settings-palette-nav: #130e1e;
+  --settings-palette-border: #433452;
+  --settings-palette-primary: #f0e7f8;
+  --settings-palette-secondary: #bca8cc;
+  --settings-palette-accent: #ea82b9;
+}
+
+:root[data-theme="ink"],
+.theme-card[data-theme-palette="ink"] {
+  --settings-palette-page: #171717;
+  --settings-palette-card: #222222;
+  --settings-palette-nav: #111111;
+  --settings-palette-border: #383838;
+  --settings-palette-primary: #ededec;
+  --settings-palette-secondary: #aaaaaa;
+  --settings-palette-accent: #bfbfbf;
+}
 
 .settings-drawer {
+  --bg-panel: var(--settings-palette-page);
+  --bg-app: var(--settings-palette-card);
+  --bg-sidebar: var(--settings-palette-nav);
+  --border: var(--settings-palette-border);
+  --text-primary: var(--settings-palette-primary);
+  --text-secondary: var(--settings-palette-secondary);
+  --accent: var(--settings-palette-accent);
+  --accent-hover: color-mix(in srgb, var(--accent) 83%, var(--settings-palette-hover-tint, #fff));
+  --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
+  --active-bg: color-mix(in srgb, var(--accent) 17%, transparent);
   position: fixed;
   /* Center with margin:auto — avoids translate(-50%,-50%) + scale() half-pixel offsets
      that blur text at non-integer window scale (especially with dense flex columns). */
@@ -1518,9 +1652,15 @@ textarea.form-input {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-dim);
 }
-.theme-swatch-bar { height: 16px; flex-shrink: 0; }
+.theme-swatch-bar {
+  height: 16px;
+  flex-shrink: 0;
+  background: var(--settings-palette-accent);
+}
 .theme-swatch-body {
   height: 36px;
+  background: var(--settings-palette-card);
+  color: var(--settings-palette-primary);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -11,7 +11,7 @@
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
   <link rel="stylesheet" href="css/styles.css?v=20261105lucide1" />
-  <link rel="stylesheet" href="css/settings.css?v=20261107memorycompletion1" />
+  <link rel="stylesheet" href="css/settings.css?v=20261107settingspalette1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
@@ -4595,99 +4595,99 @@
           <div class="s-card-title">{{ t('secAppearance') }}</div>
           <div class="theme-picker">
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'velvet'"
+          <div class="theme-card" data-theme-palette="velvet" role="button" tabindex="0" :aria-pressed="currentTheme === 'velvet'"
             @click="applyTheme('velvet')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'velvet' }">
-              <div class="theme-swatch-bar" style="background:linear-gradient(90deg,#c4a040 60%,#3cc8a8 100%);"></div>
-              <div class="theme-swatch-body" style="background:#0e0d1a;color:#e8e2d4;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameVelvet') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === '' || currentTheme === 'purple'"
+          <div class="theme-card" data-theme-palette="purple" role="button" tabindex="0" :aria-pressed="currentTheme === '' || currentTheme === 'purple'"
             @click="applyTheme('')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === '' || currentTheme === 'purple' }">
-              <div class="theme-swatch-bar" style="background:#6c63ff;"></div>
-              <div class="theme-swatch-body" style="background:#111127;color:#e8e8f4;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNamePurple') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'cursor'"
+          <div class="theme-card" data-theme-palette="cursor" role="button" tabindex="0" :aria-pressed="currentTheme === 'cursor'"
             @click="applyTheme('cursor')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'cursor' }">
-              <div class="theme-swatch-bar" style="background:#007acc;"></div>
-              <div class="theme-swatch-body" style="background:#252526;color:#cccccc;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameCursor') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'midnight'"
+          <div class="theme-card" data-theme-palette="midnight" role="button" tabindex="0" :aria-pressed="currentTheme === 'midnight'"
             @click="applyTheme('midnight')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'midnight' }">
-              <div class="theme-swatch-bar" style="background:#3d9fe0;"></div>
-              <div class="theme-swatch-body" style="background:#111827;color:#b8c8e0;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameMidnight') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'nord'"
+          <div class="theme-card" data-theme-palette="nord" role="button" tabindex="0" :aria-pressed="currentTheme === 'nord'"
             @click="applyTheme('nord')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'nord' }">
-              <div class="theme-swatch-bar" style="background:#88c0d0;"></div>
-              <div class="theme-swatch-body" style="background:#3b4252;color:#eceff4;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameNord') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'matcha'"
+          <div class="theme-card" data-theme-palette="matcha" role="button" tabindex="0" :aria-pressed="currentTheme === 'matcha'"
             @click="applyTheme('matcha')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'matcha' }">
-              <div class="theme-swatch-bar" style="background:#8a8a5c;"></div>
-              <div class="theme-swatch-body" style="background:#0d1f18;color:#ebe6dc;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameMatcha') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'warm'"
+          <div class="theme-card" data-theme-palette="warm" role="button" tabindex="0" :aria-pressed="currentTheme === 'warm'"
             @click="applyTheme('warm')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'warm' }">
-              <div class="theme-swatch-bar" style="background:#c8903c;"></div>
-              <div class="theme-swatch-body" style="background:#241d14;color:#ead8b4;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameWarm') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'light'"
+          <div class="theme-card" data-theme-palette="light" role="button" tabindex="0" :aria-pressed="currentTheme === 'light'"
             @click="applyTheme('light')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'light' }">
-              <div class="theme-swatch-bar" style="background:#0078d4;"></div>
-              <div class="theme-swatch-body" style="background:#f3f3f3;color:#1f1f1f;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameLight') }}</div>
           </div>
 
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'rose'"
+          <div class="theme-card" data-theme-palette="rose" role="button" tabindex="0" :aria-pressed="currentTheme === 'rose'"
             @click="applyTheme('rose')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'rose' }">
-              <div class="theme-swatch-bar" style="background:#d46a8a;"></div>
-              <div class="theme-swatch-body" style="background:#1a0a0f;color:#f5e6eb;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameRose') }}</div>
           </div>
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'synthwave'"
+          <div class="theme-card" data-theme-palette="synthwave" role="button" tabindex="0" :aria-pressed="currentTheme === 'synthwave'"
             @click="applyTheme('synthwave')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'synthwave' }">
-              <div class="theme-swatch-bar" style="background:linear-gradient(90deg,#f472b6 50%,#a78bfa 100%);"></div>
-              <div class="theme-swatch-body" style="background:#0f0612;color:#f0e4f8;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameSynthwave') }}</div>
           </div>
-          <div class="theme-card" role="button" tabindex="0" :aria-pressed="currentTheme === 'ink'"
+          <div class="theme-card" data-theme-palette="ink" role="button" tabindex="0" :aria-pressed="currentTheme === 'ink'"
             @click="applyTheme('ink')" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()">
             <div class="theme-swatch" aria-hidden="true" :class="{ selected: currentTheme === 'ink' }">
-              <div class="theme-swatch-bar" style="background:#c4b8a8;"></div>
-              <div class="theme-swatch-body" style="background:#0c0c0c;color:#e8e6e3;">Aa</div>
+              <div class="theme-swatch-bar"></div>
+              <div class="theme-swatch-body">Aa</div>
             </div>
             <div class="theme-name">{{ t('themeNameInk') }}</div>
           </div>
