@@ -3034,7 +3034,10 @@ const SettingsMixin = {
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         if (!data.ok) throw new Error(data.detail || data.error || this.t('toastSaveFailed'));
-        if (profileId === this.currentSessionId && !this.currentGroupId) this.messages = [];
+        if (profileId === this.currentSessionId && !this.currentGroupId) {
+          this.messages = [];
+          this.clearAgentTaskSearch?.();
+        }
         this.showToast(this.t('toastHistoryCleared'), 'success');
         if (profileId === this.memoryProfileId) {
           this.chatHistory = [];

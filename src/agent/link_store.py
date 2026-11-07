@@ -49,7 +49,7 @@ def _context_data(value):
     return value
 
 
-def _is_tool_call(payload):
+def _is_tool_call(payload, excluded_name=None):
     """Exact top-level event test for SQL EXISTS, without a SQLite JSON extension.
 
     Parsing avoids mistaking quoted/nested types for actual calls and accepts
@@ -59,7 +59,9 @@ def _is_tool_call(payload):
         event = json.loads(payload)
     except (TypeError, ValueError):
         return False
-    return isinstance(event, dict) and event.get("type") == "tool_call"
+    if not isinstance(event, dict) or event.get("type") != "tool_call":
+        return False
+    return excluded_name is None or str(event.get("tool_name", "")).removeprefix("mcp__shikigami__") != excluded_name
 
 
 def _id(value, name="id"):
@@ -152,6 +154,7 @@ class LinkStore:
         self._db.row_factory = sqlite3.Row
         try:
             self._db.create_function("link_is_tool_call", 1, _is_tool_call, deterministic=True)
+            self._db.create_function("link_is_tool_call", 2, _is_tool_call, deterministic=True)
             self._db.execute("PRAGMA foreign_keys=ON")
             self._db.execute("PRAGMA synchronous=FULL")
             with self._transaction(write=True) as db:
@@ -435,6 +438,27 @@ class LinkStore:
         with self._transaction() as db:
             return [row['run_id'] for row in db.execute(
                 'SELECT run_id FROM runs WHERE profile_id=? ORDER BY ordinal', (profile_id,))]
+
+    def task_search_records(self, profile_id, limit):
+        """Read task provenance and the terminal projection for keyword lookup."""
+        _id(profile_id, "profile_id")
+        with self._transaction() as db:
+            rows = db.execute("""
+                SELECT r.run_id, r.origin, r.state, r.created_at, r.user_message_id,
+                       e.payload AS terminal_event, o.payload AS outcome
+                FROM runs r JOIN profiles p USING (profile_id)
+                LEFT JOIN events e ON e.run_id=r.run_id AND e.seq=r.last_seq
+                LEFT JOIN outbox o ON o.run_id=r.run_id AND o.event_key='task-finished'
+                WHERE r.profile_id=? AND r.stale=0 AND r.revision=p.revision
+                    AND r.state IN ('completed','cancelled','failed')
+                    AND (r.origin='reflection' OR r.state IN ('cancelled','failed')
+                        OR r.parent_run_id IS NOT NULL
+                        OR EXISTS (SELECT 1 FROM actions a WHERE a.run_id=r.run_id)
+                        OR EXISTS (SELECT 1 FROM events t WHERE t.run_id=r.run_id
+                            AND link_is_tool_call(t.payload, 'task_search')))
+                ORDER BY r.ordinal DESC LIMIT ?
+            """, (profile_id, limit)).fetchall()
+        return [dict(row) for row in rows]
 
     def list_runs(self, profile_id, limit=30):
         _id(profile_id, "profile_id")

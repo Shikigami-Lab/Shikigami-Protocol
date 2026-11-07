@@ -52,6 +52,8 @@ class _Run:
     session: object = None
     artifacts: list = field(default_factory=list)
     memory_matches: dict = field(default_factory=dict, repr=False)
+    task_matches: dict = field(default_factory=dict, repr=False)
+    task_search_calls: set = field(default_factory=set, repr=False)
     cleanup_failed: bool = False
     before_files: dict = field(default_factory=dict)
     workspace_warning: str = ''
@@ -278,13 +280,23 @@ class AgentRuntime:
         if kind == "tool_call":
             run.used_tools = True
             try:
-                projected["result"] = {"arguments": project_arguments(json.loads(event.get("arguments") or "{}"))}
+                tool_name = projected.get("tool_name", "").removeprefix("mcp__shikigami__")
+                if tool_name == "task_search" and projected.get("call_id"):
+                    run.task_search_calls.add(projected["call_id"])
+                else:
+                    projected["result"] = {"arguments": project_arguments(json.loads(event.get("arguments") or "{}"))}
             except (ValueError, TypeError):
                 projected["summary"] = "Tool arguments could not be decoded"
         elif kind == "tool_result":
             projected["result"] = {"is_error": bool(event.get("is_error"))}
-            text = "\n".join(b.get("text", "") for b in event.get("content", []) if b.get("type") == "text")
-            projected["summary"] = safe_text(text)
+            if projected.get("call_id") in run.task_search_calls or (
+                projected.get("tool_name", "").removeprefix("mcp__shikigami__") == "task_search"
+            ):
+                projected["summary"] = ("Task search failed" if projected["result"]["is_error"]
+                                        else "Task search finished; use the workspace to review matches")
+            else:
+                text = "\n".join(b.get("text", "") for b in event.get("content", []) if b.get("type") == "text")
+                projected["summary"] = safe_text(text)
         elif kind == "approval_requested":
             run.pending_approvals.add(event["approval_id"])
             projected["result"] = {"approval_id": event["approval_id"], "reason": safe_text(event.get("reason", ""), 700)}
@@ -669,6 +681,11 @@ class AgentRuntime:
             raise ValueError('Tool is disabled for this character')
         if name == 'task_context':
             result = self.task_context(run.session, args.get('run_id', ''))
+        elif name == 'task_search':
+            from src.agent.task_search import TaskSearchArgs, search_tasks
+            value = TaskSearchArgs.model_validate(args)
+            result = await asyncio.to_thread(search_tasks, self.store, run.session, value,
+                                             include_artifacts=run.access['workspace_enabled'])
         elif name == 'workspace_describe':
             from src.agent.workspace_catalog import FileDescription
             value = FileDescription.model_validate(args)
@@ -692,6 +709,9 @@ class AgentRuntime:
         if result.get('ok') is False:
             error = result.get('error') or {}
             raise ValueError(safe_text(error.get('message', 'Tool failed; no reliable results are available')))
+        if name == 'task_search' and run.envelope.get('origin') == 'user':
+            if result['matches'] or not run.task_matches:
+                run.task_matches = result
         if name == 'memory_search' and run.envelope.get('origin') == 'user':
             for fact in result['facts']:
                 run.memory_matches.pop(fact['id'], None)

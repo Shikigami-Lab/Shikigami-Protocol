@@ -421,6 +421,34 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(public["events"][2]["approval_id"], "approval-1")
         self.assertEqual(self.runtime.store.get_run(run.id), original)
 
+    async def test_task_search_route_and_tool_return_same_profile_artifact(self):
+        store = self.runtime.store
+        for profile in ("alpha", "beta"):
+            run_id = "past-" + profile
+            store.begin_run(run_id, profile, run_id, origin="reflection")
+            store.append_event(run_id, {"type": "status", "result": {
+                "terminal_type": "completed", "artifacts": [{"path": "notes/weekend.md"}],
+            }})
+            store.finish_run(run_id, "completed")
+        response = await self.request("GET", "/runs", params={"profile_id": "alpha", "query": "weekend"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["run_id"] for row in response.json()["runs"]], ["past-alpha"])
+
+        self.config.agent.update(history_enabled=True, workspace_enabled=True)
+        run = self.prepare()
+        matches = await self.runtime.execute_tool(run.id, "task_search", {"query": "weekend"}, "1")
+        self.assertEqual([row["run_id"] for row in matches["matches"]], ["past-alpha"])
+        self.assertEqual(run.task_matches["matches"][0]["artifacts"], [{"path": "notes/weekend.md"}])
+        await self.runtime._publish(run, {"type": "tool_call", "tool_name": "mcp__shikigami__task_search",
+            "call_id": "search-1", "arguments": '{"query":"weekend"}'})
+        await self.runtime._publish(run, {"type": "tool_result", "call_id": "search-1",
+            "content": [{"type": "text", "text": "notes/weekend.md"}]})
+        saved = self.runtime.store.get_run(run.id)["events"]
+        self.assertNotIn("weekend", str(saved))
+        self.config.agent["history_enabled"] = False
+        with self.assertRaisesRegex(ValueError, "permissions changed"):
+            await self.runtime.execute_tool(run.id, "task_search", {"query": "weekend"}, "2")
+
     async def test_invalid_profile_query_is_rejected_before_session_lookup(self):
         for value in ("", ".", "..", "../alpha", "alpha/beta", "alpha\\beta", "C:alpha", "a\x00b", "a" * 257):
             with self.subTest(profile_id=value):

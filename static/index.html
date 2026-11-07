@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261105lucide1" />
+  <link rel="stylesheet" href="css/styles.css?v=20261107tasksearch" />
   <link rel="stylesheet" href="css/settings.css?v=20261107settingstext1" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107memoryreviewsearch"></script>
+  <script src="js/i18n.js?v=20261107memoryreviewtools"></script>
 </head>
 <body>
 
@@ -1009,14 +1009,29 @@
                      @artifact="openTodoArtifact"></todo-list>
       </div>
       <div v-show="agentWorkspaceTab === 'tasks'" id="agent-tasks-panel" role="tabpanel" aria-labelledby="agent-tasks-tab" tabindex="0" class="agent-workspace-tasks">
-        <div v-if="agentRunErrors[currentSessionId]" class="agent-error" role="alert">
+        <form class="agent-task-search" role="search" @submit.prevent="searchAgentTasks">
+          <input type="search" class="form-input" v-model="agentTaskQuery" maxlength="500"
+                 :placeholder="t('agentTaskSearch')" :aria-label="t('agentTaskSearch')" />
+          <button type="submit" class="s-btn s-btn-small s-btn-secondary" :disabled="agentTaskSearchBusy"
+                  :title="t('agentTaskSearch')" :aria-label="t('agentTaskSearch')">{{ t('agentTaskSearchSubmit') }}</button>
+          <button v-if="agentTaskSearch || agentTaskSearchBusy || agentTaskSearchError"
+                  type="button" class="s-btn s-btn-small s-btn-secondary" @click="clearAgentTaskSearch"
+                  :title="t('agentTaskSearchClear')" :aria-label="t('agentTaskSearchClear')"><app-icon name="x"></app-icon></button>
+        </form>
+        <p v-if="agentTaskSearchBusy" class="form-hint" role="status">{{ t('loading') }}</p>
+        <p v-else-if="agentTaskSearchError" class="agent-error" role="alert">{{ agentTaskSearchError }}</p>
+        <template v-else-if="agentTaskSearch">
+          <p v-if="!agentTaskSearch.runs.length" class="form-hint">{{ t('agentTaskSearchEmpty') }}</p>
+          <p v-if="agentTaskSearch.has_more_matches || agentTaskSearch.scan_limited" class="form-hint">{{ t('agentTaskSearchPartial') }}</p>
+        </template>
+        <div v-else-if="agentRunErrors[currentSessionId]" class="agent-error" role="alert">
           {{ t('agentRefreshFailed') }}: {{ agentRunErrors[currentSessionId] }}
           <button type="button" class="s-btn s-btn-small s-btn-secondary" :disabled="agentPollBusy" @click="refreshAgentRuns">{{ t('agentRetry') }}</button>
         </div>
         <p v-else-if="!agentRunsKnown[currentSessionId]" class="form-hint" role="status">{{ t('loading') }}</p>
         <p v-else-if="!currentAgentRuns.length" class="form-hint">{{ t('agentWorkspaceTasksEmpty') }}</p>
-        <agent-task-card v-for="run in currentAgentRuns" :key="agentRunKey(run)"
-              :run="run" :t="t" :label="agentRunLabel(run)" :state-label="agentStateLabel(run)"
+        <agent-task-card v-for="run in (agentTaskSearchBusy || agentTaskSearchError ? [] : agentTaskSearch?.runs ?? currentAgentRuns)" :key="agentRunKey(run)"
+              :run="run" :t="t" :label="run.request_excerpt || run.task_summary || agentRunLabel(run)" :state-label="agentStateLabel(run)"
               :event-label="agentEventLabel" :event-text="agentEventText" :time-label="agentRunTime(run.created_at)"
               :terminal="agentTerminal(run.state)" :artifact-path="agentArtifactPath"
               :can-continue="agentCanContinueRun(run)"
@@ -5886,12 +5901,12 @@
 </div><!-- end #app -->
 
 <!-- CRITICAL: settings.js must load before app.js (defines SettingsMixin) -->
-<script src="js/api-paths.js?v=20261107memorycompletion1"></script>
+<script src="js/api-paths.js?v=20261107tasksearch"></script>
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
-<script src="js/settings.js?v=20261107memoryreviewsearch"></script>
-<script src="js/agent-ui.js?v=20261107memorysearch"></script>
+<script src="js/settings.js?v=20261107memoryreviewtools"></script>
+<script src="js/agent-ui.js?v=20261107memoryreviewtools"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
-<script src="js/app.js?v=20261107memoryprompts2"></script>
+<script src="js/app.js?v=20261107tasksearch"></script>
 </body>
 </html>

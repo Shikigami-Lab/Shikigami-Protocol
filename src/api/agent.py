@@ -1,7 +1,8 @@
 """UI controls for host-owned agent tasks; no model-facing control endpoint."""
+import asyncio
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.settings import normalize_settings, save_settings
@@ -116,7 +117,7 @@ def _public_run(runtime, row):
 
 
 @router.get("/runs")
-async def runs(request: Request, profile_id: str):
+async def runs(request: Request, profile_id: str, query: str = Query(default="", max_length=500)):
     runtime = _runtime(request)
     if (not profile_id or profile_id in ('.', '..') or any(c in profile_id for c in ('/', '\\', ':'))
             or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in profile_id) or len(profile_id) > 256):
@@ -124,7 +125,28 @@ async def runs(request: Request, profile_id: str):
     session = request.app.state.session_manager.get_by_id(profile_id)
     if session is None:
         raise HTTPException(404, "Character not found")
-    return {"runs": [_public_run(runtime, row) for row in runtime.store.list_runs(session.profile_id) if not row['stale']]}
+    if query.strip():
+        from src.agent.task_search import TaskSearchArgs, search_tasks
+        args = TaskSearchArgs(query=query, limit=10)
+        def search():
+            revision = runtime.store.revision(session.profile_id)
+            result = search_tasks(runtime.store, session, args, include_artifacts=True)
+            matches = []
+            for match in result['matches']:
+                row = runtime.store.get_run(match['run_id'], session.profile_id)
+                if row and not row['stale']:
+                    matches.append({**_public_run(runtime, row), 'request_excerpt': match['request_excerpt'],
+                                    'task_summary': match['summary']})
+            current_revision = runtime.store.revision(session.profile_id)
+            if revision != current_revision:
+                return {'runs': [], 'revision': current_revision}
+            return {'runs': matches, 'scan_limited': result['scan_limited'],
+                    'has_more_matches': result['has_more_matches'], 'revision': revision}
+        return await asyncio.to_thread(search)
+    rows = runtime.store.list_runs(session.profile_id)
+    revision = runtime.store.revision(session.profile_id)
+    return {"runs": [_public_run(runtime, row) for row in rows if not row['stale'] and row['revision'] == revision],
+            "revision": revision}
 
 
 class RunControl(BaseModel):

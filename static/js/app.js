@@ -3053,6 +3053,7 @@ const App = {
       const activeChannelId = this.currentGroupId ? `group:${this.currentGroupId}` : this.currentSessionId;
       if (!channelId || channelId === activeChannelId) {
         this.messages = this.messages.filter(m => m.id !== messageId);
+        if (!this.currentGroupId) this.clearAgentTaskSearch?.();
       }
 
       if (Array.isArray(this.chatHistory)

@@ -29,6 +29,50 @@ class TaskHistoryTests(unittest.TestCase):
         self.addCleanup(store.close)
         return store
 
+    def test_search_tasks_by_original_request_and_artifact_within_current_profile(self):
+        from src.agent.task_search import TaskSearchArgs, search_tasks
+
+        links = self.links()
+        history = self.chat()
+        session = SimpleNamespace(profile_id="alpha", id="alpha", storage_root=self.root, _store=history)
+
+        def finish(run_id, profile_id="alpha", *, origin="user", request="", artifact="", tool="write", summary=""):
+            links.begin_run(run_id, profile_id, run_id, origin=origin)
+            if request:
+                mid = history.append("user", request, agent_run_id=run_id)
+                links.bind_messages(run_id, user_message_id=mid)
+            links.append_event(run_id, {"type": "tool_call", "tool_name": tool})
+            links.append_event(run_id, {"type": "status", "result": {
+                "terminal_type": "completed",
+                "artifacts": [{"path": artifact, "size": 123}] if artifact else [],
+            }})
+            links.finish_run(run_id, "completed", publish_result=bool(summary), outcome={"summary": summary})
+
+        finish("old", request="Compare the riverside trail", artifact="sandbox/route.md")
+        finish("long", request="x" * 6000 + " keyword at the end")
+        finish("lookup-only", request="Search the riverside trail task", tool="mcp__shikigami__task_search")
+        for i in range(35):
+            finish("unrelated-" + str(i))
+        finish("reflection", origin="reflection", artifact="sandbox/riverside_notes.md",
+               summary="Saved private-sample.md in the workspace")
+        finish("foreign", "beta", artifact="sandbox/riverside_notes.md")
+
+        def find(query, include_artifacts=True):
+            return search_tasks(links, session, TaskSearchArgs(query=query),
+                                include_artifacts=include_artifacts)["matches"]
+
+        self.assertEqual([row["run_id"] for row in find("riverside")], ["reflection", "old"])
+        self.assertEqual(find("route.md")[0]["artifacts"][0]["path"], "sandbox/route.md")
+        self.assertEqual([row["run_id"] for row in find("riverside", False)], ["old"])
+        self.assertEqual(find("route.md", False), [])
+        self.assertEqual(find("private-sample.md", False), [])
+        self.assertEqual(find("private-sample.md")[0]["run_id"], "reflection")
+        self.assertIn("keyword at the end", find("keyword")[0]["request_excerpt"])
+        history.delete_by_id(find("riverside")[-1]["user_message_id"])
+        self.assertEqual(find("route.md"), [])
+        links.invalidate("alpha")
+        self.assertEqual(find("riverside"), [])
+
     def test_old_message_schema_migrates_and_partial_survives_all_reads(self):
         with closing(sqlite3.connect(self.root / "chat_records.db")) as db, db:
             db.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY AUTOINCREMENT, "

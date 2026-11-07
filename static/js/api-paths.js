@@ -35,7 +35,7 @@ window.API_PATHS = {
   agentView: () => '/api/agent/view',
   agentStatus: () => '/api/agent/status',
   agentCheck: () => '/api/agent/check',
-  agentRuns: (profileId) => `/api/agent/runs?profile_id=${encodeURIComponent(profileId)}`,
+  agentRuns: (profileId, query = "") => `/api/agent/runs?profile_id=${encodeURIComponent(profileId)}${query ? "&query=" + encodeURIComponent(query) : ""}`,
   agentRunCancel: (id) => `/api/agent/runs/${encodeURIComponent(id)}/cancel`,
   agentRunApproval: (id) => `/api/agent/runs/${encodeURIComponent(id)}/approval`,
 

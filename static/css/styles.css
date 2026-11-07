@@ -53,6 +53,8 @@
 .agent-task-count { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .agent-workspace-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom)); }
 .agent-workspace-details, .agent-workspace-tasks { min-width: 0; overflow-wrap: anywhere; }
+.agent-task-search { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.agent-task-search .form-input { flex: 1; min-width: 0; }
 .agent-workspace-tasks .agent-task-card { width: 100%; border-bottom: 1px solid var(--border); padding: var(--space-1) 0; }
 .agent-workspace-tasks .agent-task-summary { width: 100%; }
 .agent-workspace-tasks .agent-task-time { margin-left: auto; }

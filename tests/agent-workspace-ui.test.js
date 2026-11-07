@@ -84,6 +84,23 @@ test('metadata validation and workspace lock prevent writes; preflight rechecks 
   assert.equal(writes, 0);
 });
 
+test('task search uses the scoped endpoint and discards results after switching characters', async () => {
+  const { model } = harness();
+  const pending = deferred();
+  model.agentTaskQuery = 'weekend plan';
+  model.agentFetch = async url => {
+    assert.equal(url, '/api/agent/runs?profile_id=p1&query=weekend%20plan');
+    return pending.promise;
+  };
+  const search = model.searchAgentTasks();
+  model.currentSessionId = 'p2';
+  model.clearAgentTaskSearch();
+  pending.resolve({ runs: [{ run_id: 'old' }] });
+  await search;
+  assert.equal(model.agentTaskSearch, null);
+  assert.equal(model.agentTaskSearchBusy, false);
+});
+
 test('drawer keyboard wraps three tabs and supports Home/End while ignoring other keys', () => {
   const { model } = harness(); model.agentWorkspaceOpen = true;
   model.refreshTodos = () => {};

@@ -63,7 +63,9 @@
       agentWorkspaceError: '', agentWorkspaceVersionError: '', agentWorkspacePreviewHint: '',
       agentWorkspaceLoading: false, agentWorkspacePreviewBusy: false, agentWorkspaceMutationBusy: false,
       agentWorkspaceEpoch: 0, agentWorkspaceListSequence: 0, agentWorkspaceFileSequence: 0,
-      agentRunsKnown: {}, agentCancelRequests: {} }; },
+      agentRunsKnown: {}, agentCancelRequests: {},
+      agentTaskQuery: '', agentTaskSearch: null, agentTaskSearchBusy: false,
+      agentTaskSearchError: '', agentTaskSearchSequence: 0, agentTaskRevision: null }; },
     computed: {
       agentActiveTaskCount() { return this.currentAgentRuns.filter(run => !terminal(run.state)).length; },
       agentMessageTasks() {
@@ -280,6 +282,8 @@
       },
       agentViewChanged() {
         this.agentViewVersion++;
+        this.clearAgentTaskSearch();
+        this.agentTaskRevision = null;
         this.agentContinueRunId = '';
         this.closeAgentWorkspace({ restoreFocus: false });
         // A detached request may finish, but cannot alter the newly selected chat.
@@ -450,6 +454,10 @@
             const before = this.agentRuns;
             try {
               const data = await this.agentFetch(API_PATHS.agentRuns(profile));
+              if (profile === this.currentSessionId && !this.currentGroupId && Number.isInteger(data.revision)) {
+                if (this.agentTaskSearch?.revision < data.revision) this.clearAgentTaskSearch();
+                this.agentTaskRevision = Math.max(this.agentTaskRevision ?? 0, data.revision);
+              }
               if (!Array.isArray(data.runs)) throw new Error('Invalid run list response');
               const listedKeys = new Set();
               for (const snapshot of data.runs) {
@@ -552,6 +560,33 @@
         if (!message.agent_run_id || !terminal(message.generation_status) || message.session_id !== this.currentSessionId) return;
         this.selectAgentContinuation({ id: message.agent_run_id, profile_id: message.session_id,
           session_id: message.session_id, state: message.generation_status });
+      },
+      clearAgentTaskSearch() {
+        this.agentTaskSearchSequence++;
+        this.agentTaskQuery = '';
+        this.agentTaskSearch = null;
+        this.agentTaskSearchBusy = false;
+        this.agentTaskSearchError = '';
+      },
+      async searchAgentTasks() {
+        const profile = this.currentSessionId;
+        const query = this.agentTaskQuery.trim();
+        if (!query) { this.clearAgentTaskSearch(); return; }
+        if (!profile || this.currentGroupId) return;
+        const sequence = ++this.agentTaskSearchSequence;
+        const current = () => sequence === this.agentTaskSearchSequence &&
+          profile === this.currentSessionId && !this.currentGroupId;
+        this.agentTaskSearch = null;
+        this.agentTaskSearchError = '';
+        this.agentTaskSearchBusy = true;
+        try {
+          const result = await this.agentFetch(API_PATHS.agentRuns(profile, query));
+          if (current() && !(result.revision < this.agentTaskRevision)) this.agentTaskSearch = result;
+        } catch (error) {
+          if (current()) this.agentTaskSearchError = error.message;
+        } finally {
+          if (current()) this.agentTaskSearchBusy = false;
+        }
       },
       agentCanContinueRun(run) {
         const stored = this.agentRuns[keyOf(run)];
