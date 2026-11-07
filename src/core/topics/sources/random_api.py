@@ -172,6 +172,8 @@ _BUILTIN_POOLS = {
 def _builtin_pool(ctx: TopicSourceContext) -> list[str]:
     config = (ctx.config.get("sources") or {}).get("random_api") or {}
     pool_name = (config.get("builtin_pool") or "icebreaker").strip()
+    if pool_name == "all":
+        return [topic for pool in _BUILTIN_POOLS.values() for topic in pool]
     return _BUILTIN_POOLS.get(pool_name) or _BUILTIN_POOLS["icebreaker"]
 
 

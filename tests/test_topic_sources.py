@@ -8,6 +8,7 @@ from unittest.mock import patch
 from src.commands.topic_cmds import handle_topic
 from src.config.app_config import AppConfig
 from src.core.topics import TopicSourceContext, all_source_ids, get_enabled_sources, get_source
+from src.core.topics.sources.random_api import _BUILTIN_POOLS
 
 
 class TopicSourceTests(unittest.IsolatedAsyncioTestCase):
@@ -52,3 +53,20 @@ class TopicSourceTests(unittest.IsolatedAsyncioTestCase):
             next_candidate, = source.get_candidates(ctx)
             self.assertNotEqual(material.material, source.resolve(next_candidate.item_id, ctx).material)
             self.assertEqual(old_entry, json.loads(cache.read_text(encoding="utf-8"))["items"]["old"])
+
+    def test_all_random_topics_draw_from_every_local_pool(self):
+        topics = {text for pool in _BUILTIN_POOLS.values() for text in pool}
+        with tempfile.TemporaryDirectory() as root, patch("src.core.topics.sources.random_api.random.choice") as choose:
+            ctx = TopicSourceContext("example", root, config={"sources": {"random_api": {"builtin_pool": "all"}}})
+            source = get_source("random_api")
+            trivia = _BUILTIN_POOLS["trivia"][0]
+            choose.return_value = trivia
+            candidate, = source.get_candidates(ctx)
+            self.assertEqual(topics, set(choose.call_args.args[0]))
+            self.assertEqual(trivia, source.resolve(candidate.item_id, ctx).material)
+
+            source.mark_used(candidate.item_id, ctx)
+            choose.return_value = _BUILTIN_POOLS["would_you_rather"][0]
+            candidate, = source.get_candidates(ctx)
+            self.assertEqual(topics - {trivia}, set(choose.call_args.args[0]))
+            self.assertEqual(choose.return_value, source.resolve(candidate.item_id, ctx).material)

@@ -16,7 +16,7 @@
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261108topicResearch"></script>
+  <script src="js/i18n.js?v=20261108allTopics"></script>
 </head>
 <body>
 
@@ -4327,6 +4327,7 @@
               <div class="form-label">{{ t('lblRandomApiPool') }}</div>
               <select class="form-select" style="font-size:12px;padding:3px 6px;"
                       v-model="reflectionForm.topic_discovery.sources.random_api.builtin_pool">
+                <option value="all">{{ t('optPoolAll') }}</option>
                 <option value="icebreaker">{{ t('optPoolIcebreaker') }}</option>
                 <option value="trivia">{{ t('optPoolTrivia') }}</option>
                 <option value="would_you_rather">{{ t('optPoolWyr') }}</option>
