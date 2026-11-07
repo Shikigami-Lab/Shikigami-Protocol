@@ -2878,20 +2878,6 @@ textarea.form-input {
 .toolbar-panel.tp-commands { width: 320px; }
 .toolbar-panel.tp-config   { width: 200px; }
 
-@media (max-width: 768px) {
-  .toolbar-panel.tp-todos {
-    position: fixed;
-    left: max(12px, env(safe-area-inset-left));
-    right: max(12px, env(safe-area-inset-right));
-    bottom: max(12px, env(safe-area-inset-bottom));
-    width: auto;
-    max-height: calc(100vh - 24px);
-    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-}
-
 .tp-header {
   display: flex;
   justify-content: space-between;
@@ -2996,7 +2982,6 @@ textarea.form-input {
 .tp-del:hover { opacity: 1; color: #f66; }
 
 /* Timer-specific */
-.tp-timer-item { gap: 8px; }
 .tp-timer-details { flex: 1; min-width: 0; }
 .tp-timer-details .tp-text { display: block; }
 .tp-timer-details small { color: var(--text-secondary); }
@@ -3013,7 +2998,7 @@ textarea.form-input {
 /* Command list */
 .tp-cmd-list {
   padding: 4px 0;
-  /* Cap the height and scroll: with more commands the panel would grow off the top of the screen (other tp panels use .tp-list at 220px for the same reason) */
+  /* Cap the height and scroll: with more commands the panel would grow off the top of the screen */
   max-height: min(58vh, 480px);
   overflow-y: auto;
 }

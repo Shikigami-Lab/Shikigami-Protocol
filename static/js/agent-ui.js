@@ -8,7 +8,7 @@
     return Object.prototype.hasOwnProperty.call(actions, nativeName) ? actions[nativeName] : '';
   };
   const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'memory_enabled', 'todo_enabled'];
-  const workspaceTabs = ['files', 'plans', 'tasks'];
+  const workspaceTabs = ['files', 'plans', 'reminders', 'tasks'];
   const workspaceWidthKey = 'agentWorkspaceWidth';
   const minWorkspaceWidth = 320;
   const maxWorkspaceWidth = 720;
@@ -120,6 +120,9 @@
       agentWorkspaceLocked() {
         return this.agentWorkspaceMutationBusy || this.agentOwnTaskActive || !this.agentRunsKnown[this.currentSessionId] ||
           !!this.agentRunErrors[this.currentSessionId];
+      },
+      agentRemindersVisible() {
+        return this.agentWorkspaceOpen && this.agentWorkspaceTab === 'reminders' && !!this.currentSessionId && !this.currentGroupId;
       },
       currentAgentRuns() {
         // Presentation only: retain every run in agentRuns for stop ownership/status.
@@ -348,7 +351,7 @@
         if (context && (event.session_id !== context.sessionId || event.profile_id !== context.sessionId)) return;
         const updatedRuns = reduceEvent(this.agentRuns, event);
         const key = keyOf(event);
-        if (updatedRuns !== this.agentRuns && this.showTimerPanel && !this.currentGroupId &&
+        if (updatedRuns !== this.agentRuns && this.agentRemindersVisible &&
             event.session_id === this.currentSessionId && event.profile_id === this.currentSessionId &&
             event.type === 'tool_result' && event.is_error === false) {
           const call = updatedRuns[key]?.events.find(item => item.type === 'tool_call' && item.call_id === event.call_id);
@@ -706,7 +709,9 @@
         this.agentWorkspaceOpen = true;
         this.refreshAgentRuns();
         this.$nextTick(() => this.$refs?.agentWorkspaceClose?.focus?.());
-        return this.agentWorkspaceTab === 'plans' ? this.refreshTodos() : this.refreshAgentWorkspace();
+        if (this.agentWorkspaceTab === 'plans') return this.refreshTodos();
+        if (this.agentWorkspaceTab === 'reminders') return this.refreshTimers();
+        return this.refreshAgentWorkspace();
       },
       selectAgentWorkspaceTab(tab) {
         if (!workspaceTabs.includes(tab) || this.currentGroupId || !this.currentSessionId) return;
@@ -715,6 +720,7 @@
         if (tab !== 'files') this.agentArtifactOpenSequence++;
         this.agentWorkspaceTab = tab;
         if (tab === 'plans') return this.refreshTodos();
+        if (tab === 'reminders') return this.refreshTimers();
         if (tab === 'files') return this.refreshAgentWorkspace();
       },
       navigateAgentWorkspaceTabs(event) {
@@ -926,10 +932,10 @@
         if (this.agentWorkspaceMutationBusy || !this.agentWorkspaceIsCurrent(context)) return;
         const path = this.agentWorkspaceSelected?.path;
         const fileSequence = this.agentWorkspaceFileSequence;
-        const roleContext = kind === 'metadata' ? this.todoViewContext() : null;
+        const roleContext = kind === 'metadata' ? this.workspaceProfileContext() : null;
         const selectionIsCurrent = () => this.agentWorkspaceSelected?.path === path && this.agentWorkspaceFileSequence === fileSequence;
         const current = () => this.agentWorkspaceIsCurrent(context) && (kind === 'upload' || selectionIsCurrent()) &&
-          (kind !== 'metadata' || this.todoViewIsCurrent(roleContext));
+          (kind !== 'metadata' || this.workspaceProfileIsCurrent(roleContext));
         this.agentWorkspaceMutationBusy = true;
         this.agentWorkspaceError = '';
         try {
@@ -977,8 +983,11 @@
       },
       restoreAgentWorkspaceVersion(version) { return this.mutateAgentWorkspace('restore', version); },
       openAgentTimers() {
-        if (this.agentWorkspaceOpen && this.agentDrawerNarrow) this.closeAgentWorkspace({ restoreFocus: false });
-        if (!this.showTimerPanel) this.toggleTimerPanel();
+        if (!this.currentSessionId || this.currentGroupId) return;
+        if (!this.agentWorkspaceOpen) return this.openAgentWorkspace('reminders');
+        const loading = this.selectAgentWorkspaceTab('reminders');
+        this.$nextTick(() => this.$refs?.agentWorkspaceRemindersTab?.focus?.());
+        return loading;
       },
     },
   };

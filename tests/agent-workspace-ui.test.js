@@ -84,18 +84,105 @@ test('metadata validation and workspace lock prevent writes; preflight rechecks 
   assert.equal(writes, 0);
 });
 
-test('opening the owner view reports a missed reminder once even if refresh and SSE both see it', async () => {
-  const { model, sandbox } = harness();
-  const toasts = [];
+test('profile catchup and SSE report due reminders once while the drawer is closed', async () => {
+  const { model, sandbox, app } = harness();
+  const toasts = [], sources = [];
+  let fetches = 0;
+  model.refreshTimers = app.methods.refreshTimers.bind(model);
   model.showToast = (...args) => toasts.push(args);
-  sandbox.fetch = async () => ({ ok: true, json: async () => ({ timers: [
-    { id: 'rem-1', label: 'materials', kind: 'reminder', status: 'due', session_id: 'p1' },
-    { id: 'rem-2', label: 'other', kind: 'reminder', status: 'due', session_id: 'p2' },
+  sandbox.EventSource = class {
+    constructor() { sources.push(this); }
+  };
+  sandbox.fetch = async () => {
+    fetches++;
+    return { ok: true, json: async () => ({ timers: [
+      { id: 'rem-1', label: 'materials', kind: 'reminder', status: 'due', session_id: 'p1' },
+      { id: 'rem-2', label: 'other', kind: 'reminder', status: 'due', session_id: 'p2' },
+    ] }) };
+  };
+  model.agentViewChanged();
+  await new Promise(resolve => setImmediate(resolve));
+  model.subscribeEvents('p1');
+  const emit = (id, label) => sources[0].onmessage({
+    data: JSON.stringify({ type: 'timer_expired', kind: 'reminder', timer_id: id, label }),
+  });
+  emit('rem-1', 'materials');
+  emit('rem-3', 'new reminder');
+  assert.equal(model.agentWorkspaceOpen, false);
+  assert.equal(fetches, 1);
+  assert.deepEqual(toasts, [['Reminder due: materials', 'timer'], ['Reminder due: new reminder', 'timer']]);
+  await model.openAgentWorkspace('reminders');
+  emit('rem-3', 'new reminder');
+  assert.equal(fetches, 3);
+  assert.equal(toasts.length, 2);
+});
+
+test('countdown display ticks only while Reminders is selected and cleans up on close', async () => {
+  const { model, sandbox, app } = harness(undefined, { watch: true });
+  const intervals = new Map();
+  let nextId = 0;
+  sandbox.setInterval = (tick, delay) => {
+    assert.equal(delay, 1000);
+    intervals.set(++nextId, tick);
+    return nextId;
+  };
+  sandbox.clearInterval = id => intervals.delete(id);
+  await model.openAgentWorkspace('reminders');
+  assert.equal(intervals.size, 1);
+  model.timerList = [{ id: 'countdown', remaining: 60, end_timestamp: Date.now() / 1000 + 10 }];
+  [...intervals.values()][0]();
+  assert.ok(model.timerList[0].remaining <= 10);
+  await model.selectAgentWorkspaceTab('reminders');
+  assert.equal(intervals.size, 1);
+  await model.selectAgentWorkspaceTab('tasks');
+  assert.equal(intervals.size, 0);
+  await model.selectAgentWorkspaceTab('reminders');
+  assert.equal(intervals.size, 1);
+  model.closeAgentWorkspace();
+  assert.equal(intervals.size, 0);
+  await model.openAgentWorkspace('reminders');
+  app.unmounted.call(model);
+  assert.equal(intervals.size, 0);
+});
+
+test('same-tick profile round trip invalidates an open Reminders load and countdown submission', async () => {
+  const list = deferred(), creation = deferred(), calls = [];
+  const { model, app } = harness((url, options) => {
+    calls.push([url, options]);
+    return options ? creation.promise : list.promise;
+  }, { watch: true });
+  model.refreshTimers = app.methods.refreshTimers.bind(model);
+  const toasts = [];
+  model.showToast = text => toasts.push(text);
+  const opening = model.openAgentWorkspace('reminders');
+  model.newTimerLabel = 'Original draft';
+  const creating = model.createTimer();
+  assert.deepEqual(JSON.parse(calls[1][1].body), { seconds: 60, label: 'Original draft', session_id: 'p1' });
+  model.currentSessionId = 'p2'; model.currentSessionId = 'p1';
+  model.newTimerLabel = 'New draft';
+  creation.resolve({ ok: true });
+  list.resolve({ ok: true, json: async () => ({ timers: [
+    { id: 'stale', kind: 'reminder', status: 'due', session_id: 'p1', label: 'Stale' },
   ] }) });
-  await model.refreshTimers();
-  model.notifyDatedReminder('rem-1', 'materials');
-  await model.refreshTimers();
-  assert.deepEqual(toasts, [['Reminder due: materials', 'timer']]);
+  await Promise.all([opening, creating]);
+  assert.equal(calls.length, 2);
+  assert.equal(model.newTimerLabel, 'New draft');
+  assert.equal(model.timerList.length, 0);
+  assert.deepEqual(toasts, []);
+});
+
+test('Reminders holds the countdown form, reminder dates and scoped actions in drawer order', () => {
+  const { model } = harness();
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  assert.match(html, /id="agent-plans-tab"[\s\S]*id="agent-reminders-tab"[\s\S]*id="agent-tasks-tab"/);
+  const panel = html.slice(html.indexOf('id="agent-reminders-panel"'), html.indexOf('id="agent-tasks-panel"'));
+  assert.match(panel, /@submit.prevent="createTimer"/);
+  assert.match(panel, /v-for="timer in timerList"/);
+  assert.match(panel, /fmtReminderTime\(timer.end_timestamp\)/);
+  assert.match(panel, /timerReminderDismiss[\s\S]*@click="cancelTimer\(timer.id\)"/);
+  assert.equal(model.t('agentWorkspaceRemindersTab'), 'Reminders');
+  model.locale = 'zh';
+  assert.equal(model.t('agentWorkspaceRemindersTab'), '提醒');
 });
 
 test('task search uses the scoped endpoint and discards results after switching characters', async () => {
@@ -115,20 +202,21 @@ test('task search uses the scoped endpoint and discards results after switching 
   assert.equal(model.agentTaskSearchBusy, false);
 });
 
-test('drawer keyboard wraps three tabs and supports Home/End while ignoring other keys', () => {
+test('drawer keyboard wraps four tabs and supports Home/End while ignoring other keys', () => {
   const { model } = harness(); model.agentWorkspaceOpen = true;
   model.refreshTodos = () => {};
   const focused = [], prevented = [];
-  const buttons = ['files', 'plans', 'tasks'].map(id => ({ focus() { focused.push(id); } }));
+  const buttons = ['files', 'plans', 'reminders', 'tasks'].map(id => ({ focus() { focused.push(id); } }));
   const press = key => model.navigateAgentWorkspaceTabs({ key, preventDefault() { prevented.push(key); }, currentTarget: { querySelectorAll: () => buttons } });
   press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'plans');
+  press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'reminders');
   press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'tasks');
   press('ArrowRight'); assert.equal(model.agentWorkspaceTab, 'files');
   press('ArrowLeft'); assert.equal(model.agentWorkspaceTab, 'tasks');
   press('Home'); assert.equal(model.agentWorkspaceTab, 'files');
   press('End'); assert.equal(model.agentWorkspaceTab, 'tasks');
-  press('Escape'); assert.equal(prevented.length, 6);
-  assert.deepEqual(focused, ['plans', 'tasks', 'files', 'tasks', 'files', 'tasks']);
+  press('Escape'); assert.equal(prevented.length, 7);
+  assert.deepEqual(focused, ['plans', 'reminders', 'tasks', 'files', 'tasks', 'files', 'tasks']);
 });
 
 test('Files tab loads inventory after opening Plans first', async () => {
@@ -193,7 +281,7 @@ test('drawer retains focus wrap, Escape close and opener restoration with Plans 
   assert.match(html, /@keydown\.esc\.stop\.prevent="closeAgentWorkspace"/);
   assert.match(html, /@keydown\.tab="trapAgentWorkspaceFocus"/);
   assert.match(html, /role="tablist"[^>]*@keydown="navigateAgentWorkspaceTabs"/);
-  for (const tab of ['files', 'plans', 'tasks']) {
+  for (const tab of ['files', 'plans', 'reminders', 'tasks']) {
     assert.match(html, new RegExp('id="agent-' + tab + '-tab"[^>]*role="tab"[^>]*:aria-selected="agentWorkspaceTab === \'' + tab + '\''));
     assert.match(html, new RegExp('id="agent-' + tab + '-panel" role="tabpanel" aria-labelledby="agent-' + tab + '-tab"'));
   }
@@ -287,13 +375,31 @@ test('a later artifact request wins even when the first listing completes last',
   assert.deepEqual(selected, ['b.txt']);
 });
 
-test('mobile drawer closes before opening timers or returning a background task to chat', () => {
+test('task timer shortcut opens Reminders and moves focus when switching inside the narrow drawer', async () => {
+  const { model, sandbox } = harness();
+  model.agentDrawerNarrow = true;
+  let focused = 0, refreshes = 0;
+  const opener = { isConnected: true, focus() { focused++; } };
+  sandbox.document.activeElement = opener;
+  model.refreshTimers = async () => { refreshes++; };
+  await model.openAgentTimers();
+  assert.equal(model.agentWorkspaceOpen, true);
+  assert.equal(model.agentWorkspaceTab, 'reminders');
+  assert.equal(refreshes, 1);
+  await model.selectAgentWorkspaceTab('tasks');
+  model.$refs = { agentWorkspaceRemindersTab: { focus() { focused++; } } };
+  await model.openAgentTimers();
+  assert.equal(model.agentWorkspaceOpen, true);
+  assert.equal(model.agentWorkspaceTab, 'reminders');
+  assert.equal(focused, 1);
+  assert.equal(refreshes, 2);
+  model.closeAgentWorkspace();
+  assert.equal(focused, 2, 'the original chat opener regains focus');
+});
+
+test('mobile drawer closes when returning a background task to chat', () => {
   const { model } = harness();
-  model.agentDrawerNarrow = true; model.agentWorkspaceOpen = true;
-  model.toggleTimerPanel = () => { model.showTimerPanel = true; };
-  model.openAgentTimers();
-  assert.equal(model.agentWorkspaceOpen, false);
-  assert.equal(model.showTimerPanel, true);
+  model.agentDrawerNarrow = true;
   const context = { sessionId: 'p1', requestId: 'client', viewVersion: 0 };
   model.agentChatContext = context; model.isStreaming = true;
   model.receiveAgentEvent(event(1, 'started'), context);
@@ -319,7 +425,7 @@ test('terminal host errors survive streamed events and later polling', async () 
   assert.equal(model.agentRuns[key].error, failure.error);
 });
 
-function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }), { reactive = false } = {}) {
+function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }), { reactive = false, watch = false } = {}) {
   let app;
   const sandbox = { console, AbortController, DOMException, TextDecoder, Uint8Array, URL, Blob, FormData,
     crypto: require('node:crypto').webcrypto, fetch: fetchImpl,
@@ -335,12 +441,12 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
   for (const file of ['api-paths.js', 'i18n.js', 'agent-ui.js', 'settings.js', 'compose-assist.js', 'app.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/js', file), 'utf8'), sandbox);
   }
-  const rawModel = Object.assign({}, ...app.mixins.map(m => m.data()), {
+  const rawModel = Object.assign({}, ...app.mixins.map(m => m.data()), watch ? app.data() : {}, {
     currentSessionId: 'p1', currentGroupId: null, sessions: [{ id: 'p1', display_name: 'One' }],
     inputText: 'hello', messages: [], streamingText: '', isStreaming: false, locale: 'en',
     ttsEnabled: true, spoken: [], pendingScreenshot: null,
   });
-  const model = reactive ? realVue.reactive(rawModel) : rawModel;
+  const model = reactive || watch ? realVue.reactive(rawModel) : rawModel;
   for (const methods of [...app.mixins.map(m => m.methods), app.methods]) {
     for (const [name, method] of Object.entries(methods)) model[name] = method.bind(model);
   }
@@ -353,6 +459,17 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
   model.refreshAgentRuns = async () => {};
   model.refreshTimers = async () => {};
   model.showToast = () => {};
+  if (watch) {
+    for (const source of [...app.mixins, app]) {
+      for (const [name, getter] of Object.entries(source.computed || {})) {
+        if (!(name in model)) Object.defineProperty(model, name, { get: () => getter.call(model) });
+      }
+    }
+    for (const [name, config] of Object.entries(app.watch)) {
+      const handler = typeof config === 'function' ? config : config.handler;
+      realVue.watch(() => model[name], handler.bind(model), typeof config === 'function' ? {} : config);
+    }
+  }
   return { model, sandbox, app };
 }
 const streamResponse = frames => {

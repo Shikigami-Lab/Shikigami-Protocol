@@ -10,13 +10,13 @@
   <!-- Restore theme before Vue mounts (prevents flash); migrate legacy id -->
   <script>(function(){var t=localStorage.getItem('theme');if(t===null){t='light';localStorage.setItem('theme',t);}if(t==='velvet_legacy'){t='velvet';localStorage.setItem('theme',t);}document.documentElement.setAttribute('data-theme',t);})();</script>
 
-  <link rel="stylesheet" href="css/styles.css?v=20261107proactivebadge" />
-  <link rel="stylesheet" href="css/settings.css?v=20261107reminder1" />
+  <link rel="stylesheet" href="css/styles.css?v=20261107workspaceProactive" />
+  <link rel="stylesheet" href="css/settings.css?v=20261107workspaceProactive" />
 
   <!-- P3: local libs (offline-capable, required for Electron) -->
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/marked.min.js"></script>
-  <script src="js/i18n.js?v=20261107proactivewithschedule"></script>
+  <script src="js/i18n.js?v=20261107workspaceProactive"></script>
 </head>
 <body>
 
@@ -723,58 +723,6 @@
         <input type="file" accept="image/*" style="display:none" ref="uploadImageInput" @change="onUploadImage" />
       </label>
 
-      <!-- 待办事项 button + panel（群聊下隐藏） -->
-      <div v-if="toolbarConfig.todos.enabled && !currentGroupId" class="toolbar-panel-wrap">
-        <button class="toolbar-btn" :class="{ on: showTodosPanel }"
-                @click="toggleTodosPanel" :title="t('todosTitle')"><app-icon name="list-todo"></app-icon></button>
-        <div class="toolbar-panel tp-todos" v-show="showTodosPanel">
-          <div class="tp-header">
-            <span>{{ t('todosPanelTitle') }}</span>
-            <button class="tp-close" :title="t('statusPanelClose')" @click="showTodosPanel = false"><app-icon name="x" :size="14"></app-icon></button>
-          </div>
-          <todo-list :t="t" :owner="todoOwner" :todos="visibleTodos" v-model:draft="newTodoText"
-                     :artifact-path="todoArtifactPath" @update:owner="selectTodoOwner" @add="addTodo"
-                     @toggle="toggleTodo" @delete="deleteTodo" @clear="clearDoneTodos"
-                     @artifact="openTodoArtifact"></todo-list>
-        </div>
-      </div>
-
-      <!-- 计时器 button + panel（群聊下隐藏） -->
-      <div v-if="(toolbarConfig.timer.enabled || showTimerPanel) && !currentGroupId" class="toolbar-panel-wrap">
-        <button class="toolbar-btn" :class="{ on: showTimerPanel }"
-                @click="toggleTimerPanel" :title="t('timerTitle')"><app-icon name="timer"></app-icon></button>
-        <div class="toolbar-panel" v-show="showTimerPanel">
-          <div class="tp-header">
-            <span>{{ t('timerPanelTitle') }}</span>
-            <button class="tp-close" :title="t('statusPanelClose')" @click="showTimerPanel = false"><app-icon name="x" :size="14"></app-icon></button>
-          </div>
-          <div class="tp-add-row">
-            <input class="tp-input tp-timer-label" v-model="newTimerLabel" :placeholder="t('timerLabelPlaceholder')" />
-            <input class="tp-input tp-timer-secs" v-model.number="newTimerSeconds"
-                   type="number" min="1" :placeholder="t('timerSecsPlaceholder')" />
-            <button class="tp-add-btn" :title="t('timerAdd')" @click="createTimer"><app-icon name="plus" :size="14"></app-icon></button>
-          </div>
-          <div class="tp-list">
-            <div v-if="timerList.length === 0" class="tp-empty">{{ t('timerEmpty') }}</div>
-            <div v-for="timer in timerList" :key="timer.id" class="tp-item tp-timer-item">
-              <template v-if="timer.kind === 'reminder'">
-                <span class="tp-timer-remain" :class="{ expired: timer.status !== 'scheduled' }">{{ t('timerReminder_' + timer.status) }}</span>
-                <div class="tp-timer-details">
-                  <span class="tp-text" :title="timer.label">{{ timer.label }}</span>
-                  <small>{{ fmtReminderTime(timer.end_timestamp) }}</small>
-                </div>
-              </template>
-              <template v-else>
-                <span class="tp-timer-remain" :class="{ expired: timer.remaining === 0 }">{{ fmtRemaining(timer.remaining) }}</span>
-                <span class="tp-text">{{ timer.label }}</span>
-              </template>
-              <button class="tp-del" :title="t(timer.kind === 'reminder' && timer.status !== 'scheduled' ? 'timerReminderDismiss' : 'timerCancel')"
-                      @click="cancelTimer(timer.id)"><app-icon name="x" :size="14"></app-icon></button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Command 一览 button + panel -->
       <div v-if="toolbarConfig.commands.enabled" class="toolbar-panel-wrap">
         <button class="toolbar-btn" :class="{ on: showCommandsPanel }"
@@ -942,6 +890,9 @@
       <button id="agent-plans-tab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'plans'"
               :tabindex="agentWorkspaceTab === 'plans' ? 0 : -1" aria-controls="agent-plans-panel"
               @click="selectAgentWorkspaceTab('plans')">{{ t('agentWorkspacePlansTab') }}</button>
+      <button id="agent-reminders-tab" ref="agentWorkspaceRemindersTab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'reminders'"
+              :tabindex="agentWorkspaceTab === 'reminders' ? 0 : -1" aria-controls="agent-reminders-panel"
+              @click="selectAgentWorkspaceTab('reminders')">{{ t('agentWorkspaceRemindersTab') }}</button>
       <button id="agent-tasks-tab" type="button" role="tab" :aria-selected="agentWorkspaceTab === 'tasks'"
               :tabindex="agentWorkspaceTab === 'tasks' ? 0 : -1" aria-controls="agent-tasks-panel"
               @click="selectAgentWorkspaceTab('tasks')">{{ t('agentWorkspaceTasksTab') }}<span v-if="agentActiveTaskCount" class="agent-task-count">{{ agentActiveTaskCount }}</span></button>
@@ -1024,6 +975,32 @@
                      :artifact-path="todoArtifactPath" @update:owner="selectTodoOwner" @add="addTodo"
                      @toggle="toggleTodo" @delete="deleteTodo" @clear="clearDoneTodos"
                      @artifact="openTodoArtifact"></todo-list>
+      </div>
+      <div v-show="agentWorkspaceTab === 'reminders'" id="agent-reminders-panel" role="tabpanel" aria-labelledby="agent-reminders-tab" tabindex="0">
+        <form class="tp-add-row" @submit.prevent="createTimer">
+          <input class="tp-input tp-timer-label" v-model="newTimerLabel"
+                 :aria-label="t('timerLabelPlaceholder')" :placeholder="t('timerLabelPlaceholder')" />
+          <input class="tp-input tp-timer-secs" v-model.number="newTimerSeconds"
+                 type="number" min="1" :aria-label="t('timerSecsPlaceholder')" :placeholder="t('timerSecsPlaceholder')" />
+          <button type="submit" class="tp-add-btn" :title="t('timerAdd')" :aria-label="t('timerAdd')"><app-icon name="plus" :size="14"></app-icon></button>
+        </form>
+        <div v-if="timerList.length === 0" class="tp-empty">{{ t('timerEmpty') }}</div>
+        <div v-for="timer in timerList" :key="timer.id" class="tp-item">
+          <template v-if="timer.kind === 'reminder'">
+            <span class="tp-timer-remain" :class="{ expired: timer.status !== 'scheduled' }">{{ t('timerReminder_' + timer.status) }}</span>
+            <div class="tp-timer-details">
+              <span class="tp-text" :title="timer.label">{{ timer.label }}</span>
+              <small>{{ fmtReminderTime(timer.end_timestamp) }}</small>
+            </div>
+          </template>
+          <template v-else>
+            <span class="tp-timer-remain" :class="{ expired: timer.remaining === 0 }">{{ fmtRemaining(timer.remaining) }}</span>
+            <span class="tp-text">{{ timer.label }}</span>
+          </template>
+          <button type="button" class="tp-del"
+                  :title="t(timer.kind === 'reminder' && timer.status !== 'scheduled' ? 'timerReminderDismiss' : 'timerCancel')"
+                  @click="cancelTimer(timer.id)"><app-icon name="x" :size="14"></app-icon></button>
+        </div>
       </div>
       <div v-show="agentWorkspaceTab === 'tasks'" id="agent-tasks-panel" role="tabpanel" aria-labelledby="agent-tasks-tab" tabindex="0" class="agent-workspace-tasks">
         <form class="agent-task-search" role="search" @submit.prevent="searchAgentTasks">
@@ -5973,8 +5950,8 @@
 <script src="js/icons.js?v=20261105lucide1"></script>
 <script src="js/components.js?v=20261105lucide1"></script>
 <script src="js/settings.js?v=20261107memoryreviewschedulesave"></script>
-<script src="js/agent-ui.js?v=20261107memoryreviewtools"></script>
+<script src="js/agent-ui.js?v=20261107workspaceProactive"></script>
 <script src="js/compose-assist.js?v=20261102trisync1"></script>
-<script src="js/app.js?v=20261107proactivebadge"></script>
+<script src="js/app.js?v=20261107workspaceProactive"></script>
 </body>
 </html>

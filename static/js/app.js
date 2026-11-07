@@ -315,8 +315,6 @@ const App = {
       _historyOffset: 0,   // messages skipped by limit=200 loading (for store-index calc)
 
       // P5-C — Toolbar panel toggles
-      showTodosPanel: false,
-      showTimerPanel: false,
       showCommandsPanel: false,
       showToolbarConfig: false,
 
@@ -334,19 +332,17 @@ const App = {
         screenshot:  { label: '截图',  icon: 'camera', enabled: true, electronOnly: true },
         screenShare: { label: '屏幕共享', icon: 'monitor-up', enabled: true, webOnly: true },
         uploadImage: { label: '上传图片', icon: 'image-plus', enabled: true },
-        todos:       { label: '待办',  icon: 'list-todo', enabled: true },
-        timer:       { label: '计时',  icon: 'timer', enabled: true },
         commands:    { label: '命令',  icon: 'command', enabled: true },
       },
 
-      // The quick popup and workspace Plans tab share one todo controller.
+      // Workspace Plans tab
       todos: [],
       todoOwner: 'user',
-      todoViewEpoch: 0,
+      workspaceProfileEpoch: 0,
       todoFetchSequence: 0,
       newTodoText: '',
 
-      // Timers panel
+      // Workspace Reminders tab
       timerList: [],
       timerFetchSequence: 0,
       newTimerLabel: '',
@@ -518,8 +514,6 @@ const App = {
     // Close toolbar panels when clicking outside
     this._outsideClickHandler = (e) => {
       if (!e.target.closest('.toolbar-panel-wrap') && !e.target.closest('.toolbar-btn.toolbar-gear')) {
-        this.showTodosPanel = false;
-        this.showTimerPanel = false;
         this.showCommandsPanel = false;
         this.showToolbarConfig = false;
       }
@@ -623,7 +617,7 @@ const App = {
     }
     if (this._statusPollTimer) clearInterval(this._statusPollTimer);
     if (this._asePollTimer) clearInterval(this._asePollTimer);
-    if (this._timerRefreshId) clearInterval(this._timerRefreshId);
+    this.stopTimerDisplay();
     if (this._engineWarnTimer) clearInterval(this._engineWarnTimer);
     if (this._outsideClickHandler) document.removeEventListener('click', this._outsideClickHandler);
     if (this._visibilityHandler) document.removeEventListener('visibilitychange', this._visibilityHandler);
@@ -1482,7 +1476,7 @@ const App = {
           } else if (data.type === 'timer_expired') {
             if (data.kind === 'reminder') this.notifyDatedReminder(data.timer_id, data.label);
             else this.showToast(`计时器「${data.label}」到时了！`, 'timer');
-            if (this.showTimerPanel) this.refreshTimers();
+            if (this.agentRemindersVisible) this.refreshTimers();
             // system_trigger 已由后端直接处理，前端只负责 UI 刷新
           } else if (data.type === 'heartbeat_screenshot_request') {
             uiLog('heartbeat', 'screenshot_request received, capturing...');
@@ -2905,57 +2899,47 @@ const App = {
 
     /* ─────────────────── P5-C: Todos panel ─────────────────── */
 
-    todoViewContext() {
-      return { profile: this.currentSessionId, epoch: this.todoViewEpoch };
+    workspaceProfileContext() {
+      return { profile: this.currentSessionId, epoch: this.workspaceProfileEpoch };
     },
 
-    todoViewIsCurrent(context) {
+    workspaceProfileIsCurrent(context) {
       return !!context.profile && !this.currentGroupId && context.profile === this.currentSessionId &&
-        context.epoch === this.todoViewEpoch;
+        context.epoch === this.workspaceProfileEpoch;
     },
 
-    resetTodoView() {
-      this.todoViewEpoch++;
+    resetWorkspaceProfile() {
+      this.workspaceProfileEpoch++;
       this.todoFetchSequence++;
       this.todos = [];
       this.todoOwner = 'user';
       this.newTodoText = '';
-      this.showTodosPanel = false;
+      this.newTimerLabel = '';
+      this.newTimerSeconds = 60;
     },
 
     selectTodoOwner(owner) {
       if (owner === 'user' || owner === 'ai') this.todoOwner = owner;
     },
 
-    async refreshTodos(context = this.todoViewContext()) {
-      if (!this.todoViewIsCurrent(context)) return;
+    async refreshTodos(context = this.workspaceProfileContext()) {
+      if (!this.workspaceProfileIsCurrent(context)) return;
       const sequence = ++this.todoFetchSequence;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(context.profile));
         if (!res.ok) return;
         const data = await res.json();
-        if (!this.todoViewIsCurrent(context) || sequence !== this.todoFetchSequence) return;
+        if (!this.workspaceProfileIsCurrent(context) || sequence !== this.todoFetchSequence) return;
         this.todos = (Array.isArray(data.todos) ? data.todos : []).map(item => ({
           ...item, _todoProfileId: context.profile, _todoViewEpoch: context.epoch,
         }));
       } catch (_) {}
     },
 
-    toggleTodosPanel() {
-      if (!this.currentSessionId || this.currentGroupId) return;
-      this.showTodosPanel = !this.showTodosPanel;
-      if (this.showTodosPanel) {
-        this.showTimerPanel = false;
-        this.showCommandsPanel = false;
-        this.showToolbarConfig = false;
-        this.refreshTodos();
-      }
-    },
-
     async addTodo() {
-      const context = this.todoViewContext(), owner = this.todoOwner;
+      const context = this.workspaceProfileContext(), owner = this.todoOwner;
       const draft = this.newTodoText, text = (draft || '').trim();
-      if (!text || !this.todoViewIsCurrent(context)) return;
+      if (!text || !this.workspaceProfileIsCurrent(context)) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(context.profile), {
           method: 'POST',
@@ -2963,15 +2947,15 @@ const App = {
           body: JSON.stringify({ content: text, owner }),
         });
         if (!res.ok) { uiWarn('todos', 'addTodo failed', res.status); return; }
-        if (!this.todoViewIsCurrent(context)) return;
+        if (!this.workspaceProfileIsCurrent(context)) return;
         if (this.todoOwner === owner && this.newTodoText === draft) this.newTodoText = '';
         await this.refreshTodos(context);
       } catch (e) { uiWarn('todos', 'addTodo error', e.message); }
     },
 
     async toggleTodo(id) {
-      const context = this.todoViewContext();
-      if (!this.todoViewIsCurrent(context)) return;
+      const context = this.workspaceProfileContext();
+      if (!this.workspaceProfileIsCurrent(context)) return;
       const t = this.visibleTodos.find(t => t.id === id);
       if (!t) return;
       try {
@@ -2980,31 +2964,31 @@ const App = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ done: !t.done }),
         });
-        if (res.ok && this.todoViewIsCurrent(context)) await this.refreshTodos(context);
+        if (res.ok && this.workspaceProfileIsCurrent(context)) await this.refreshTodos(context);
       } catch (_) {}
     },
 
     async deleteTodo(id) {
-      const context = this.todoViewContext();
-      if (!this.todoViewIsCurrent(context) || !this.visibleTodos.some(t => t.id === id)) return;
+      const context = this.workspaceProfileContext();
+      if (!this.workspaceProfileIsCurrent(context) || !this.visibleTodos.some(t => t.id === id)) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionTodoById(context.profile, id), { method: 'DELETE' });
-        if (res.ok && this.todoViewIsCurrent(context)) await this.refreshTodos(context);
+        if (res.ok && this.workspaceProfileIsCurrent(context)) await this.refreshTodos(context);
       } catch (_) {}
     },
 
     async clearDoneTodos() {
-      const context = this.todoViewContext(), owner = this.todoOwner;
-      if (!this.todoViewIsCurrent(context) || !this.visibleTodos.some(t => t.done)) return;
+      const context = this.workspaceProfileContext(), owner = this.todoOwner;
+      if (!this.workspaceProfileIsCurrent(context) || !this.visibleTodos.some(t => t.done)) return;
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionTodos(context.profile) + '?owner=' + encodeURIComponent(owner), { method: 'DELETE' });
-        if (res.ok && this.todoViewIsCurrent(context)) await this.refreshTodos(context);
+        if (res.ok && this.workspaceProfileIsCurrent(context)) await this.refreshTodos(context);
       } catch (_) {}
     },
 
     todoArtifactPath(todo, field) {
       if (todo?.owner !== 'ai' || !['source_path', 'evidence_path'].includes(field) ||
-          !this.todoViewIsCurrent({ profile: todo._todoProfileId, epoch: todo._todoViewEpoch })) return '';
+          !this.workspaceProfileIsCurrent({ profile: todo._todoProfileId, epoch: todo._todoViewEpoch })) return '';
       return this.agentArtifactPath(todo[field]);
     },
 
@@ -3013,25 +2997,12 @@ const App = {
       if (path) return this.openAgentArtifact({ path, profile_id: todo._todoProfileId });
     },
 
-    /* ─────────────────── P5-C: Timer panel ─────────────────── */
+    /* ─────────────────── Workspace Reminders ─────────────────── */
 
-    toggleTimerPanel() {
-      this.showTimerPanel = !this.showTimerPanel;
-      if (this.showTimerPanel) {
-        this.showTodosPanel = false;
-        this.showCommandsPanel = false;
-        this.showToolbarConfig = false;
-        this.refreshTimers();
-        // 每秒用 end_timestamp 与本地时间计算剩余，避免仅靠轮询导致数字静止
-        if (!this._timerRefreshId) {
-          this._timerRefreshId = setInterval(() => {
-            if (this.showTimerPanel) this._tickTimerDisplay();
-          }, 1000);
-        }
-      } else {
-        clearInterval(this._timerRefreshId);
-        this._timerRefreshId = null;
-      }
+    stopTimerDisplay() {
+      if (this._timerRefreshId == null) return;
+      clearInterval(this._timerRefreshId);
+      this._timerRefreshId = null;
     },
 
     /** 根据服务端返回的 end_timestamp 更新剩余秒数（不请求网络） */
@@ -3056,14 +3027,15 @@ const App = {
     },
 
     async refreshTimers() {
-      const sessionId = this.currentSessionId, viewVersion = this.agentViewVersion;
+      const context = this.workspaceProfileContext();
+      const sessionId = context.profile;
       const sequence = this.timerFetchSequence = (this.timerFetchSequence || 0) + 1;
-      if (!sessionId || this.currentGroupId) { this.timerList = []; return; }
+      if (!this.workspaceProfileIsCurrent(context)) { this.timerList = []; return; }
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.timers(sessionId));
         if (!res.ok) return;
         const raw = (await res.json()).timers || [];
-        if (sessionId !== this.currentSessionId || this.currentGroupId || viewVersion !== this.agentViewVersion || sequence !== this.timerFetchSequence) return;
+        if (!this.workspaceProfileIsCurrent(context) || sequence !== this.timerFetchSequence) return;
         const now = Date.now() / 1000;
         this.timerList = raw.filter(t => t.kind === 'reminder'
           ? t.session_id === sessionId : !t.session_id || t.session_id === sessionId).map((t) => {
@@ -3096,26 +3068,32 @@ const App = {
     },
 
     async createTimer() {
-      const secs = parseInt(this.newTimerSeconds);
-      const label = (this.newTimerLabel || '').trim() || '计时器';
-      if (!secs || secs <= 0) return;
-      const sessionId = this.currentGroupId ? 'group:' + this.currentGroupId : (this.currentSessionId || '');
+      const context = this.workspaceProfileContext();
+      const draftLabel = this.newTimerLabel, draftSeconds = this.newTimerSeconds;
+      const secs = parseInt(draftSeconds);
+      const label = (draftLabel || '').trim() || '计时器';
+      if (!secs || secs <= 0 || !this.workspaceProfileIsCurrent(context)) return;
       try {
-        await fetch(getBaseUrl() + API_PATHS.timers(), {
+        const res = await fetch(getBaseUrl() + API_PATHS.timers(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ seconds: secs, label, session_id: sessionId }),
+          body: JSON.stringify({ seconds: secs, label, session_id: context.profile }),
         });
-        this.newTimerLabel = '';
-        this.newTimerSeconds = 60;
+        if (!res.ok || !this.workspaceProfileIsCurrent(context)) return;
+        if (this.newTimerLabel === draftLabel && this.newTimerSeconds === draftSeconds) {
+          this.newTimerLabel = '';
+          this.newTimerSeconds = 60;
+        }
         await this.refreshTimers();
       } catch (_) {}
     },
 
     async cancelTimer(id) {
+      const context = this.workspaceProfileContext();
+      if (!this.workspaceProfileIsCurrent(context)) return;
       try {
-        await fetch(getBaseUrl() + API_PATHS.timerById(id, this.currentSessionId), { method: 'DELETE' });
-        await this.refreshTimers();
+        await fetch(getBaseUrl() + API_PATHS.timerById(id, context.profile), { method: 'DELETE' });
+        if (this.workspaceProfileIsCurrent(context)) await this.refreshTimers();
       } catch (_) {}
     },
 
@@ -3127,7 +3105,7 @@ const App = {
     },
 
     fmtRemaining(secs) {
-      if (secs <= 0) return '已到期';
+      if (secs <= 0) return this.t('timerReminder_due');
       const h = Math.floor(secs / 3600);
       const m = Math.floor((secs % 3600) / 60);
       const s = secs % 60;
@@ -3140,8 +3118,6 @@ const App = {
     toggleCommandsPanel() {
       this.showCommandsPanel = !this.showCommandsPanel;
       if (this.showCommandsPanel) {
-        this.showTodosPanel = false;
-        this.showTimerPanel = false;
         this.showToolbarConfig = false;
         this.cmdPanelQuery = '';   // clear the previous search on reopen so "recently used" shows
       }
@@ -3300,10 +3276,16 @@ const App = {
       document.title = count ? `(${count}) Shikigami Protocol` : 'Shikigami Protocol';
     },
     // Synchronous invalidation also covers A -> B -> A within one Vue tick.
-    todoViewKey: { flush: 'sync', handler() { this.resetTodoView(); } },
+    workspaceProfileKey: { flush: 'sync', handler() { this.resetWorkspaceProfile(); } },
+    agentRemindersVisible: {
+      flush: 'sync',
+      handler(visible) {
+        if (visible) this._timerRefreshId = setInterval(() => this._tickTimerDisplay(), 1000);
+        else this.stopTimerDisplay();
+      },
+    },
     todoToolRevision() {
-      if (!this.currentGroupId && ((this.showTodosPanel && this.toolbarConfig.todos.enabled) ||
-          (this.agentWorkspaceOpen && this.agentWorkspaceTab === 'plans'))) this.refreshTodos();
+      if (!this.currentGroupId && this.agentWorkspaceOpen && this.agentWorkspaceTab === 'plans') this.refreshTodos();
     },
     inputText() {
       // Any input change resets the selected suggestion and lifts a temporary Esc dismissal
@@ -3337,7 +3319,7 @@ const App = {
 
   computed: {
     unreadProactiveCount() { return this.sessions.filter(session => this.hasUnreadProactive(session.id)).length; },
-    todoViewKey() { return JSON.stringify([this.currentSessionId, this.currentGroupId]); },
+    workspaceProfileKey() { return JSON.stringify([this.currentSessionId, this.currentGroupId]); },
     visibleTodos() {
       return this.currentGroupId ? [] : this.todos.filter(item => (item.owner ?? 'user') === this.todoOwner);
     },

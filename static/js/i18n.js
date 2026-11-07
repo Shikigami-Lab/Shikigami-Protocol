@@ -13,7 +13,8 @@ window.LOCALES = {
     agentWorkspaceBackToFiles: "返回文件列表",
     agentWorkspaceProperties: "文件属性",
     agentWorkspaceEmptyFile: "此文件为空。",
-    agentWorkspacePlansTab: "计划",
+    agentWorkspacePlansTab: "待办与计划",
+    agentWorkspaceRemindersTab: "提醒",
     agentWorkspaceDescription: "用途说明（最多 200 字）",
     agentWorkspaceCategory: "分类",
     agentWorkspaceCategory_note: "笔记",
@@ -116,7 +117,7 @@ window.LOCALES = {
     // AI tool runtime and task activity
     agentActivity: "任务活动",
     agentPartialReply: "未完成的回复",
-    agentOpenTimers: "计时器",
+    agentOpenTimers: "提醒",
     agentCancel: "取消任务",
     agentNeedsAttention: "需要处理",
     agentRefreshFailed: "状态刷新失败，显示最后已知状态",
@@ -308,8 +309,6 @@ window.LOCALES = {
     screenShareOn: '停止屏幕共享',
     screenShareOff: '开启屏幕共享（供 AI 主动发言时感知画面）',
     uploadImageTitle: '上传图片供 AI 分析',
-    todosTitle: '待办事项',
-    timerTitle: '计时器',
     commandsTitle: '命令一览',
     toolbarConfigTitle: '自定义工具栏',
 
@@ -325,9 +324,8 @@ window.LOCALES = {
     todosEmpty: '暂无待办',
     todosNewPlaceholder: '新增待办…',
 
-    // ── Timer panel ──
-    timerPanelTitle: '计时器',
-    timerEmpty: '无活跃计时器',
+    // ── Reminders tab ──
+    timerEmpty: '暂无计时器或提醒',
     timerAdd: '添加计时器',
     timerReminder_scheduled: '提醒',
     timerReminder_due: '已到期',
@@ -1942,7 +1940,8 @@ window.LOCALES = {
     agentWorkspaceBackToFiles: "Back to files",
     agentWorkspaceProperties: "File properties",
     agentWorkspaceEmptyFile: "This file is empty.",
-    agentWorkspacePlansTab: "Plans",
+    agentWorkspacePlansTab: "To-dos & plans",
+    agentWorkspaceRemindersTab: "Reminders",
     agentWorkspaceDescription: "Purpose (up to 200 characters)",
     agentWorkspaceCategory: "Category",
     agentWorkspaceCategory_note: "Note",
@@ -2045,7 +2044,7 @@ window.LOCALES = {
     // AI tool runtime and task activity
     agentActivity: "Task activity",
     agentPartialReply: "Partial reply",
-    agentOpenTimers: "Timers",
+    agentOpenTimers: "Reminders",
     agentCancel: "Cancel task",
     agentNeedsAttention: "Needs attention",
     agentRefreshFailed: "Refresh failed; showing last known state",
@@ -2237,8 +2236,6 @@ window.LOCALES = {
     screenShareOn: 'Stop screen share',
     screenShareOff: 'Start screen share (for AI proactive vision)',
     uploadImageTitle: 'Upload image for AI analysis',
-    todosTitle: 'To-dos',
-    timerTitle: 'Timer',
     commandsTitle: 'Commands',
     toolbarConfigTitle: 'Customize toolbar',
 
@@ -2254,9 +2251,8 @@ window.LOCALES = {
     todosEmpty: 'No to-dos',
     todosNewPlaceholder: 'Add to-do…',
 
-    // ── Timer panel ──
-    timerPanelTitle: 'Timer',
-    timerEmpty: 'No active timers',
+    // ── Reminders tab ──
+    timerEmpty: 'No timers or reminders',
     timerAdd: 'Add timer',
     timerReminder_scheduled: 'Reminder',
     timerReminder_due: 'Due',

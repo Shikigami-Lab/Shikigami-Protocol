@@ -1260,15 +1260,18 @@ test('dated reminders use the profile-scoped timer API and show a local date', a
   assert.equal(calls[1][1], 'DELETE');
 });
 
-test('an open timer panel refreshes once for the visible schedule receipt', () => {
+test('only visible Reminders refreshes once for the schedule receipt', () => {
   const { model } = harness();
-  model.showTimerPanel = true;
+  model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'reminders';
   let refreshes = 0;
   model.refreshTimers = () => { refreshes++; };
   const run = timerRun('timer_schedule');
   model.receiveAgentEvent(run.events[0]);
   model.receiveAgentEvent(run.events[1]);
   model.receiveAgentEvent(run.events[1]);
+  assert.equal(refreshes, 1);
+  model.selectAgentWorkspaceTab('tasks');
+  for (const event of run.events) model.receiveAgentEvent({ ...event, run_id: 'another' });
   assert.equal(refreshes, 1);
 });
 

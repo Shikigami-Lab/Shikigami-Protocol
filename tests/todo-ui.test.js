@@ -66,7 +66,7 @@ test('tabs split explicit AI tasks from user and legacy tasks', async () => {
   assert.equal(model.todoOwner, 'ai');
 });
 
-test('plans drawer and quick popup share REST, owner, draft and stale-view guards', async () => {
+test('plans drawer retains REST, owner, draft and stale-profile guards', async () => {
   const calls = [];
   const { model } = harness(async (url, options) => { calls.push({ url, options }); return response([{ id: 'ai', owner: 'ai', source_path: 'notes/plan.md', evidence_path: '../escape' }]); });
   model.refreshAgentWorkspace = async () => {};
@@ -74,7 +74,8 @@ test('plans drawer and quick popup share REST, owner, draft and stale-view guard
   assert.equal(model.agentWorkspaceTab, 'plans');
   assert.equal(calls[0].url, 'http://fixture.test/sessions/a/todos');
   model.selectTodoOwner('ai'); model.newTodoText = 'Shared draft';
-  model.toggleTodosPanel(); await flush();
+  model.selectAgentWorkspaceTab('tasks');
+  await model.selectAgentWorkspaceTab('plans');
   assert.equal(model.newTodoText, 'Shared draft');
   assert.equal(model.visibleTodos[0].id, 'ai');
   assert.equal(model.todoArtifactPath(model.todos[0], 'evidence_path'), '');
@@ -87,12 +88,14 @@ test('plans drawer and quick popup share REST, owner, draft and stale-view guard
   assert.equal(calls.length, count);
 });
 
-test('successful todo tools refresh an open plans tab even with quick popup disabled', async () => {
+test('successful todo tools refresh Plans only while selected', async () => {
   const { model } = harness(); let refreshes = 0;
   model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans';
-  model.toolbarConfig.todos.enabled = false;
   model.refreshTodos = async () => { refreshes++; };
   model.receiveAgentEvent({ run_id: 'r', profile_id: 'a', session_id: 'a', sequence: 1, type: 'tool_result', tool_name: 'todo_add', is_error: false });
+  await flush(); assert.equal(refreshes, 1);
+  model.selectAgentWorkspaceTab('tasks');
+  model.receiveAgentEvent({ run_id: 'r', profile_id: 'a', session_id: 'a', sequence: 2, type: 'tool_result', tool_name: 'todo_add', is_error: false });
   await flush(); assert.equal(refreshes, 1);
 });
 
@@ -180,17 +183,16 @@ test('clear completed is scoped to the current tab; failed mutations do not refr
 test('group entry clears task state and every task action is inert in groups', async () => {
   const calls = [];
   const { model } = harness(async (...args) => { calls.push(args); return response([{ id: 'x' }]); });
-  await model.refreshTodos(); model.showTodosPanel = true; model.newTodoText = 'Draft'; model.todoOwner = 'ai';
+  await model.openAgentWorkspace('plans'); model.newTodoText = 'Draft'; model.todoOwner = 'ai';
   model.currentGroupId = 'g';
-  assert.equal(model.showTodosPanel, false);
+  assert.equal(model.visibleTodos.length, 0);
   assert.equal(model.todos.length, 0);
   assert.equal(model.newTodoText, '');
   assert.equal(model.todoOwner, 'user');
-  model.toggleTodosPanel(); model.newTodoText = 'Blocked';
+  await model.openAgentWorkspace('plans'); model.newTodoText = 'Blocked';
   await model.refreshTodos(); await model.addTodo(); await model.toggleTodo('x');
   await model.deleteTodo('x'); await model.clearDoneTodos();
   assert.equal(calls.length, 1);
-  assert.equal(model.showTodosPanel, false);
 });
 
 test('plan files use the owning profile scoped artifact opener and reject stale or external metadata', async () => {
@@ -213,10 +215,10 @@ test('plan files use the owning profile scoped artifact opener and reject stale 
   assert.equal(opened.length, 2);
 });
 
-test('successful own todo tool results refresh an open popup through existing event/poll ingestion', async () => {
+test('successful own todo tool results refresh an open Plans tab through existing event/poll ingestion', async () => {
   const { model } = harness(); let refreshes = 0;
   model.refreshTodos = async () => { refreshes++; };
-  model.showTodosPanel = true;
+  model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans';
   const event = (sequence, extra = {}) => ({ run_id: 'r', profile_id: 'a', session_id: 'a',
     sequence, type: 'tool_result', tool_name: 'mcp__shikigami__todo_add', is_error: false, ...extra });
   model.receiveAgentEvent(event(1)); await flush();
@@ -229,7 +231,7 @@ test('successful own todo tool results refresh an open popup through existing ev
   assert.equal(refreshes, 1);
   model.receiveAgentEvent(event(6, { tool_name: 'todo_complete' })); await flush();
   assert.equal(refreshes, 2);
-  model.showTodosPanel = false;
+  model.closeAgentWorkspace();
   model.receiveAgentEvent(event(7)); await flush();
   assert.equal(refreshes, 2);
   model.currentGroupId = 'g'; model.receiveAgentEvent(event(8)); await flush();
@@ -287,7 +289,7 @@ test('clear snapshots each owner, refreshes after success and leaves pending row
 
 test('existing poll replays successful own todo results once without refreshing foreign runs', async () => {
   const { model, sandbox } = harness(); let refreshes = 0;
-  model.showTodosPanel = true;
+  model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans';
   model.refreshTodos = async () => { refreshes++; };
   const event = { run_id: 'r', profile_id: 'a', session_id: 'a', sequence: 1,
     type: 'tool_result', tool_name: 'todo_update', is_error: false };
@@ -313,16 +315,17 @@ test('real artifact opener captures profile before listing and rejects late A-B-
   assert.equal(model.agentWorkspaceSelected, null);
 });
 
-test('popup labels and dynamic controls reuse existing templates in both locales', () => {
+test('the Plans tab is the single home of the existing todo controls in both locales', () => {
   const { model } = harness();
   const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
   const sandbox = { window: {} };
   vm.runInNewContext(fs.readFileSync(path.join(jsDir, 'components.js'), 'utf8'), sandbox);
   const component = sandbox.window.SK_COMPONENTS['todo-list'];
-  assert.equal((html.match(/<todo-list /g) || []).length, 2);
-  assert.equal((html.match(/:todos="visibleTodos"/g) || []).length, 2);
-  assert.equal((html.match(/@artifact="openTodoArtifact"/g) || []).length, 2);
-  assert.equal((html.match(/@clear="clearDoneTodos"/g) || []).length, 2);
+  assert.equal((html.match(/<todo-list /g) || []).length, 1);
+  assert.match(html, /id="agent-plans-panel"[^>]*>\s*<todo-list [^>]*:todos="visibleTodos"[^>]*@clear="clearDoneTodos"[^>]*@artifact="openTodoArtifact"/);
+  assert.equal(model.t('agentWorkspacePlansTab'), 'To-dos & plans');
+  model.locale = 'zh';
+  assert.equal(model.t('agentWorkspacePlansTab'), '待办与计划');
   assert.match(component.template, /v-for="todo in todos"/);
   assert.match(component.template, /artifactPath\(todo, 'source_path'\)/);
   assert.match(component.template, /artifactPath\(todo, 'evidence_path'\)/);
@@ -379,29 +382,28 @@ test('todo tool cards localize native and MCP names in both languages', () => {
   }
 });
 
-test('closing a popup before queued tool refresh does not start a request', async () => {
+test('closing Plans before queued tool refresh does not start a request', async () => {
   const calls = [];
   const { model } = harness(async (...args) => { calls.push(args); return response([]); });
-  model.showTodosPanel = true;
+  model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans';
   model.receiveAgentEvent({ run_id: 'r', profile_id: 'a', session_id: 'a', sequence: 1,
     type: 'tool_result', tool_name: 'todo_add', is_error: false });
-  model.showTodosPanel = false;
+  model.closeAgentWorkspace();
   await flush();
   assert.equal(calls.length, 0);
-  assert.equal(model.showTodosPanel, false);
+  assert.equal(model.agentWorkspaceOpen, false);
 });
 
-test('closed-popup load cannot overwrite a newer reopened popup or reopen itself', async () => {
+test('closed Plans load cannot overwrite a newer reopened drawer or reopen it', async () => {
   const pending = deferred(); let calls = 0;
   const { model } = harness(async () => ++calls === 1 ? pending.promise : response([{ id: 'current' }]));
-  model.showTodosPanel = true;
-  const oldLoad = model.refreshTodos();
-  model.showTodosPanel = false;
-  model.toggleTodosPanel(); await flush();
+  const oldLoad = model.openAgentWorkspace('plans');
+  model.closeAgentWorkspace();
+  await model.openAgentWorkspace('plans');
   pending.resolve(response([{ id: 'old' }])); await oldLoad;
   assert.equal(model.todos[0].id, 'current');
-  model.showTodosPanel = false; await flush();
-  assert.equal(model.showTodosPanel, false);
+  model.closeAgentWorkspace(); await flush();
+  assert.equal(model.agentWorkspaceOpen, false);
 });
 
 test('native call_id-only todo results refresh the visible list after their matching call', async () => {
@@ -411,7 +413,7 @@ test('native call_id-only todo results refresh the visible list after their matc
       calls.push(url);
       return response([{ id: 'created', owner: 'ai', content: 'Native plan' }]);
     });
-    model.showTodosPanel = true; model.selectTodoOwner('ai');
+    model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans'; model.selectTodoOwner('ai');
     const binding = { run_id: 'native', profile_id: 'a', session_id: 'a', turn: 'turn-1', step: 1 };
     model.receiveAgentEvent({ ...binding, sequence: 1, type: 'tool_call',
       call_id: 'todo-call', tool_name: toolName, arguments: '{"content":"Native plan"}' });
@@ -432,7 +434,7 @@ test('persisted native results without tool_name refresh through actual run poll
   const { model, sandbox } = harness(async url => {
     calls.push(url); return response([{ id: 'saved', owner: 'ai', content: 'Saved plan' }]);
   });
-  model.showTodosPanel = true; model.selectTodoOwner('ai');
+  model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans'; model.selectTodoOwner('ai');
   const binding = { run_id: 'persisted', profile_id: 'a', session_id: 'a', request_id: 'persisted' };
   const events = [
     { ...binding, sequence: 1, seq: 1, type: 'tool_call', call_id: 'saved-call', tool_name: 'todo_update', arguments: '{}' },
@@ -452,7 +454,7 @@ test('persisted native results without tool_name refresh through actual run poll
   assert.equal(calls.length, 1);
   assert.equal(model.visibleTodos[0].id, 'saved');
   await poll(); await flush(); assert.equal(calls.length, 1);
-  model.showTodosPanel = false;
+  model.closeAgentWorkspace();
   const closedBinding = { ...binding, run_id: 'closed', request_id: 'closed' };
   snapshots.push({ ...closedBinding, id: 'closed', state: 'completed',
     events: events.map(event => ({ ...event, ...closedBinding })) });
@@ -461,7 +463,7 @@ test('persisted native results without tool_name refresh through actual run poll
 
 test('todo result correlation is by prior call_id within its own run, with explicit name only as fallback', async () => {
   const { model } = harness(); let refreshes = 0;
-  model.showTodosPanel = true; model.refreshTodos = async () => { refreshes++; };
+  model.agentWorkspaceOpen = true; model.agentWorkspaceTab = 'plans'; model.refreshTodos = async () => { refreshes++; };
   const binding = { profile_id: 'a', session_id: 'a' };
   const send = (run, sequence, type, extra) => model.receiveAgentEvent({ ...binding, run_id: run, sequence, type, ...extra });
   send('one', 1, 'tool_call', { call_id: 'shared', tool_name: 'todo_add' });
@@ -480,17 +482,13 @@ test('todo result correlation is by prior call_id within its own run, with expli
   await flush(); assert.equal(refreshes, 2);
 });
 
-test('only the todo popup opts into narrow-screen viewport bounds and scrolling', () => {
+test('legacy toolbar preferences cannot restore the removed todo and timer controls', () => {
+  const { model, sandbox } = harness();
+  sandbox.localStorage.getItem = () => JSON.stringify({ todos: { enabled: true }, timer: { enabled: true }, commands: { enabled: false } });
+  model._loadToolbarConfig();
+  assert.equal(model.toolbarConfig.commands.enabled, false);
+  assert.ok(!('todos' in model.toolbarConfig));
+  assert.ok(!('timer' in model.toolbarConfig));
   const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
-  const css = fs.readFileSync(path.join(__dirname, '../static/css/settings.css'), 'utf8');
-  assert.ok(/class="toolbar-panel tp-todos" v-show="showTodosPanel"/.test(html), 'todo popup needs its own responsive class');
-  assert.equal((html.match(/class="toolbar-panel tp-todos"/g) || []).length, 1);
-  assert.match(html, /class="toolbar-panel" v-show="showTimerPanel"/);
-  const narrow = css.match(/@media\s*\(max-width:\s*768px\)\s*\{\s*\.toolbar-panel\.tp-todos\s*\{([^}]+)\}/);
-  assert.ok(narrow, 'todo viewport rule must be scoped to narrow screens');
-  assert.match(narrow[1], /position:\s*fixed/);
-  for (const edge of ['left', 'right', 'bottom']) assert.match(narrow[1], new RegExp(edge + ':\\s*max\\(12px,\\s*env\\(safe-area-inset-' + edge + '\\)\\)'));
-  assert.match(narrow[1], /width:\s*auto/);
-  assert.match(narrow[1], /max-height:[^;]*100dvh/);
-  assert.match(narrow[1], /overflow-y:\s*auto/);
+  assert.doesNotMatch(html, /toolbarConfig\.(todos|timer)|showTodosPanel|showTimerPanel/);
 });
