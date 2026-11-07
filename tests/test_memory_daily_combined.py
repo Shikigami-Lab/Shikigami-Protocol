@@ -1,4 +1,5 @@
 """Offline acceptance of the scheduled one-request memory transaction."""
+import asyncio
 import json
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -87,6 +88,12 @@ class DailyCombinedMemoryTests(IsolatedAsyncioTestCase):
     async def run_job(self, day=DAY):
         await job._run_daily_curation(self.session, day, self.app)
 
+    def assert_daily_counts(self, **expected):
+        keys = ("requests", "dialogue_messages", "dialogue_slices", "added", "updated",
+                "confirmed", "merged", "archived", "reviewed")
+        daily = LongTermStore(self.root).curation_snapshot()[-1]["daily"]
+        self.assertEqual({key: daily.get(key) for key in keys}, dict.fromkeys(keys, 0) | expected)
+
     async def test_one_scheduled_request_commits_both_and_leaves_diary_separate(self):
         self.seed()
         self.reply({"operations": [self.add()], "items": [self.archive()]})
@@ -108,6 +115,7 @@ class DailyCombinedMemoryTests(IsolatedAsyncioTestCase):
         self.assertEqual([fact.content for fact in store.get_active()], ["They prefer unsweetened tea."])
         self.assertEqual(store.source_cursors(), {"single": self.assistant_id})
         self.assertEqual(store.curation_status()["daily"]["status"], "completed")
+        self.assert_daily_counts(requests=1, dialogue_messages=2, dialogue_slices=2, added=1, archived=1)
 
     async def test_empty_dialogue_operations_commit_cursor_and_clear_completed_offset(self):
         self.seed(offset=3)
@@ -117,6 +125,7 @@ class DailyCombinedMemoryTests(IsolatedAsyncioTestCase):
         _, cursors, _, offsets = LongTermStore(self.root).extraction_progress_snapshot()
         self.assertEqual((cursors, offsets), ({"single": self.assistant_id}, {}))
         self.assertTrue(self.manager.facts.get_by_id("old").archived)
+        self.assert_daily_counts(requests=1, dialogue_messages=2, dialogue_slices=2, archived=1)
 
     async def test_empty_dialogue_operations_commit_partial_offset(self):
         text = "Hello. " * 5000
@@ -129,6 +138,31 @@ class DailyCombinedMemoryTests(IsolatedAsyncioTestCase):
             "id": self.user_id, "offset": 32_003, "content_hash": message_hash(text),
         }})
         self.assertTrue(self.manager.facts.get_by_id("old").archived)
+        self.assert_daily_counts(requests=1, dialogue_messages=1, dialogue_slices=6, archived=1)
+
+    async def test_valid_empty_response_records_consumed_dialogue_with_zero_changes(self):
+        self.seed(old=False)
+        self.reply({"operations": [], "items": []})
+        await self.run_job()
+        await self.run_job("2026-11-08")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.manager.facts.curation_status()["daily"]["status"], "completed")
+        self.assert_daily_counts(requests=1, dialogue_messages=2, dialogue_slices=2)
+
+    async def test_repeating_an_existing_review_note_records_zero_review_changes(self):
+        self.seed()
+        reason = "Check the original message."
+        revision, cursors, facts, state = self.manager.facts.curation_snapshot()
+        facts[0].review_note = reason
+        self.assertTrue(self.manager.facts.apply_curation(revision, facts, cursors, state))
+        self.reply({"operations": [], "items": [{"fact_id": "old", "action": "review", "reason": reason}]})
+        await self.run_job()
+        await self.run_job("2026-11-08")
+        self.assertEqual(len(self.calls), 1)
+        store = LongTermStore(self.root)
+        self.assertEqual(store.get_by_id("old").review_note, reason)
+        self.assertEqual(store.curation_status()["latest"]["counts"]["reviewed"], 0)
+        self.assert_daily_counts(requests=1, dialogue_messages=2, dialogue_slices=2)
 
     async def test_missing_or_invalid_operations_preserve_progress_and_curation(self):
         baseline = self.seed(offset=3)
@@ -156,6 +190,62 @@ class DailyCombinedMemoryTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.facts.curation_status()["daily"]["status"], "failed")
         self.assertFalse(self.manager.facts.get_by_id("old").archived)
         self.assertEqual(self.manager.facts.source_cursors(), {"single": 0})
+        self.assert_daily_counts(requests=1)
+
+    async def test_provider_setup_failure_records_zero_requests(self):
+        self.seed()
+        self.get_provider.side_effect = RuntimeError("Synthetic provider setup failure")
+        await self.run_job()
+        self.assertEqual(self.manager.facts.curation_status()["daily"]["status"], "failed")
+        self.assert_daily_counts()
+
+    async def test_cancelled_stream_records_the_request_without_committed_dialogue(self):
+        self.seed()
+        entered = asyncio.Event()
+
+        async def stream(_):
+            entered.set()
+            await asyncio.Event().wait()
+            yield "{}"
+
+        self.provider.stream_chat = stream
+        task = asyncio.create_task(self.run_job())
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            self.assert_daily_counts(requests=1)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(self.manager.facts.curation_status()["daily"]["status"], "cancelled")
+        self.assert_daily_counts(requests=1)
+
+    async def test_daily_counts_compare_committed_records_instead_of_proposed_operations(self):
+        self.seed(text="I prefer unsweetened tea. I switched from cereal to oatmeal. I still like pears. I keep bees.")
+        revision, cursors, facts, offsets = self.manager.facts.extraction_progress_snapshot()
+        facts.extend([
+            LongTermFact("I prefer cereal.", id="cereal", kind="stable", category="preference",
+                         source="auto", is_manual=False),
+            LongTermFact("I like pears.", id="pears", kind="stable", source="auto", is_manual=False),
+            LongTermFact("I keep bees.", id="bees", kind="stable", pinned=True),
+        ])
+        self.assertTrue(self.manager.facts.apply_extraction_progress(revision, facts, cursors, offsets))
+        evidence = [f"single:{self.user_id}"]
+        self.reply({"operations": [
+            self.add(),
+            {"op": "update", "fact_id": "cereal", "content": "I prefer oatmeal.", "evidence": evidence},
+            {"op": "confirm", "fact_id": "pears", "evidence": evidence},
+            {"op": "confirm", "fact_id": "pears", "evidence": evidence},
+            {"op": "add", "kind": "stable", "content": "I keep bees.", "evidence": evidence},
+        ], "items": [
+            self.archive(),
+            {"fact_id": "cereal", "action": "keep", "reason": "Existing fact"},
+            {"fact_id": "pears", "action": "keep", "reason": "Existing fact"},
+        ]})
+        await self.run_job()
+        self.assertEqual(self.manager.facts.curation_status()["daily"]["status"], "completed")
+        self.assert_daily_counts(requests=1, dialogue_messages=2, dialogue_slices=2, added=1,
+                                 updated=1, confirmed=1, archived=1)
 
     async def test_invalid_dialogue_rejects_otherwise_valid_curation(self):
         self.seed()
@@ -276,6 +366,7 @@ class DailyCombinedMemoryTests(IsolatedAsyncioTestCase):
         self.assertEqual(store.curation_status()["daily"]["status"], "stale")
         self.assertEqual(store.source_cursors(), {"group:g": 0})
         self.assertEqual([fact.id for fact in store.get_active()], ["old"])
+        self.assert_daily_counts(requests=1)
 
     async def test_assistant_only_prefix_advances_locally_before_the_single_combined_call(self):
         earlier_user, assistant, digest = self.seed_assistant_prefix(70_000)

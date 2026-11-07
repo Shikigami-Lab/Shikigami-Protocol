@@ -437,6 +437,7 @@ const SettingsMixin = {
       memoryFacts: [],
       memoryFactsRevision: 0,
       memoryFactEvidence: new Map(),
+      memoryFactActionDraft: null,
       memoryFactForm: { content: '', category: 'other', weight: 1.0 },
       memoryEditingFact: null,
       memoryVectors: [],
@@ -458,12 +459,14 @@ const SettingsMixin = {
       forgettingPreview: null,
       forgettingPreviewLoading: false,
       memoryCurationPreview: null,
+      memoryCurationPromoted: false,
       memoryCurationSelection: [],
       memoryCurationResult: null,
       memoryCurationPending: '',
       memoryBulkCurationPage: null,
       memoryBulkCurationPending: false,
       memoryBulkCurationError: false,
+      memoryBulkCurationRestartRequired: false,
       memoryRestoringFactId: '',
       memoryChangelog: [],       // 记忆变更历史（最近 20 条）
       memoryChangelogLoading: false,
@@ -686,6 +689,14 @@ const SettingsMixin = {
 
     displayedMemoryFacts() {
       return this.sortedMemoryFacts.slice(0, this.factsDisplayLimit);
+    },
+    memoryFactHistory() {
+      const history = new Map();
+      for (const fact of this.displayedMemoryFacts) {
+        const versions = this.memoryFactVersionComparisons(fact);
+        if (versions.length) history.set(fact.id, versions);
+      }
+      return history;
     },
     displayedMemoryVectors() {
       return this.sortedMemoryVectors.slice(0, this.vectorsDisplayLimit);
@@ -4591,6 +4602,7 @@ const SettingsMixin = {
       this.memoryCurationPending = this.memoryRestoringFactId = '';
       this.memoryBulkCurationPage = null;
       this.memoryBulkCurationPending = this.memoryBulkCurationError = false;
+      this.memoryBulkCurationRestartRequired = false;
       this.factFilterStatus = 'active';
       this.memoryChangelog = [];
       this.memoryChangelogLoading = this.memoryRollbackLoading = false;
@@ -4657,6 +4669,7 @@ const SettingsMixin = {
       this.memoryFacts = facts;
       this.memoryFactsRevision++;
       this.memoryFactEvidence = new Map();
+      this.memoryFactActionDraft = null;
     },
 
     async loadMemoryFactEvidence(fact) {
@@ -4827,6 +4840,141 @@ const SettingsMixin = {
       return fact.expires_at != null && fact.expires_at * 1000 <= Date.now();
     },
 
+    memoryDiaryExperiences(summary) {
+      if (!this.memoryProfileId || this.memoryProfileId !== this.memoryContentProfileId
+          || !this.memorySummaries.includes(summary) || !Array.isArray(summary.experience_ids)) return [];
+      return [...new Set(summary.experience_ids)]
+        .map(id => this.memoryFacts.find(fact => fact.id === id && fact.kind === 'experience'))
+        .filter(Boolean);
+    },
+
+    jumpToMemoryExperience(summary, id) {
+      const fact = this.memoryDiaryExperiences(summary).find(experience => experience.id === id);
+      if (!fact || this.memoryPanelLoading) return;
+      const current = this.beginMemoryRequest(this.memoryProfileId, 'experienceJump');
+      this.factFilterStatus = fact.archived || this.memoryFactExpired(fact) ? 'archived' : 'experiences';
+      this.factSearch = '';
+      this.factFilterEmotional = 'all';
+      const index = this.sortedMemoryFacts.indexOf(fact);
+      this.factsDisplayLimit = Math.max(this.factsDisplayLimit, index + 1);
+      this.memoryActiveSubTab = 'facts';
+      return this.$nextTick(() => {
+        if (!current() || this.memoryActiveSubTab !== 'facts') return;
+        const rows = this.$refs?.memoryFactsList?.querySelectorAll('[data-fact-id]') || [];
+        const row = Array.from(rows).find(element => element.dataset.factId === id);
+        row?.focus({ preventScroll: true });
+        row?.scrollIntoView({ block: 'nearest' });
+      });
+    },
+
+    memoryFactActionAvailable(fact) {
+      return !!fact.action_revision && !!this.memoryProfileId
+        && this.memoryProfileId === this.memoryContentProfileId && this.memoryFacts.includes(fact)
+        && !this.memoryCurationPending && !this.memoryRestoringFactId && !this.memoryPanelLoading;
+    },
+
+    memoryFactNeedsReview(fact) {
+      return !!fact.review_note?.trim() && !fact.archived && !this.memoryFactExpired(fact);
+    },
+
+    memoryFactArchiveReasons(fact) {
+      if (fact.is_manual || fact.source === 'manual' || fact.pinned) return [];
+      const reasons = ['low_value', 'unsupported'];
+      if (this.memoryFactCanColdArchive(fact)) reasons.push('cold_memory');
+      return reasons;
+    },
+
+    memoryFactCanColdArchive(fact) {
+      if (fact.kind !== 'experience' || fact.event_date || fact.expires_at != null) return false;
+      // Mirror the store's cold-archive checks for option visibility. The server validates the write.
+      const floatingDate = /(?:上|下|这|本)(?:一?个)?(?:星期|礼拜|周)|(?:上|下|这|本)个?月|(?:明|今|去|后|前)年|(?:明|昨|今|后|前)天|(?:今|明|昨)晚|\b(?:today|tomorrow|yesterday|tonight)\b|\b(?:next|last|this)\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+      if (floatingDate.test(fact.content)) return false;
+      const dates = [fact.occurred_from, fact.occurred_to].filter(value => value != null);
+      const today = new Date().toLocaleDateString('sv-SE');
+      if (!dates.every((value, index) => {
+        if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) return false;
+        const date = new Date(value);
+        return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+          && value <= today && (index === 0 || value >= dates[index - 1]);
+      })) return false;
+      const evidence = fact.evidence || [];
+      return evidence.some(ref => ref?.speaker_role === 'user') && evidence.every(ref => {
+        if (!ref || typeof ref.source !== 'string') return false;
+        const { source, id, timestamp, speaker_role, assertion, start_char, end_char } = ref;
+        return (source === 'single' || (source.startsWith('group:') && !!source.slice(6).trim()))
+          && Number.isInteger(id) && id > 0 && Number.isFinite(timestamp) && timestamp > 0
+          && ((speaker_role === 'user' && assertion === 'self_statement')
+            || (speaker_role === 'assistant' && assertion === 'character_context'))
+          && (!Object.hasOwn(ref, 'generation_status') || ref.generation_status === 'completed')
+          && ((!Object.hasOwn(ref, 'start_char') && !Object.hasOwn(ref, 'end_char'))
+            || (Number.isInteger(start_char) && Number.isInteger(end_char) && 0 <= start_char && start_char < end_char))
+          && (!Object.hasOwn(ref, 'content_hash') || (typeof ref.content_hash === 'string' && !!ref.content_hash.trim()));
+      });
+    },
+
+    startMemoryFactArchive(fact) {
+      if (this.memoryFactNeedsReview(fact) && this.memoryFactActionAvailable(fact) && this.memoryFactArchiveReasons(fact).length) {
+        this.memoryFactActionDraft = { fact, reason: '' };
+      }
+    },
+
+    async reviewMemoryFact(fact, decision) {
+      if (!this.memoryFactNeedsReview(fact) || !['keep', 'archive'].includes(decision)) return;
+      const body = { decision };
+      if (decision === 'archive') {
+        const draft = this.memoryFactActionDraft;
+        if (draft?.fact !== fact || !this.memoryFactArchiveReasons(fact).includes(draft.reason)) return;
+        body.archive_reason = draft.reason;
+      }
+      const successKey = decision === 'archive' ? 'toastMemoryFactReviewArchived' : 'toastMemoryFactReviewKept';
+      return this.submitMemoryFactAction(fact, API_PATHS.memoryFactReview, body, successKey);
+    },
+
+    startMemoryFactVersionRestore(fact, index) {
+      if (Number.isInteger(index) && this.memoryFactVersionIsDisplayable(fact.versions?.[index])
+          && this.memoryFactActionAvailable(fact)) {
+        this.memoryFactActionDraft = { fact, versionIndex: index };
+      }
+    },
+
+    async restoreMemoryFactVersion(fact, index) {
+      const draft = this.memoryFactActionDraft;
+      if (draft?.fact !== fact || draft.versionIndex !== index || !this.memoryFactVersionIsDisplayable(fact.versions?.[index])) return;
+      return this.submitMemoryFactAction(fact, API_PATHS.memoryFactVersionRestore,
+        { version_index: index }, 'toastMemoryFactVersionRestored', true);
+    },
+
+    async submitMemoryFactAction(fact, path, body, successKey, refreshSummaries = false) {
+      if (!this.memoryFactActionAvailable(fact)) return;
+      const profileId = this.memoryProfileId;
+      const current = this.beginMemoryRequest(profileId, 'factAction');
+      this.memoryCurationPending = 'factAction';
+      this.memoryFactActionDraft = null;
+      try {
+        const res = await fetch(getBaseUrl() + path(profileId, fact.id), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, expected_revision: fact.action_revision }),
+        });
+        const data = res.ok ? await res.json() : null;
+        if (!current()) return;
+        if (data?.ok === true) {
+          await Promise.all([
+            this.refreshMemoryAfterCuration(profileId),
+            refreshSummaries ? this.loadMemorySummaries(profileId) : null,
+          ]);
+          if (current()) this.showToast(this.t(successKey), 'success');
+        } else {
+          this.showToast(this.t('toastMemoryFactActionFailed'), 'error');
+          if (res.status === 409) await Promise.all([this.loadMemoryFacts(profileId), this.loadMemoryStatus(profileId)]);
+        }
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryFactActionFailed'), 'error');
+      } finally {
+        if (current()) this.memoryCurationPending = '';
+      }
+    },
+
     memoryFactKindLabel(kind) {
       const kinds = ['stable', 'address', 'event', 'temporary', 'experience'];
       return kinds.includes(kind) ? this.t('memFactKind_' + kind) : kind;
@@ -4836,10 +4984,20 @@ const SettingsMixin = {
       return typeof timestamp === 'number' ? new Date(timestamp * 1000).toLocaleString() : timestamp;
     },
 
+    memoryFactVersionIsDisplayable(version) {
+      return typeof version?.content === 'string' && !!version.content.trim();
+    },
+
     memoryFactVersionComparisons(fact) {
-      return fact.versions.map((version, index) => ({
-        updated_at: version.updated_at,
-        ...this.memoryFactVersionDiff(version.content ?? '', fact.versions[index + 1]?.content ?? fact.content ?? ''),
+      if (!Array.isArray(fact.versions)) return [];
+      const valid = [];
+      for (const [version_index, version] of fact.versions.entries()) {
+        if (this.memoryFactVersionIsDisplayable(version)) valid.push({ ...version, version_index });
+      }
+      return valid.map(({ content, updated_at, version_index }, index) => ({
+        version_index,
+        updated_at,
+        ...this.memoryFactVersionDiff(content, valid[index + 1]?.content ?? fact.content ?? ''),
       }));
     },
 
@@ -4941,33 +5099,48 @@ const SettingsMixin = {
     },
 
     startEditMemoryFact(fact) {
-      this.memoryEditingFact = { ...fact };
+      if (!this.memoryFactActionAvailable(fact)) return;
+      const { id, content, category, weight, action_revision } = fact;
+      this.memoryEditingFact = { id, content, category, weight, expected_revision: action_revision, conflict: false };
     },
 
     async saveMemoryFact() {
       const profileId = this.memoryProfileId;
-      if (!this.memoryEditingFact || !profileId) return;
       const draft = this.memoryEditingFact;
-      const { id, content, category, weight } = draft;
+      if (!draft?.expected_revision || draft.conflict || !profileId || profileId !== this.memoryContentProfileId
+          || this.memoryCurationPending || this.memoryRestoringFactId || this.memoryPanelLoading) return;
+      const { id, content, category, weight, expected_revision } = draft;
+      const current = this.beginMemoryRequest(profileId, 'factEdit');
+      this.memoryCurationPending = 'factEdit';
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.memoryFactById(profileId, id),
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content, category, weight: parseFloat(weight) || 1.0 }),
+            body: JSON.stringify({ content, category, weight: parseFloat(weight) || 1.0, expected_revision }),
           }
         );
+        if (!current()) return;
+        if (res.status === 409) {
+          if (this.memoryEditingFact === draft) draft.conflict = true;
+          return;
+        }
         const data = await res.json();
+        if (!current()) return;
         if (res.ok && data.ok) {
           if (this.memoryEditingFact === draft && draft.content === content
               && draft.category === category && draft.weight === weight) this.memoryEditingFact = null;
           await this.loadMemoryFacts(profileId);
-          this.showToast('事实已更新', 'success');
+          if (current()) this.showToast('事实已更新', 'success');
         } else {
           this.showToast(`更新失败: ${data.error || ''}`, 'error');
         }
-      } catch (e) { this.showToast(`更新失败: ${e.message}`, 'error'); }
+      } catch (e) {
+        if (current()) this.showToast(`更新失败: ${e.message}`, 'error');
+      } finally {
+        if (current()) this.memoryCurationPending = '';
+      }
     },
 
     async deleteMemoryFact(factId) {
@@ -4990,22 +5163,35 @@ const SettingsMixin = {
 
     async toggleMemoryFactPin(fact) {
       const profileId = this.memoryProfileId;
-      if (!profileId) return;
+      if (!this.memoryFactActionAvailable(fact)) return;
+      const current = this.beginMemoryRequest(profileId, 'factPin');
+      this.memoryCurationPending = 'factPin';
       const newPinned = !fact.pinned;
       try {
         const res = await fetch(
           getBaseUrl() + API_PATHS.memoryFactById(profileId, fact.id),
           { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pinned: newPinned }) }
+            body: JSON.stringify({ pinned: newPinned, expected_revision: fact.action_revision }) }
         );
+        if (!current()) return;
+        if (res.status === 409) {
+          this.showToast(this.t('toastMemoryFactPinConflict'), 'error');
+          await this.loadMemoryFacts(profileId);
+          return;
+        }
         const data = await res.json();
+        if (!current()) return;
         if (res.ok && data.ok) {
           this.showToast(newPinned ? '已设为永久显示' : '已取消永久显示', 'success');
           await this.loadMemoryFacts(profileId);
         } else {
           this.showToast(`操作失败: ${data.error || ''}`, 'error');
         }
-      } catch (e) { this.showToast(`操作失败: ${e.message}`, 'error'); }
+      } catch (e) {
+        if (current()) this.showToast(`操作失败: ${e.message}`, 'error');
+      } finally {
+        if (current()) this.memoryCurationPending = '';
+      }
     },
 
     async addMemoryVector() {
@@ -5131,11 +5317,20 @@ const SettingsMixin = {
 
     clearMemoryCurationPreview() {
       this.memoryCurationPreview = null;
+      this.memoryCurationPromoted = false;
       this.memoryCurationSelection = [];
     },
 
     isMemoryCurationChange(item) {
       return ['merge', 'archive', 'review'].includes(item.action);
+    },
+
+    acceptMemoryCurationPreview(data, profileId, promoted = false) {
+      if (data?.profile_id !== profileId || !data.preview_id || !Array.isArray(data.items)) return false;
+      this.memoryCurationPreview = data;
+      this.memoryCurationPromoted = promoted;
+      this.memoryCurationSelection = data.items.filter(this.isMemoryCurationChange).map(item => item.fact_id);
+      return true;
     },
 
     async loadMemoryCurationPreview(profileId) {
@@ -5149,10 +5344,7 @@ const SettingsMixin = {
         const res = await fetch(getBaseUrl() + API_PATHS.memoryCurationPreview(profileId), { method: 'POST' });
         const data = await res.json();
         if (!current()) return;
-        if (res.ok && data.profile_id === profileId && data.preview_id && Array.isArray(data.items)) {
-          this.memoryCurationPreview = data;
-          this.memoryCurationSelection = data.items.filter(this.isMemoryCurationChange).map(item => item.fact_id);
-        } else {
+        if (!res.ok || !this.acceptMemoryCurationPreview(data, profileId)) {
           this.showToast(this.t('toastMemoryCurationPreviewFail'), 'error');
         }
       } catch {
@@ -5164,7 +5356,8 @@ const SettingsMixin = {
 
     async loadMemoryBulkCurationPage(profileId, restart = false) {
       const page = this.memoryBulkCurationPage;
-      if (this.memoryBulkCurationPending || this.memoryPanelLoading || profileId !== this.memoryContentProfileId
+      if (this.memoryBulkCurationPending || this.memoryCurationPending === 'promote'
+          || this.memoryPanelLoading || profileId !== this.memoryContentProfileId
           || (!restart && page?.next_cursor === null)) return;
       const current = this.beginMemoryRequest(profileId, 'bulkCuration');
       if (!current) return;
@@ -5184,6 +5377,7 @@ const SettingsMixin = {
             && [total, offset, covered].every(Number.isInteger) && 0 <= offset && offset <= covered && covered <= total
             && (data.next_cursor === null || (typeof data.next_cursor === 'string' && data.next_cursor !== cursor))) {
           this.memoryBulkCurationPage = data;
+          this.memoryBulkCurationRestartRequired = false;
         } else {
           this.memoryBulkCurationError = true;
         }
@@ -5194,15 +5388,57 @@ const SettingsMixin = {
       }
     },
 
+    markMemoryBulkCurationStale(profileId) {
+      this.beginMemoryRequest(profileId, 'bulkCuration');
+      this.memoryBulkCurationPage = null;
+      this.memoryBulkCurationPending = this.memoryBulkCurationError = false;
+      this.memoryBulkCurationRestartRequired = true;
+    },
+
+    async promoteMemoryBulkCurationItem(page, item) {
+      const profileId = this.memoryProfileId;
+      if (!profileId || profileId !== this.memoryContentProfileId || this.memoryPanelLoading
+          || this.memoryCurationPending || this.memoryBulkCurationPending || this.memoryRestoringFactId
+          || page !== this.memoryBulkCurationPage || page?.profile_id !== profileId
+          || !page.page_token || !page.items.includes(item) || !this.isMemoryCurationChange(item)) return;
+      const current = this.beginMemoryRequest(profileId, 'curation');
+      this.memoryCurationPending = 'promote';
+      try {
+        const res = await fetch(getBaseUrl() + API_PATHS.memoryCurationBulkPromote(profileId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ page_token: page.page_token, fact_id: item.fact_id }),
+        });
+        const data = res.ok ? await res.json() : null;
+        if (!current()) return;
+        if (!this.acceptMemoryCurationPreview(data, profileId, true)) {
+          if (res.status === 409) this.markMemoryBulkCurationStale(profileId);
+          this.showToast(this.t('toastMemoryBulkCurationPromoteFail'), 'error');
+          return;
+        }
+        await this.$nextTick(() => {
+          if (!current()) return;
+          const preview = this.$refs?.memoryCurationReview;
+          preview?.focus({ preventScroll: true });
+          preview?.scrollIntoView({ block: 'nearest' });
+        });
+      } catch {
+        if (current()) this.showToast(this.t('toastMemoryBulkCurationPromoteFail'), 'error');
+      } finally {
+        if (current()) this.memoryCurationPending = '';
+      }
+    },
+
     async applyMemoryCuration() {
       const profileId = this.memoryProfileId;
       const preview = this.memoryCurationPreview;
+      const promoted = this.memoryCurationPromoted;
       if (this.memoryCurationPending || this.memoryRestoringFactId || this.memoryPanelLoading
           || !preview || preview.profile_id !== profileId) return;
       const selectedIds = new Set(this.memoryCurationSelection);
       const factIds = preview.items.filter(item => this.isMemoryCurationChange(item) && selectedIds.has(item.fact_id))
         .map(item => item.fact_id);
-      if (!factIds.length && !preview.items.some(item => item.action === 'keep')) return;
+      if (!factIds.length && (promoted || !preview.items.some(item => item.action === 'keep'))) return;
       const current = this.beginMemoryRequest(profileId, 'curation');
       if (!current) return;
       this.memoryCurationPending = 'apply';
@@ -5212,13 +5448,15 @@ const SettingsMixin = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ preview_id: preview.preview_id, fact_ids: factIds }),
         });
-        const data = await res.json();
+        const data = res.ok ? await res.json() : null;
         if (!current()) return;
-        if (!res.ok || data.ok !== true) {
+        if (data?.ok !== true) {
+          if (promoted && res.status === 409) this.markMemoryBulkCurationStale(profileId);
           this.showToast(this.t('toastMemoryCurationApplyFail'), 'error');
           return;
         }
         this.memoryCurationResult = data;
+        if (promoted) this.markMemoryBulkCurationStale(profileId);
         await this.refreshMemoryAfterCuration(profileId);
       } catch {
         if (current()) this.showToast(this.t('toastMemoryCurationApplyFail'), 'error');

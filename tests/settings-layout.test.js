@@ -166,7 +166,7 @@ test('the Facts view exposes experiences, original evidence and text changes usi
   for (const binding of [
     'fact.kind', 'fact.occurred_from', 'fact.occurred_to', 'fact.retention_reason',
     'item.available', 'item.content', 'item.source', 'item.role', 'item.timestamp', 'item.id',
-    'item.start_char', 'item.end_char', 'item.truncated', 'memoryFactVersionComparisons(fact)',
+    'item.start_char', 'item.end_char', 'item.truncated', 'memoryFactHistory.get(fact.id)',
   ]) assert.ok(memory.includes(binding), binding);
   assert.doesNotMatch(memory, /v-html="item.content"/);
   for (const locale of ['en', 'zh']) {
@@ -176,4 +176,40 @@ test('the Facts view exposes experiences, original evidence and text changes usi
       assert.ok(window.LOCALES[locale][key], locale + ' ' + key);
     }
   }
+});
+
+test('Memory completion exposes scoped controls and actual daily metrics in both languages', () => {
+  const window = {};
+  for (const filename of ['api-paths.js', 'i18n.js']) {
+    runInNewContext(readFileSync(join(__dirname, '../static/js', filename), 'utf8'), { window });
+  }
+  assert.equal(window.API_PATHS.memoryFactReview('a/b', 'f/1'), '/memory/a%2Fb/facts/f%2F1/review');
+  assert.equal(window.API_PATHS.memoryFactVersionRestore('a/b', 'f/1'), '/memory/a%2Fb/facts/f%2F1/versions/restore');
+  assert.equal(window.API_PATHS.memoryCurationBulkPromote('a/b'), '/memory/a%2Fb/curation/bulk-preview/promote');
+  for (const binding of ['memoryStatus.counts?.facts', 'memoryStatus.counts.experiences', 'memoryStatus.counts.archived',
+    'memoryStatus.counts.expired', 'reviewMemoryFact(fact, \'keep\')', 'startMemoryFactArchive(fact)',
+    'v-model="memoryFactActionDraft.reason"', 'restoreMemoryFactVersion(fact, version.version_index)',
+    'promoteMemoryBulkCurationItem(memoryBulkCurationPage, item)', 'jumpToMemoryExperience(sum, experience.id)']) {
+    assert.ok(html.includes(binding), binding);
+  }
+  assert.match(html, /v-if="memoryStatus.curation.daily\?\.requests != null"/);
+  for (const locale of ['en', 'zh']) {
+    const strings = window.LOCALES[locale];
+    assert.match(strings.lblEnableDailyCuration, locale === 'en' ? /pending chats.*old memories/i : /每日补提取与旧记忆整理/);
+    assert.match(strings.hintDailyCuration, locale === 'en' ? /model.*charges/i : /模型.*费用/);
+    for (const field of ['requests', 'dialogue_messages', 'dialogue_slices', 'added', 'updated', 'confirmed', 'merged', 'archived', 'reviewed']) {
+      assert.ok(html.includes("'" + field + "'"), field);
+      assert.ok(strings['memDailyCurationMetric_' + field], locale + ' ' + field);
+    }
+    for (const key of ['memFactReviewKeep', 'memFactReviewArchive', 'memFactVersionRestore', 'memBulkCurationPromote', 'memDiaryExperiences']) {
+      assert.ok(strings[key], locale + ' ' + key);
+    }
+  }
+});
+
+test('Memory exposes a visible edit conflict and restart from a completed bulk page', () => {
+  assert.match(html, /v-if="memoryEditingFact.conflict"[^>]*role="alert"/);
+  assert.match(html, /memoryBulkCurationPage && \(memoryBulkCurationError \|\| memoryBulkCurationPage.next_cursor === null\)/);
+  assert.match(html, /:data-version-index="version.version_index"/);
+  assert.match(html, /memoryCurationCounts.keep && !memoryCurationPromoted/);
 });

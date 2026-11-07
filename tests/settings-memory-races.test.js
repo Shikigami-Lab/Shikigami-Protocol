@@ -24,6 +24,9 @@ function harness(fetch) {
     t: key => key, $nextTick: fn => Promise.resolve().then(fn),
   });
   for (const [key, method] of Object.entries(mixin.methods)) model[key] = method.bind(model);
+  for (const [key, getter] of Object.entries(mixin.computed)) {
+    if (typeof getter === 'function' && !(key in model)) Object.defineProperty(model, key, { get: getter.bind(model) });
+  }
   model.showToast = (message, type) => toasts.push({ message, type });
   return { model, watch: mixin.watch, toasts, runDebounce() {
     for (const [id, { fn, ms }] of timers) {
@@ -507,6 +510,60 @@ test('each earlier version compares against the next saved text, ending with the
   ]);
 });
 
+test('malformed historical entries are skipped without renumbering restorable versions', () => {
+  const { model } = harness(async () => response({}));
+  const comparisons = model.memoryFactVersionComparisons({
+    versions: [null, { content: 'First' }, { content: {} }, false, { content: 'Second' }, {}],
+    content: 'Latest',
+  });
+  assert.deepEqual(Array.from(comparisons, version => version.version_index), [1, 4]);
+  const texts = version => [version.prefix + version.before + version.suffix, version.prefix + version.after + version.suffix];
+  assert.deepEqual(Array.from(comparisons, texts), [['First', 'Second'], ['Second', 'Latest']]);
+});
+
+test('a conflicting save uses the original edit revision and preserves the visible draft', async () => {
+  const calls = [];
+  const { model } = harness(async (url, options) => {
+    calls.push([url, JSON.parse(options.body)]);
+    return { ...response({}, false), status: 409 };
+  });
+  model.selectMemoryProfile('a');
+  const fact = { id: 'entry', content: 'Before', category: 'other', weight: 1, action_revision: 'original' };
+  model.memoryFacts = [fact];
+  model.startEditMemoryFact(fact);
+  const draft = model.memoryEditingFact;
+  draft.content = 'My edit';
+  model.memoryFacts = [{ ...fact, content: 'Concurrent edit', action_revision: 'later' }];
+  await model.saveMemoryFact();
+  assert.deepEqual(calls, [['memoryFactById/a/entry', {
+    content: 'My edit', category: 'other', weight: 1, expected_revision: 'original',
+  }]]);
+  assert.equal(model.memoryEditingFact, draft);
+  assert.equal(draft.content, 'My edit');
+  assert.equal(draft.conflict, true);
+  await model.saveMemoryFact();
+  assert.equal(calls.length, 1);
+});
+
+test('pin updates carry the visible revision and refresh after a conflict', async () => {
+  const calls = [];
+  const fact = { id: 'entry', pinned: false, action_revision: 'old' };
+  const refreshed = { ...fact, action_revision: 'new' };
+  const { model, toasts } = harness(async (url, options) => {
+    calls.push([url, options?.body && JSON.parse(options.body)]);
+    if (options?.method === 'PUT') return { ...response({}, false), status: 409 };
+    return response({ facts: [refreshed] });
+  });
+  model.selectMemoryProfile('a');
+  model.memoryFacts = [fact];
+  await model.toggleMemoryFactPin(fact);
+  assert.deepEqual(calls, [
+    ['memoryFactById/a/entry', { pinned: true, expected_revision: 'old' }], ['memoryFacts/a', undefined],
+  ]);
+  assert.equal(model.memoryFacts[0], refreshed);
+  assert.deepEqual(toasts, [{ message: 'toastMemoryFactPinConflict', type: 'error' }]);
+});
+
 test('archive recall labels distinguish cold memory, live merge targets and unavailable records', () => {
   const { model } = harness(async () => response({}));
   model.memoryFacts = [{ id: 'live', content: 'Retained original' }, { id: 'expired', expires_at: 1 }];
@@ -590,6 +647,208 @@ test('the old-store preview sends one explicit cursor request per page and never
   assert.equal(model.memoryBulkCurationPage, last);
   assert.equal(model.memoryCurationPreview, null);
   assert.deepEqual([...model.memoryCurationSelection], []);
+});
+
+test('review keep sends the visible revision, and archive requires an explicit permitted reason', async () => {
+  const writes = [];
+  const plain = { id: 'entry', review_note: 'Verify the original', action_revision: 'r1' };
+  const { model } = harness(async (url, options) => {
+    if (options?.method === 'POST') {
+      writes.push([url, JSON.parse(options.body)]);
+      return response({ ok: true });
+    }
+    return response({});
+  });
+  model.selectMemoryProfile('a');
+  model.memoryFacts = [plain];
+  await model.reviewMemoryFact(plain, 'archive');
+  model.startMemoryFactArchive(plain);
+  assert.deepEqual(writes, []);
+  await model.reviewMemoryFact(plain, 'archive');
+  model.memoryFactActionDraft.reason = 'cold_memory';
+  await model.reviewMemoryFact(plain, 'archive');
+  assert.deepEqual(writes, []);
+  model.memoryFactActionDraft.reason = 'unsupported';
+  await model.reviewMemoryFact(plain, 'archive');
+  assert.deepEqual(writes, [['memoryFactReview/a/entry', {
+    decision: 'archive', archive_reason: 'unsupported', expected_revision: 'r1',
+  }]]);
+  const next = { ...plain, action_revision: 'r2' };
+  model.memoryFacts = [next];
+  await model.reviewMemoryFact(plain, 'keep');
+  await model.reviewMemoryFact(next, 'keep');
+  assert.deepEqual(writes[1], ['memoryFactReview/a/entry', { decision: 'keep', expected_revision: 'r2' }]);
+  assert.equal(writes.length, 2);
+});
+
+test('cold archive requires a completed, evidence-backed experience and protected rows cannot be archived', () => {
+  const { model } = harness(async () => response({}));
+  const experience = { kind: 'experience', content: 'We discussed the issue.', occurred_from: '2026-01-02',
+    occurred_to: '2026-01-03', evidence: [
+      { source: 'single', id: 1, timestamp: 1767312000, speaker_role: 'user', assertion: 'self_statement' },
+    ] };
+  const reasons = fact => Array.from(model.memoryFactArchiveReasons(fact));
+  assert.deepEqual(reasons(experience), ['low_value', 'unsupported', 'cold_memory']);
+  for (const overrides of [
+    { evidence: [{ ...experience.evidence[0], id: 0 }] }, { occurred_to: '2026-01-01' },
+    { occurred_to: '2026-02-31' }, { event_date: '2026-01-02' }, { expires_at: 9999999999 },
+    { content: 'We spoke yesterday.' },
+  ]) assert.deepEqual(reasons({ ...experience, ...overrides }), ['low_value', 'unsupported']);
+  for (const overrides of [{ pinned: true }, { source: 'manual' }, { is_manual: true }]) {
+    assert.deepEqual(reasons({ ...experience, ...overrides }), []);
+  }
+});
+
+test('restore requires confirmation of a specific version and refreshes the displaced current version into history', async () => {
+  const writes = [];
+  const before = { id: 'entry', content: 'Current', kind: 'experience', action_revision: 'r1',
+    versions: [{ content: 'First' }, { content: 'Second' }] };
+  const after = { ...before, content: 'Second', action_revision: 'r2', versions: [...before.versions, { content: 'Current' }] };
+  const diary = { date: '2026-11-05', experience_ids: ['entry'] };
+  const { model } = harness(async (url, options) => {
+    if (url === 'memoryFacts/a') return response({ facts: [after] });
+    if (url.startsWith('memorySummariesDays/a/')) return response({ summaries: [diary] });
+    if (options?.method === 'POST') writes.push([url, JSON.parse(options.body)]);
+    return response({ ok: true });
+  });
+  model.selectMemoryProfile('a');
+  model.memoryFacts = [before];
+  model.factFilterStatus = 'experiences';
+  await model.restoreMemoryFactVersion(before, 1);
+  model.startMemoryFactVersionRestore(before, 1);
+  await model.restoreMemoryFactVersion(before, 0);
+  assert.deepEqual(writes, []);
+  await model.restoreMemoryFactVersion(before, 1);
+  assert.deepEqual(writes, [['memoryFactVersionRestore/a/entry', { version_index: 1, expected_revision: 'r1' }]]);
+  assert.equal(model.memoryFacts[0].content, 'Second');
+  assert.equal(model.memoryFacts[0].versions.at(-1).content, 'Current');
+  assert.equal(model.memorySummaries[0], diary);
+  assert.equal(model.factFilterStatus, 'experiences');
+  assert.equal(model.memoryFactActionDraft, null);
+});
+
+test('switching personas clears fact confirmations and ignores a late review response', async () => {
+  let finishReview;
+  const requests = [];
+  const { model, toasts } = harness(url => {
+    requests.push(url);
+    return new Promise(resolve => { finishReview = resolve; });
+  });
+  const before = { id: 'entry', review_note: 'Check', action_revision: 'a' };
+  const current = { ...before, action_revision: 'b' };
+  model.selectMemoryProfile('a');
+  model.memoryFacts = [before];
+  model.startMemoryFactArchive(before);
+  model.memoryFactActionDraft.reason = 'low_value';
+  const pending = model.reviewMemoryFact(before, 'archive');
+  model.selectMemoryProfile('b');
+  model.memoryFacts = [current];
+  model.startMemoryFactArchive(current);
+  finishReview(response({ ok: true }));
+  await pending;
+  await model.reviewMemoryFact(before, 'keep');
+  assert.equal(model.memoryFactActionDraft.fact, current);
+  assert.equal(model.memoryFactActionDraft.reason, '');
+  assert.deepEqual(requests, ['memoryFactReview/a/entry']);
+  assert.deepEqual(toasts, []);
+});
+
+test('bulk promotion only sends the current actionable row and still requires standard Apply', async () => {
+  const writes = [];
+  const item = { fact_id: 'entry', action: 'archive' };
+  const keep = { fact_id: 'keep', action: 'keep' };
+  const { model } = harness(async (url, options) => {
+    if (options?.method === 'POST') writes.push([url, JSON.parse(options.body)]);
+    if (url === 'memoryCurationBulkPromote/a') return response({ profile_id: 'a', preview_id: 'standard', items: [item, keep] });
+    return response({ ok: true });
+  });
+  model.selectMemoryProfile('a');
+  const page = { profile_id: 'a', page_token: 'page', items: [item, keep], next_cursor: null };
+  model.memoryBulkCurationPage = page;
+  await model.promoteMemoryBulkCurationItem(page, keep);
+  await model.promoteMemoryBulkCurationItem({ ...page }, item);
+  assert.deepEqual(writes, []);
+  await model.promoteMemoryBulkCurationItem(page, item);
+  assert.deepEqual(writes, [['memoryCurationBulkPromote/a', { page_token: 'page', fact_id: 'entry' }]]);
+  assert.deepEqual([...model.memoryCurationSelection], ['entry']);
+  model.memoryCurationSelection = [];
+  await model.applyMemoryCuration();
+  assert.equal(writes.length, 1);
+  model.memoryCurationSelection = ['entry'];
+  await model.applyMemoryCuration();
+  assert.deepEqual(writes[1], ['memoryCurationApply/a', { preview_id: 'standard', fact_ids: ['entry'] }]);
+  assert.equal(model.memoryBulkCurationPage, null);
+  assert.equal(model.memoryBulkCurationRestartRequired, true);
+});
+
+test('promotion conflict clears a completed bulk page and the next explicit request starts at the first page', async () => {
+  const calls = [];
+  const item = { fact_id: 'entry', action: 'archive' };
+  const { model } = harness(async (url, options) => {
+    calls.push([url, JSON.parse(options.body)]);
+    if (url === 'memoryCurationBulkPromote/a') return { ...response({}, false), status: 409 };
+    return response({ profile_id: 'a', items: [], coverage: { total: 0, offset: 0, covered: 0 }, next_cursor: null });
+  });
+  model.selectMemoryProfile('a');
+  const page = { profile_id: 'a', page_token: 'page', items: [item], next_cursor: null };
+  model.memoryBulkCurationPage = page;
+  await model.promoteMemoryBulkCurationItem(page, item);
+  assert.equal(model.memoryBulkCurationPage, null);
+  assert.equal(model.memoryBulkCurationRestartRequired, true);
+  assert.equal(calls.length, 1);
+  await model.loadMemoryBulkCurationPage('a');
+  assert.deepEqual(calls[1], ['memoryCurationBulkPreview/a', { cursor: null }]);
+  assert.equal(model.memoryBulkCurationRestartRequired, false);
+});
+
+test('a late bulk promotion cannot install a normal preview after switching personas', async () => {
+  let finish;
+  const { model } = harness(() => new Promise(resolve => { finish = resolve; }));
+  const item = { fact_id: 'entry', action: 'merge' };
+  model.selectMemoryProfile('a');
+  const page = { profile_id: 'a', page_token: 'page', items: [item] };
+  model.memoryBulkCurationPage = page;
+  const pending = model.promoteMemoryBulkCurationItem(page, item);
+  model.selectMemoryProfile('b');
+  finish(response({ profile_id: 'a', preview_id: 'late', items: [item] }));
+  await pending;
+  assert.equal(model.memoryCurationPreview, null);
+  assert.equal(model.memoryBulkCurationPage, null);
+  assert.equal(model.memoryCurationPending, '');
+});
+
+test('diary links jump to the matching filter, reveal a paginated experience and ignore a stale diary', async () => {
+  const { model } = harness(async () => response({}));
+  const active = { id: 'active', kind: 'experience', content: 'Active' };
+  const archived = { id: 'archived', kind: 'experience', archived: true, content: 'Archived' };
+  const expired = { id: 'expired', kind: 'experience', expires_at: 1, content: 'Expired' };
+  const summary = { experience_ids: ['active', 'archived', 'expired', 'ordinary', 'missing', 'active'] };
+  const focus = [];
+  model.$refs = { memoryFactsList: { querySelectorAll: () => [
+    { dataset: { factId: 'active' }, focus: () => focus.push('active'), scrollIntoView() {} },
+    { dataset: { factId: 'archived' }, focus: () => focus.push('archived'), scrollIntoView() {} },
+  ] } };
+  model.selectMemoryProfile('a');
+  model.memoryFacts = [...Array.from({ length: 35 }, (_, index) => ({
+    id: 'new-' + index, kind: 'experience', pinned: true,
+  })), active, archived, expired, { id: 'ordinary', content: 'Fact' }];
+  model.memorySummaries = [summary];
+  assert.deepEqual(Array.from(model.memoryDiaryExperiences(summary), item => item.id), ['active', 'archived', 'expired']);
+  model.factSearch = 'hides the target';
+  model.factFilterEmotional = 'with_note';
+  await model.jumpToMemoryExperience(summary, 'active');
+  assert.equal(model.memoryActiveSubTab, 'facts');
+  assert.equal(model.factFilterStatus, 'experiences');
+  assert.ok(model.displayedMemoryFacts.includes(active));
+  await model.jumpToMemoryExperience(summary, 'archived');
+  assert.equal(model.factFilterStatus, 'archived');
+  assert.deepEqual(focus, ['active', 'archived']);
+  model.selectMemoryProfile('b');
+  model.memoryFacts = [{ ...active }];
+  model.memoryActiveSubTab = 'summaries';
+  await model.jumpToMemoryExperience(summary, 'active');
+  assert.equal(model.memoryActiveSubTab, 'summaries');
+  assert.deepEqual(focus, ['active', 'archived']);
 });
 
 test('a failed old-store page keeps the prior results and allows retry or an explicit restart', async () => {

@@ -2,6 +2,7 @@
 
 事实原文和旧版本保留，日常使用按有效期过滤。
 """
+import hashlib
 import json
 import logging
 import math
@@ -13,6 +14,7 @@ import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, fields
+from datetime import date
 from typing import List, Optional
 from src.utils.memory_time import has_floating_date
 
@@ -51,6 +53,11 @@ _VALID_CATEGORIES = frozenset({
 })
 _VALID_SOURCES = frozenset({"manual", "auto", "reflection"})
 EXPERIENCE_CONTENT_LIMIT = 1200
+_REVIEW_ARCHIVE_REASONS = ("cold_memory", "low_value", "unsupported")
+_DAILY_COUNTERS = (
+    "requests", "dialogue_messages", "dialogue_slices", "added", "updated", "confirmed",
+    "merged", "archived", "reviewed",
+)
 
 
 def _valid_source_offsets(data):
@@ -133,7 +140,7 @@ class LongTermFact:
         return cls(
             id=d.get("id", "f_" + uuid.uuid4().hex[:8]),
             content=d.get("content", ""),
-            weight=round(float(d.get("weight", 1.0)), 2),
+            weight=float(d.get("weight", 1.0)),
             source=d.get("source", "manual"),
             is_manual=bool(d.get("is_manual", True)),
             category=d.get("category", "other"),
@@ -159,6 +166,109 @@ class LongTermFact:
             occurred_to=d.get("occurred_to"),
             retention_reason=d.get("retention_reason") or "",
         )
+
+
+def fact_action_revision(fact: LongTermFact) -> str:
+    """Fingerprint the entire current fact and its history for explicit user actions."""
+    data = asdict(fact)
+    data["weight"], data["updated_at"] = float(fact.weight), float(fact.updated_at)
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _is_iso_date(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def _valid_experience_range(start, end):
+    known = [value for value in (start, end) if value is not None]
+    today = date.today().isoformat()
+    return all(_is_iso_date(value) and value <= today for value in known) and known == sorted(known)
+
+
+def _has_source_reference(ref):
+    return (
+        isinstance(ref, dict) and isinstance(ref.get("source"), str) and bool(ref["source"].strip())
+        and type(ref.get("id")) is int and ref["id"] > 0
+    )
+
+
+def _valid_cold_reference(ref):
+    if not _has_source_reference(ref):
+        return False
+    source, timestamp = ref["source"], ref.get("timestamp")
+    start, end = ref.get("start_char"), ref.get("end_char")
+    return (
+        (source == "single" or (source.startswith("group:") and bool(source[6:].strip())))
+        and type(timestamp) in (int, float) and 0 < timestamp < float("inf")
+        and (ref.get("speaker_role"), ref.get("assertion")) in (
+            ("user", "self_statement"), ("assistant", "character_context"),
+        )
+        and ref.get("generation_status", "completed") == "completed"
+        and ("start_char" not in ref and "end_char" not in ref
+             or type(start) is int and type(end) is int and 0 <= start < end)
+        and ("content_hash" not in ref
+             or isinstance(ref["content_hash"], str) and bool(ref["content_hash"].strip()))
+    )
+
+
+def can_cold_archive_experience(fact: LongTermFact) -> bool:
+    """Check stored provenance for recallable cold archives."""
+    return (
+        fact.kind == "experience" and not fact.event_date and fact.expires_at is None
+        and not has_floating_date(fact.content)
+        and _valid_experience_range(fact.occurred_from, fact.occurred_to)
+        and all(_valid_cold_reference(ref) for ref in fact.evidence)
+        and any(ref["speaker_role"] == "user" for ref in fact.evidence)
+    )
+
+
+def _restore_fields(version, fact):
+    if not isinstance(version, dict) or version.get("id", fact.id) != fact.id:
+        return None
+    old_kind = version.get("kind", "")
+    # The first correction could classify an untyped legacy record as stable.
+    if old_kind != fact.kind and (old_kind, fact.kind) != ("", "stable"):
+        return None
+    content = version.get("content")
+    category = version.get("category", "other")
+    tags = version.get("tags", [])
+    evidence = version.get("evidence", [])
+    note = version.get("emotional_note", "")
+    reason = version.get("retention_reason", "")
+    event_date = version.get("event_date")
+    expires_at = version.get("expires_at")
+    start, end = version.get("occurred_from"), version.get("occurred_to")
+    if (
+        not isinstance(content, str) or not content.strip()
+        or not isinstance(category, str) or category not in _VALID_CATEGORIES
+        or not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags)
+        or not isinstance(evidence, list) or not all(_has_source_reference(ref) for ref in evidence)
+        or not isinstance(note, str) or not isinstance(reason, str)
+        or (event_date is not None and not _is_iso_date(event_date))
+        or (expires_at is not None and (
+            type(expires_at) not in (int, float) or not -float("inf") < expires_at < float("inf")
+        ))
+        or not _valid_experience_range(start, end)
+    ):
+        return None
+    if fact.kind == "experience" and (
+        len(content) > EXPERIENCE_CONTENT_LIMIT or event_date is not None or expires_at is not None
+    ):
+        return None
+    if (fact.kind == "event" and (event_date is None or expires_at is None)
+            or fact.kind == "temporary" and expires_at is None):
+        return None
+    return {
+        "content": content, "category": category, "tags": deepcopy(tags), "evidence": deepcopy(evidence),
+        "emotional_note": note, "retention_reason": reason, "event_date": event_date,
+        "expires_at": expires_at, "occurred_from": start, "occurred_to": end,
+    }
 
 
 class LongTermStore:
@@ -209,14 +319,15 @@ class LongTermStore:
         logger.info("[LongTermStore] 新增事实 id=%s category=%s source=%s", fact.id, fact.category, fact.source)
         return fact
 
-    def update(self, fact_id: str, **kwargs) -> bool:
+    def update(self, fact_id: str, *, expected_revision: Optional[str] = None, **kwargs) -> bool:
         """更新事实字段。返回是否成功。
         只有 content / category 变更才刷新 updated_at（影响 score 衰减）。
         pinned / weight / tags 为元数据，不影响时间戳。
+        expected_revision: optional raw token from fact_action_revision().
         """
-        self._refresh()
-        fact = self._get_by_id(fact_id)
-        if not fact:
+        revision, cursors, facts = self.extraction_snapshot()
+        fact = next((item for item in facts if item.id == fact_id), None)
+        if fact is None or (expected_revision is not None and fact_action_revision(fact) != expected_revision):
             return False
         content = kwargs.get("content")
         if fact.kind == "experience" and content and len(str(content).strip()) > EXPERIENCE_CONTENT_LIMIT:
@@ -244,9 +355,67 @@ class LongTermStore:
             fact.updated_at = time.time()
             fact.curation_protected = True
             fact.review_note = ""
-        if fact.archived and fact != self._get_by_id(fact_id):
+        if fact.archived and fact != previous:
             fact.archive_revision = uuid.uuid4().hex
-        return self._commit([fact if f.id == fact_id else f for f in self._facts], self._cursors)
+        return self._commit([fact if item.id == fact_id else item for item in facts], cursors,
+                            expected_revision=revision)
+
+    def resolve_review(self, fact_id: str, expected_revision: str, decision: str,
+                       archive_reason: Optional[str] = None) -> bool:
+        """Resolve a pending review against the exact fact shown to the user."""
+        if decision not in ("keep", "archive"):
+            return False
+        if (decision == "archive" and archive_reason not in _REVIEW_ARCHIVE_REASONS
+                or decision == "keep" and archive_reason is not None):
+            return False
+        revision, cursors, facts, state = self.curation_snapshot()
+        fact = self._fact_for_action(facts, fact_id, expected_revision)
+        if fact is None or not fact.is_active() or not isinstance(fact.review_note, str) or not fact.review_note.strip():
+            return False
+        if decision == "archive":
+            if fact.is_manual or fact.source == "manual" or fact.pinned:
+                return False
+            if archive_reason == "cold_memory" and not can_cold_archive_experience(fact):
+                return False
+            fact.archived = True
+            fact.archive_reason = archive_reason
+            fact.archive_note = fact.review_note
+            fact.archive_revision = uuid.uuid4().hex
+            fact.merged_into = None
+            fact.merged_source_version = fact.merged_target_version = ""
+            state["index_cleanup_pending"] = fact.archive_revision
+        fact.review_note = ""
+        fact.curation_protected = True
+        return self.apply_curation(revision, facts, cursors, state)
+
+    def restore_version(self, fact_id: str, version_index: int, expected_revision: str) -> bool:
+        """Restore historical content while preserving current identity and user overrides."""
+        if type(version_index) is not int or version_index < 0:
+            return False
+        revision, cursors, facts, state = self.curation_snapshot()
+        fact = self._fact_for_action(facts, fact_id, expected_revision)
+        if fact is None or version_index >= len(fact.versions):
+            return False
+        restored = _restore_fields(fact.versions[version_index], fact)
+        if restored is None:
+            return False
+        previous = fact.snapshot()
+        for key, value in restored.items():
+            setattr(fact, key, value)
+        if fact.archived and fact.archive_reason == "cold_memory" and not can_cold_archive_experience(fact):
+            return False
+        fact.versions.append(previous)
+        fact.review_note = ""
+        fact.curation_protected = True
+        fact.updated_at = time.time()
+        if fact.archived:
+            fact.archive_revision = uuid.uuid4().hex
+        return self.apply_curation(revision, facts, cursors, state)
+
+    @staticmethod
+    def _fact_for_action(facts, fact_id, expected_revision):
+        fact = next((item for item in facts if item.id == fact_id), None)
+        return fact if fact is not None and fact_action_revision(fact) == expected_revision else None
 
     def delete(self, fact_id: str) -> bool:
         """按 ID 删除事实（唯一删除入口）。"""
@@ -311,10 +480,17 @@ class LongTermStore:
         self._refresh()
         with _WRITE_LOCK:
             daily = self._curation.get("daily")
+            daily_status = None
+            if daily:
+                daily_status = {
+                    "day": daily["day"], "status": daily["status"],
+                    **{key: daily[key] for key in _DAILY_COUNTERS
+                       if type(daily.get(key)) is int and daily[key] >= 0},
+                }
             return {
                 "latest": deepcopy(self._curation.get("latest")),
                 "index_pending": bool(self._curation.get("index_cleanup_pending")),
-                "daily": {"day": daily["day"], "status": daily["status"]} if daily else None,
+                "daily": daily_status,
             }
 
     def curation_index_token(self) -> Optional[str]:

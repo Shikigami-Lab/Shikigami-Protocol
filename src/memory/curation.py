@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date
@@ -12,7 +13,7 @@ import time
 import uuid
 
 from src.memory.fact_operations import apply_operations, normalize, rank_related
-from src.memory.long_term_store import LongTermFact, LongTermStore
+from src.memory.long_term_store import LongTermFact, LongTermStore, fact_action_revision
 from src.memory.recall import semantic_version
 from src.utils.memory_time import has_floating_date
 
@@ -50,6 +51,9 @@ For new experiences, use cold_memory only for evidence-backed completed experien
 Use review when more evidence is needed. Do not rewrite any record or propose deletion."""
 
 Decide = Callable[[list[LongTermFact]], Awaitable[list[dict]]]
+_CURATION_COUNTS = ("merged", "archived", "reviewed")
+_DAILY_COUNTS = ("requests", "dialogue_messages", "dialogue_slices", "added", "updated", "confirmed", *_CURATION_COUNTS)
+_daily_request_start: ContextVar[Callable[[], None] | None] = ContextVar("daily_request_start", default=None)
 
 
 @dataclass
@@ -60,6 +64,23 @@ class DailyDialogue:
     next_offsets: dict[str, dict]
     is_current: Callable[[], bool]
     threshold: float
+
+
+@dataclass
+class _BulkPage:
+    token: str
+    profile_id: str
+    revision: int
+    versions: dict[str, str]
+    items: dict[str, dict]
+
+
+@dataclass
+class _PendingPreview:
+    id: str
+    versions: dict[str, str]
+    items: list[dict]
+    promoted: bool
 
 
 class CurationConflict(Exception):
@@ -265,9 +286,15 @@ class MemoryCuration:
     def __init__(self, profile_id: str, store: LongTermStore):
         self.profile_id = profile_id
         self.store = store
-        self._pending = None
+        self._pending: _PendingPreview | None = None
         self._in_flight = asyncio.Lock()
         self._bulk_scope = uuid.uuid4().hex
+        self._bulk_page: _BulkPage | None = None
+
+    def _stage_preview(self, versions: dict[str, str], items: list[dict], *, promoted: bool = False) -> dict:
+        preview_id = uuid.uuid4().hex
+        self._pending = _PendingPreview(preview_id, versions, items, promoted)
+        return {"profile_id": self.profile_id, "preview_id": preview_id, "items": deepcopy(items)}
 
     async def preview(self, decide: Decide) -> dict:
         if self._in_flight.locked():
@@ -276,9 +303,7 @@ class MemoryCuration:
             _, _, facts, state = self.store.curation_snapshot()
             rows = _candidates(facts, state.get("reviewed", {}))
             items = _validate(rows, await decide(rows)) if rows else []
-            preview_id = uuid.uuid4().hex
-            self._pending = (preview_id, {fact.id: _version(fact) for fact in rows}, items)
-            return {"profile_id": self.profile_id, "preview_id": preview_id, "items": deepcopy(items)}
+            return self._stage_preview({fact.id: fact_action_revision(fact) for fact in rows}, items)
 
     async def preview_bulk(self, decide: Decide, *, cursor: str | None = None) -> dict:
         """Read one ID-ordered page from the same store revision. Advice only."""
@@ -314,12 +339,46 @@ class MemoryCuration:
             if self.store.curation_snapshot()[0] != revision:
                 raise CurationConflict("Memories changed during the bulk preview")
             covered = offset + len(page)
+            page_token = uuid.uuid4().hex
+            self._bulk_page = _BulkPage(page_token, self.profile_id, revision,
+                                        {fact.id: fact_action_revision(fact) for fact in rows}, items_by_id)
             return {
                 "profile_id": self.profile_id,
-                "items": [items_by_id[fact.id] for fact in page],
+                "page_token": page_token,
+                "items": deepcopy([items_by_id[fact.id] for fact in page]),
                 "coverage": {"total": len(facts), "offset": offset, "covered": covered},
                 "next_cursor": f"{scope}{covered}" if covered < len(facts) else None,
             }
+
+    def promote_bulk(self, page_token: str, fact_id: str) -> dict:
+        """Stage one suggestion from the latest page for the ordinary apply flow."""
+        if self._in_flight.locked():
+            raise CurationConflict("A memory preview is already running")
+        page = self._bulk_page
+        if page is None or page.token != page_token or page.profile_id != self.profile_id:
+            raise CurationConflict("Generate a fresh bulk memory preview")
+        revision, _, facts, _ = self.store.curation_snapshot()
+        if revision != page.revision:
+            raise CurationConflict("Memories changed after the bulk preview")
+        item = page.items.get(fact_id)
+        if item is None or item["action"] not in ("archive", "merge", "review"):
+            raise CurationConflict("This bulk preview item cannot be promoted")
+        selected_ids = [fact_id]
+        if item["action"] == "merge":
+            target = page.items.get(item["target_id"])
+            if target is None or target["action"] != "keep":
+                raise CurationConflict("The bulk merge representative is unavailable")
+            selected_ids.append(target["fact_id"])
+        by_id = {fact.id: fact for fact in facts}
+        versions = {}
+        for selected_id in selected_ids:
+            fact = by_id.get(selected_id)
+            version = page.versions.get(selected_id)
+            if (version is None or fact is None or _curation_keep_reason(fact) is not None
+                    or fact_action_revision(fact) != version):
+                raise CurationConflict("Memories changed after the bulk preview")
+            versions[selected_id] = version
+        return self._stage_preview(versions, [item], promoted=True)
 
     def apply(self, preview_id: str, fact_ids: list[str] | None = None) -> dict:
         revision, cursors, facts, state = self.store.curation_snapshot()
@@ -329,11 +388,14 @@ class MemoryCuration:
             if replay["selection"] != selection:
                 raise CurationConflict("This preview was already applied with a different selection")
             return replay["counts"]
-        if self._pending is None or preview_id != self._pending[0]:
+        pending = self._pending
+        if pending is None or preview_id != pending.id:
             raise CurationConflict("Generate a fresh memory preview")
-        _, versions, items = self._pending
-        if fact_ids is not None:
-            selected = set(fact_ids)
+        if pending.promoted and selection == []:
+            raise CurationConflict("Select the promoted memory suggestion")
+        versions, items = pending.versions, pending.items
+        if selection is not None:
+            selected = set(selection)
             if not selected <= {item["fact_id"] for item in items if item["action"] != "keep"}:
                 raise CurationConflict("Selection is not part of this preview")
             items = [item for item in items if item["action"] == "keep" or item["fact_id"] in selected]
@@ -347,16 +409,22 @@ class MemoryCuration:
     def _commit_preview(self, preview_id, versions, items, revision, cursors, facts, state,
                         *, origin, selection=None, offsets=None):
         by_id = {fact.id: fact for fact in facts}
+        version_of = fact_action_revision if origin == "manual" else _version
         if any(
-            fact_id not in by_id or _version(by_id[fact_id]) != version or not by_id[fact_id].is_active()
+            fact_id not in by_id or version_of(by_id[fact_id]) != version or not by_id[fact_id].is_active()
             for fact_id, version in versions.items()
         ):
             raise CurationConflict("Memories changed after the preview")
-        receipt = {"ok": True, "merged": 0, "archived": 0, "reviewed": 0}
+        receipt = {"ok": True, **dict.fromkeys(_CURATION_COUNTS, 0)}
         for item in items:
             fact = by_id[item["fact_id"]]
             action = item["action"]
-            fact.review_note = item["reason"] if action == "review" else ""
+            if action == "review":
+                if fact.review_note != item["reason"]:
+                    fact.review_note = item["reason"]
+                    receipt["reviewed"] += 1
+                continue
+            fact.review_note = ""
             if action in ("archive", "merge"):
                 fact.archived = True
                 fact.archive_reason = "merged" if action == "merge" else item["archive_reason"]
@@ -367,8 +435,6 @@ class MemoryCuration:
                     fact.merged_source_version = semantic_version(fact)
                     fact.merged_target_version = semantic_version(by_id[fact.merged_into])
                 receipt["merged" if action == "merge" else "archived"] += 1
-            elif action == "review":
-                receipt["reviewed"] += 1
         reviewed = {key: value for key, value in state.get("reviewed", {}).items() if key in by_id}
         reviewed.update({item["fact_id"]: _version(by_id[item["fact_id"]]) for item in items})
         state["reviewed"] = reviewed
@@ -376,6 +442,8 @@ class MemoryCuration:
             receipts = state.get("receipts", {})
             receipts[preview_id] = {"selection": selection, "counts": receipt}
             state["receipts"] = dict(list(receipts.items())[-32:])
+        elif origin == "daily":
+            state["daily"].update({key: receipt[key] for key in _CURATION_COUNTS})
         if receipt["merged"] or receipt["archived"]:
             state["index_cleanup_pending"] = preview_id
         state["latest"] = {"counts": receipt, "at": time.time(), "origin": origin}
@@ -417,9 +485,10 @@ class MemoryCuration:
             if not rows and dialogue is None:
                 return
             run_id = uuid.uuid4().hex
-            state["daily"] = {"day": day, "id": run_id, "status": "running"}
+            state["daily"] = {"day": day, "id": run_id, "status": "running", **dict.fromkeys(_DAILY_COUNTS, 0)}
             if not self.store.apply_curation(revision, facts, cursors, state):
                 return
+            request_token = _daily_request_start.set(lambda: self._record_daily_request(run_id))
             try:
                 operations, raw_items = (await decide_combined(rows, dialogue) if dialogue is not None
                                          else ([], await decide(rows)))
@@ -439,6 +508,7 @@ class MemoryCuration:
                         raise CurationConflict("Memories or dialogue changed during the daily request")
                     changed, items = self._apply_daily_dialogue(dialogue, operations, current_facts, items, versions)
                     current_cursors, next_offsets = dialogue.next_cursors, dialogue.next_offsets
+                    state["daily"].update(self._dialogue_counts(dialogue, facts, current_facts))
                 state["daily"]["status"] = "completed"
                 self._commit_preview(run_id, versions, items, revision, current_cursors, current_facts, state,
                                      origin="daily", offsets=next_offsets)
@@ -450,6 +520,37 @@ class MemoryCuration:
                 self._end_attempt(run_id, "stale" if dialogue is not None else "failed")
             except Exception:
                 self._end_attempt(run_id, "failed")
+            finally:
+                _daily_request_start.reset(request_token)
+
+    def _record_daily_request(self, run_id: str) -> None:
+        revision, cursors, facts, state = self.store.curation_snapshot()
+        daily = state.get("daily", {})
+        if daily.get("id") != run_id or daily.get("status") != "running" or daily.get("requests") != 0:
+            raise CurationConflict("This daily memory request is no longer available")
+        daily["requests"] = 1
+        if not self.store.apply_curation(revision, facts, cursors, state):
+            raise CurationConflict("Memories changed before the daily request")
+
+    @staticmethod
+    def _dialogue_counts(dialogue, before, after) -> dict[str, int]:
+        counts = {
+            "dialogue_messages": len({(row["source"], row["id"]) for row in dialogue.rows}),
+            "dialogue_slices": len({row["reference"] for row in dialogue.rows}),
+            "added": 0,
+            "updated": 0,
+            "confirmed": 0,
+        }
+        by_id = {fact.id: fact for fact in before}
+        for fact in after:
+            previous = by_id.get(fact.id)
+            if previous is None:
+                counts["added"] += 1
+            elif previous.record_version != fact.record_version:
+                counts["updated"] += 1
+            elif previous.evidence != fact.evidence:
+                counts["confirmed"] += 1
+        return counts
 
     @staticmethod
     def _apply_daily_dialogue(dialogue, operations, facts, items, versions):
@@ -552,6 +653,9 @@ async def _request_object(messages, preset):
         provider.client = provider.client.with_options(max_retries=0, timeout=60.0)
     raw = ""
     try:
+        on_request_start = _daily_request_start.get()
+        if on_request_start is not None:
+            on_request_start()
         async for chunk in provider.stream_chat(messages):
             if chunk.startswith("[LLM Error:") or len(raw) + len(chunk) > 32_000:
                 raise ValueError("Memory model request failed")

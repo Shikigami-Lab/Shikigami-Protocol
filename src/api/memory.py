@@ -15,8 +15,10 @@
   POST   /memory/{profile_id}/summaries/generate  — 写日记：按日期范围生成摘要
 """
 import asyncio
+import hashlib
 import logging
-from typing import List, Optional
+import time
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -24,6 +26,7 @@ from pydantic import BaseModel, Field
 from src.memory.curation import CurationConflict, curation_for, curation_preset, request_suggestions
 from src.memory.recall import RecallCandidates, experience_links_by_day
 from src.memory.extraction_batches import is_memory_turn, message_hash
+from src.memory.long_term_store import fact_action_revision
 from src.utils.debug_logger import (
     log_app_event,
     log_fact_add,
@@ -99,7 +102,18 @@ def _require_manager(request: Request, profile_id: str):
 @router.get("/{profile_id}/status")
 async def get_memory_status(profile_id: str, request: Request):
     mgr = _require_manager(request, profile_id)
-    return {**mgr.status(), "curation": mgr.facts.curation_status()}
+    now = time.time()
+    counts = dict(facts=0, experiences=0, archived=0, expired=0, review=0)
+    for fact in mgr.facts.get_all():
+        if fact.archived:
+            counts["archived"] += 1
+        elif not fact.is_active(now):
+            counts["expired"] += 1
+        else:
+            counts["experiences" if fact.kind == "experience" else "facts"] += 1
+        if fact.review_note:
+            counts["review"] += 1
+    return {**mgr.status(), "curation": mgr.facts.curation_status(), "counts": counts}
 
 
 # ── Facts CRUD ────────────────────────────────────────────────────────────────
@@ -117,6 +131,11 @@ class FactUpdate(BaseModel):
     weight: Optional[float] = None
     tags: Optional[List[str]] = None
     pinned: Optional[bool] = None
+    expected_revision: Optional[str] = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+def _profile_action_revision(profile_id: str, revision: str) -> str:
+    return hashlib.sha256(f"{profile_id}\0{revision}".encode("utf-8")).hexdigest()
 
 
 @router.get("/{profile_id}/facts")
@@ -124,7 +143,8 @@ async def get_facts(profile_id: str, request: Request):
     mgr = _require_manager(request, profile_id)
     pool = RecallCandidates(mgr.facts)
     return {"facts": [
-        {**fact.to_dict(), "archive_recallable": fact.id in pool.cold or fact.id in pool.aliases}
+        {**fact.to_dict(), "archive_recallable": fact.id in pool.cold or fact.id in pool.aliases,
+         "action_revision": _profile_action_revision(mgr._profile_id, fact_action_revision(fact))}
         for fact in pool.facts
     ]}
 
@@ -201,9 +221,16 @@ async def create_fact(profile_id: str, body: FactCreate, request: Request):
 @router.put("/{profile_id}/facts/{fact_id}")
 async def update_fact(profile_id: str, fact_id: str, body: FactUpdate, request: Request):
     mgr = _require_manager(request, profile_id)
-    kwargs = {k: v for k, v in body.model_dump().items() if v is not None}
-    ok = mgr.facts.update(fact_id, **kwargs)
-    if not ok:
+    kwargs = body.model_dump(exclude={"expected_revision"}, exclude_none=True)
+    revision = None
+    if body.expected_revision is not None:
+        if mgr._profile_id != profile_id:
+            raise HTTPException(status_code=404, detail="Memory profile not found")
+        revision = _require_current_fact_revision(mgr, fact_id, body.expected_revision)
+        kwargs["expected_revision"] = revision
+    if not mgr.facts.update(fact_id, **kwargs):
+        if revision is not None:
+            raise HTTPException(status_code=409, detail="The memory changed or cannot be edited")
         raise HTTPException(status_code=404, detail="Fact not found")
     return {"ok": True}
 
@@ -237,6 +264,11 @@ class BulkCurationPreview(BaseModel):
     cursor: Optional[str] = Field(default=None, max_length=128)
 
 
+class BulkCurationPromote(BaseModel):
+    page_token: str = Field(min_length=1, max_length=128)
+    fact_id: str = Field(min_length=1, max_length=512)
+
+
 class CurationApply(BaseModel):
     preview_id: str = Field(min_length=32, max_length=32)
     fact_ids: Optional[List[str]] = Field(default=None, max_length=24)
@@ -244,6 +276,17 @@ class CurationApply(BaseModel):
 
 class ArchiveRestore(BaseModel):
     archive_revision: str = Field(max_length=32)
+
+
+class FactReviewDecision(BaseModel):
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    decision: Literal["keep", "archive"]
+    archive_reason: Optional[Literal["low_value", "unsupported", "cold_memory"]] = None
+
+
+class FactVersionRestore(BaseModel):
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    version_index: int = Field(ge=0, strict=True)
 
 
 def _require_curation(request: Request, profile_id: str):
@@ -283,6 +326,48 @@ async def preview_curation_page(profile_id: str, body: BulkCurationPreview, requ
     except Exception:
         logger.warning("Bulk memory curation preview failed for profile %s", profile_id)
         raise HTTPException(status_code=502, detail="The memory model did not return a valid preview")
+
+
+@router.post("/{profile_id}/curation/bulk-preview/promote")
+async def promote_curation_page_item(profile_id: str, body: BulkCurationPromote, request: Request):
+    _, curation = _require_curation(request, profile_id)
+    try:
+        return curation.promote_bulk(body.page_token, body.fact_id)
+    except CurationConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _require_current_fact_revision(manager, fact_id: str, expected_revision: str) -> str:
+    fact = manager.facts.get_by_id(fact_id)
+    if fact is not None:
+        revision = fact_action_revision(fact)
+        if _profile_action_revision(manager._profile_id, revision) == expected_revision:
+            return revision
+    raise HTTPException(status_code=409, detail="The memory changed or is unavailable")
+
+
+@router.post("/{profile_id}/facts/{fact_id}/review")
+async def resolve_fact_review(profile_id: str, fact_id: str, body: FactReviewDecision, request: Request):
+    manager, _ = _require_curation(request, profile_id)
+    if (body.decision == "archive") != (body.archive_reason is not None):
+        raise HTTPException(status_code=422, detail="Choose a reason only when archiving")
+    revision = _require_current_fact_revision(manager, fact_id, body.expected_revision)
+    if not manager.facts.resolve_review(fact_id, revision, body.decision, body.archive_reason):
+        raise HTTPException(status_code=409, detail="The memory changed or cannot be reviewed")
+    if body.decision == "archive":
+        await manager.prune_curation_index()
+    return {"ok": True}
+
+
+@router.post("/{profile_id}/facts/{fact_id}/versions/restore")
+async def restore_fact_version(profile_id: str, fact_id: str, body: FactVersionRestore, request: Request):
+    manager, _ = _require_curation(request, profile_id)
+    revision = _require_current_fact_revision(manager, fact_id, body.expected_revision)
+    if not manager.facts.restore_version(fact_id, body.version_index, revision):
+        raise HTTPException(status_code=409, detail="The memory changed or this version cannot be restored")
+    if manager.vectors and manager.vectors.is_available():
+        await manager.reembed_fact(fact_id)
+    return {"ok": True}
 
 
 @router.post("/{profile_id}/curation/apply")
@@ -386,8 +471,7 @@ async def get_summaries(profile_id: str, request: Request, days: int = 3):
     mgr = _require_manager(request, profile_id)
     links = experience_links_by_day(mgr.facts.get_all())
     return {"summaries": [
-        {**summary, "experience_ids": sorted(links.get(summary.get("date", ""), set())
-                                             | set(summary.get("experience_ids") or ()))}
+        {**summary, "experience_ids": sorted(links.get(summary.get("date", ""), ()))}
         for summary in mgr.day_store.get_recent(n=days)
     ]}
 

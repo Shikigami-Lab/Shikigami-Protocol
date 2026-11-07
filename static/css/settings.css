@@ -1695,6 +1695,12 @@ textarea.form-input {
 }
 .mem-curation-preview { margin-top: 12px; }
 #memory-bulk-curation > summary { cursor: pointer; }
+.mem-fact-review-actions,
+.mem-diary-experience-links { flex: 1 1 100%; }
+.mem-diary-experience-links .s-btn { overflow-wrap: anywhere; }
+.mem-fact-version-actions { margin-top: 6px; }
+.mem-fact-version-actions p { flex: 1 1 100%; }
+.form-select.mem-fact-archive-reason { width: auto; max-width: 100%; }
 .mem-curation-counts {
   display: flex;
   flex-wrap: wrap;
