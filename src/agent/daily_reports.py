@@ -83,6 +83,18 @@ class DailyReportStore:
         return _configuration(row) if row is not None else None
 
     def configure(self, profile_id, time, instructions, enabled):
+        with closing(self._connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._get(db, profile_id)
+            if row is not None:
+                time = row["time"] if time is None else time
+                instructions = row["instructions"] if instructions is None else instructions
+                enabled = bool(row["enabled"]) if enabled is None else enabled
+            elif enabled is None:
+                enabled = True
+            return self._configure(db, profile_id, time, instructions, enabled, row)
+
+    def _configure(self, db, profile_id, time, instructions, enabled, row):
         if not isinstance(time, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", time):
             raise ValueError("Report time must be host-local HH:MM")
         if not isinstance(instructions, str) or not instructions.strip() or len(instructions) > 1000:
@@ -90,38 +102,35 @@ class DailyReportStore:
         if not isinstance(enabled, bool):
             raise ValueError("Report enabled must be a boolean")
 
-        with closing(self._connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            row = self._get(db, profile_id)
-            if row is not None and row["time"] == time and row["enabled"] == enabled:
-                if row["instructions"] == instructions:
-                    return _configuration(row)
-                next_day = row["next_day"]
-            elif enabled:
-                now = self._clock()
-                day = datetime.fromtimestamp(now).date()
-                if _slot(day, time) < now:
-                    day += _DAY
-                if row is not None and row["last_day"] is not None:
-                    day = max(day, date.fromisoformat(row["last_day"]) + _DAY)
-                next_day = day.isoformat()
-            else:
-                next_day = None
+        if row is not None and row["time"] == time and row["enabled"] == enabled:
+            if row["instructions"] == instructions:
+                return _configuration(row)
+            next_day = row["next_day"]
+        elif enabled:
+            now = self._clock()
+            day = datetime.fromtimestamp(now).date()
+            if _slot(day, time) < now:
+                day += _DAY
+            if row is not None and row["last_day"] is not None:
+                day = max(day, date.fromisoformat(row["last_day"]) + _DAY)
+            next_day = day.isoformat()
+        else:
+            next_day = None
 
-            db.execute("""INSERT INTO daily_reports(profile_id, time, instructions, enabled, next_day)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(profile_id) DO UPDATE SET
-                    time=excluded.time, instructions=excluded.instructions, enabled=excluded.enabled,
-                    next_day=excluded.next_day, claim_id=NULL, claim_deadline=NULL,
-                    last_status=CASE WHEN last_status='running' THEN 'skipped' ELSE last_status END
-                """, (profile_id, time, instructions, enabled, next_day))
-            return _configuration(self._get(db, profile_id))
+        db.execute("""INSERT INTO daily_reports(profile_id, time, instructions, enabled, next_day)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id) DO UPDATE SET
+                time=excluded.time, instructions=excluded.instructions, enabled=excluded.enabled,
+                next_day=excluded.next_day, claim_id=NULL, claim_deadline=NULL,
+                last_status=CASE WHEN last_status='running' THEN 'skipped' ELSE last_status END
+            """, (profile_id, time, instructions, enabled, next_day))
+        return _configuration(self._get(db, profile_id))
 
     def remove_profile(self, profile_id):
         with closing(self._connect()) as db, db:
             db.execute("DELETE FROM daily_reports WHERE profile_id=?", (profile_id,))
 
-    def _claim_due(self):
+    def _claim_due(self, started_at):
         claims = []
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -141,7 +150,7 @@ class DailyReportStore:
                 day, slot = due
                 profile_id = row["profile_id"]
                 next_day = (day + _DAY).isoformat()
-                if now - slot > _GRACE_SECONDS or datetime.fromtimestamp(slot).date() != day:
+                if slot < started_at or day != today or now - slot > _GRACE_SECONDS or datetime.fromtimestamp(slot).date() != day:
                     db.execute("""UPDATE daily_reports
                         SET next_day=?, last_day=?, last_run_at=?, last_status='missed' WHERE profile_id=?""",
                         (next_day, day.isoformat(), slot, profile_id))
@@ -173,8 +182,10 @@ class DailyReportStore:
             try:
                 with closing(self._connect()) as db:
                     row = self._get(db, profile_id)
+                now = self._clock()
                 return (row is not None and row["claim_id"] == claim_id
-                        and row["last_run_at"] <= self._clock() < row["claim_deadline"]
+                        and datetime.fromtimestamp(now).date().isoformat() == row["last_day"]
+                        and row["last_run_at"] <= now < row["claim_deadline"]
                         and loop.time() < deadline)
             except sqlite3.Error:
                 logger.exception("Daily report claim check failed")
@@ -221,7 +232,7 @@ class DailyReportStore:
         if self._scheduler is not None and not self._scheduler.done():
             raise RuntimeError("Daily report scheduler is already running")
         shutdown = asyncio.get_running_loop().create_future()
-        self._scheduler = asyncio.create_task(self._run(callback, shutdown))
+        self._scheduler = asyncio.create_task(self._run(callback, shutdown, self._clock()))
         try:
             yield
         finally:
@@ -229,13 +240,13 @@ class DailyReportStore:
                 shutdown.set_result(None)
             await asyncio.shield(self._scheduler)
 
-    async def _run(self, callback, shutdown):
+    async def _run(self, callback, shutdown, started_at):
         pending = set()
         try:
             while not shutdown.done():
                 pending = {task for task in pending if not task.done()}
                 try:
-                    claims = self._claim_due()
+                    claims = self._claim_due(started_at)
                 except sqlite3.Error:
                     logger.exception("Daily report scheduler tick failed")
                 else:

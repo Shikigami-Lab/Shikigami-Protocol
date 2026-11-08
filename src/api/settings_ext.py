@@ -124,7 +124,7 @@ async def guard_settings_access(request: Request, call_next):
     if root_path and path.startswith(root_path + "/"):
         path = path[len(root_path):]
     guarded = ("/settings", "/profiles", "/memory", "/sessions", "/lorebooks",
-               "/api/settings", "/api/agent/settings", "/api/tools", "/api/profiles",
+               "/api/settings", "/api/agent/settings", "/api/agent/daily-report", "/api/tools", "/api/profiles",
                "/api/preferences", "/api/setup")
     if any(path == prefix or path.startswith(prefix + "/") for prefix in guarded):
         origins = request.headers.getlist("origin")

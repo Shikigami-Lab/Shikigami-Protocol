@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from threading import RLock
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -27,7 +28,9 @@ class DailyReportDeliveryTests(unittest.IsolatedAsyncioTestCase):
             )),
             profile_loader=lambda _: {"base_prompt": "Synthetic persona"},
             store=SimpleNamespace(revision=lambda _: 3, task_search_records=lambda *args: []),
-            _mutations={},
+            _mutations={}, _state_lock=RLock(),
+            tools_allowed=lambda _: True,
+            access_for=lambda _: {'todo_enabled': True},
         )
 
     async def test_report_is_saved_for_loaded_noncurrent_role_and_announced(self):
@@ -76,7 +79,7 @@ class DailyReportDeliveryTests(unittest.IsolatedAsyncioTestCase):
         path = Path(self.session.storage_root) / "daily.sqlite3"
         reports = DailyReportStore(path, clock=lambda: now)
         reports.configure("reporter", "09:00", "Fixture", True)
-        now += 10
+        now += 5
         completed = asyncio.Event()
 
         async def stream(messages):
@@ -99,6 +102,22 @@ class DailyReportDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
             model.assert_called_once()
         self.assertEqual(self.session.conversation_store.get_recent()[-1]["content"], "Today's scheduled report.")
+
+    async def test_report_omits_data_sources_when_role_permission_is_off(self):
+        from src.agent.daily_report_delivery import run_daily_report
+
+        TodoStore(self.session.storage_root).add("Hidden task", owner="user")
+        self.runtime.access_for = lambda _: {}
+        self.runtime.store.task_search_records = lambda *args: self.fail("History must not be read")
+
+        async def stream(messages):
+            self.assertNotIn("Hidden task", str(messages))
+            self.assertIn('"user_todos": null', messages[1]["content"])
+            yield "Data unavailable."
+
+        with patch("src.agent.daily_report_delivery.get_provider", return_value=SimpleNamespace(stream_chat=stream)):
+            self.assertEqual(await run_daily_report(self.runtime, "reporter", "Fixture", lambda: True),
+                             "completed")
 
     async def test_provider_error_does_not_save_partial_report(self):
         from src.agent.daily_report_delivery import run_daily_report

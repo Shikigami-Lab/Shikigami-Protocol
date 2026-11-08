@@ -50,7 +50,8 @@ async def configure_daily_report(request: Request, body: DailyReportSettings,
     runtime = _runtime(request)
     _require_loaded_report_profile(request, profile_id)
     try:
-        report = runtime.daily_reports.configure(profile_id, body.time, body.instructions, body.enabled)
+        with runtime._state_lock:
+            report = runtime.daily_reports.configure(profile_id, body.time, body.instructions, body.enabled)
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
     return {"report": report}

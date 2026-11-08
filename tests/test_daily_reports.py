@@ -53,13 +53,16 @@ class DailyReportTests(IsolatedAsyncioTestCase):
         assert store.configure("role", "09:00", expected["instructions"], True) == expected
         reopened = DailyReportStore(path, clock=clock)
         assert reopened.get("role") == expected
-        for invalid in ("9:00", "24:00", "09:60", "09:00 ", None):
+        for invalid in ("9:00", "24:00", "09:60", "09:00 "):
             with self.assertRaises(ValueError):
                 store.configure("role", invalid, "Report", True)
-        for invalid in ("", " \n", "x" * 1001, None):
+        for invalid in ("", " \n", "x" * 1001):
             with self.assertRaises(ValueError):
                 store.configure("role", "09:00", invalid, True)
+        with self.assertRaises(ValueError):
+            store.configure("new-role", None, "Report", True)
         assert store.configure("role", "09:00", "x" * 1000, False)["next_run_at"] is None
+        assert store.configure("role", None, "New instructions", None)["enabled"] is False
         store.remove_profile("role")
         store.remove_profile("role")
         assert reopened.get("role") is None
@@ -75,7 +78,7 @@ class DailyReportTests(IsolatedAsyncioTestCase):
         store, path, clock = self.schedule()
         store.configure("role", "09:00", "Report", True)
         other = DailyReportStore(path, clock=clock)
-        clock.advance(minutes=2)
+        clock.advance(minutes=1)
         calls = []
         release = asyncio.Event()
 
@@ -120,7 +123,7 @@ class DailyReportTests(IsolatedAsyncioTestCase):
             await until(lambda: reopened.get("role")["last_status"] == "completed")
             assert len(calls) == 1
 
-    async def test_grace_window_includes_previous_local_day(self):
+    async def test_offline_slots_are_missed_even_within_previous_grace_window(self):
         store, _, clock = self.schedule()
         clock.now = clock.now.replace(hour=23, minute=58)
         store.configure("within", "23:59", "Report", True)
@@ -133,11 +136,11 @@ class DailyReportTests(IsolatedAsyncioTestCase):
             return "completed"
 
         async with store.running(callback):
-            await until(lambda: store.get("within")["last_status"] == "completed")
+            await until(lambda: store.get("within")["last_status"] == "missed")
             assert store.get("outside")["last_status"] == "missed"
             assert store.get("within")["next_run_at"] == clock.now.replace(
                 hour=23, minute=59, second=0).timestamp()
-            assert calls == ["within"]
+            assert calls == []
 
     async def test_clock_rollback_and_time_edit_keep_claimed_day(self):
         store, _, clock = self.schedule()
@@ -295,7 +298,7 @@ class DailyReportTests(IsolatedAsyncioTestCase):
         store, path, clock = self.schedule(str(seconds))
         store.configure("role", "09:00", "Report", True)
         clock.advance(minutes=1)
-        assert len(store._claim_due()) == 1  # Simulate process death immediately after commit.
+        assert len(store._claim_due(clock())) == 1  # Simulate process death immediately after commit.
         clock.advance(seconds=seconds)
 
         reopened = DailyReportStore(path, clock=clock)

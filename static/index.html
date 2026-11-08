@@ -1020,7 +1020,7 @@
                    aria-describedby="agent-daily-report-hint" :disabled="!dailyReport.loaded" />
             <label for="agent-daily-report-instructions">{{ t('dailyReportInstructions') }}</label>
             <textarea id="agent-daily-report-instructions" v-model="dailyReport.draft.instructions" class="form-input" rows="2"
-                      :placeholder="t('dailyReportPlaceholder')" :disabled="!dailyReport.loaded"></textarea>
+                      :placeholder="t('dailyReportPlaceholder')" :disabled="!dailyReport.loaded" maxlength="1000" required></textarea>
             <div class="agent-actions">
               <button type="submit" class="s-btn s-btn-small s-btn-primary"
                       :disabled="!dailyReport.loaded || dailyReport.loading || dailyReport.saving">

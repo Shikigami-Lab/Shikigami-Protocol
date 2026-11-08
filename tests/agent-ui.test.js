@@ -683,6 +683,23 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
   model.showToast = () => {};
   return { model, sandbox, app };
 }
+test('a daily report stays separate from an overlapping proactive stream', () => {
+  const { model, sandbox } = harness();
+  sandbox.EventSource = class { close() {} };
+  model.subscribeEvents('p1');
+  const send = (payload) => model._sseSource.onmessage({ data: JSON.stringify(payload) });
+  send({ token: 'Proactive ', done: false });
+  send({ type: 'new_message', role: 'assistant', source: 'daily_report', client_id: '',
+    message_id: 21, content: 'Daily report' });
+  send({ token: 'message', done: false });
+  send({ type: 'new_message', role: 'assistant', client_id: '', message_id: 22, content: 'Proactive message' });
+  send({ token: '', done: true });
+  assert.equal(model.messages.length, 2);
+  assert.equal(model.messages.find(item => item.id === 21)?.content, 'Daily report');
+  assert.equal(model.messages.find(item => item.id === 22)?.content, 'Proactive message');
+  assert.equal(model.messages.some(item => item._streaming), false);
+});
+
 test('a proactive notice marks its own role and opening it only clears that notice', async () => {
   const { model, sandbox } = harness();
   const saved = new Map();

@@ -1403,7 +1403,8 @@ const App = {
           if (sessionId !== this.currentSessionId || this.currentGroupId) return;
 
           if (data.type === 'proactive_stream_discard') {
-            if (this._aseStreaming && this.messages[this.messages.length - 1]?._streaming) this.messages.pop();
+            const index = this.messages.findLastIndex(message => message._streaming);
+            if (this._aseStreaming && index >= 0) this.messages.splice(index, 1);
             this._aseStreaming = false;
             this._aseStreamBuf = '';
             return;
@@ -1416,8 +1417,8 @@ const App = {
             if (data.done) {
               // Stream finished — finalize bubble and fire TTS
               if (this._aseStreaming) {
-                const last = this.messages[this.messages.length - 1];
-                if (last && last._streaming) delete last._streaming;
+                const last = this.messages.findLast(message => message._streaming);
+                if (last) delete last._streaming;
                 if (last) last.sender = this.sessions.find(s => s.id === this.currentSessionId)?.display_name || '';
                 if (this.ttsEnabled && this._aseStreamBuf.trim()) {
                   this.sendToTTS(this._aseStreamBuf);
@@ -1435,8 +1436,8 @@ const App = {
                 const displayName = this.sessions.find(s => s.id === this.currentSessionId)?.display_name || '';
                 this.messages.push({ role: 'assistant', content: data.token, _streaming: true, timestamp: this._now(), sender: displayName });
               } else {
-                const last = this.messages[this.messages.length - 1];
-                if (last && last._streaming) last.content += data.token;
+                const last = this.messages.findLast(message => message._streaming);
+                if (last) last.content += data.token;
               }
               this.$nextTick(() => this.scrollToBottom());
             }
@@ -1460,8 +1461,8 @@ const App = {
             }
             if (own && data.role !== 'assistant' && !data.request_id) return;
             // Skip ASE new_message if we already rendered it token-by-token
-            if (this._aseStreaming && data.client_id === '') {
-              const last = this.messages[this.messages.length - 1];
+            if (this._aseStreaming && data.client_id === '' && data.source !== 'daily_report') {
+              const last = this.messages.findLast(message => message._streaming);
               if (last && last._streaming && data.message_id != null) {
                 last.id = data.message_id;
                 if (data.agent_run_id) {
@@ -3287,8 +3288,14 @@ const App = {
     agentRemindersVisible: {
       flush: 'sync',
       handler(visible) {
-        if (visible) this._timerRefreshId = setInterval(() => this._tickTimerDisplay(), 1000);
-        else this.stopTimerDisplay();
+        if (!visible) { this.stopTimerDisplay(); return; }
+        let ticks = 0;
+        this._timerRefreshId = setInterval(() => {
+          this._tickTimerDisplay();
+          if (++ticks % 15 === 0 && this.dailyReport?.loaded && !this.dailyReport.saving && !this.dailyReport.error) {
+            this.refreshDailyReport();
+          }
+        }, 1000);
       },
     },
     todoToolRevision() {

@@ -821,12 +821,11 @@ class AgentRuntime:
                     result = {'ok': True, 'timer_id': reminder['id'], 'label': reminder['label'],
                               'due_at': reminder['due_at']}
                 elif name == 'timer_daily_report':
-                    prior = self.daily_reports.get(run.profile_id) or {}
                     if args:
-                        values = {key: args.get(key, prior.get(key)) for key in ('time', 'instructions', 'enabled')}
-                        if values['enabled'] is None:
-                            values['enabled'] = True
-                        prior = self.daily_reports.configure(run.profile_id, values['time'], values['instructions'], values['enabled'])
+                        prior = self.daily_reports.configure(run.profile_id, args.get('time'),
+                                                            args.get('instructions'), args.get('enabled'))
+                    else:
+                        prior = self.daily_reports.get(run.profile_id) or {}
                     result = {'ok': True, 'configured': bool(prior),
                               **{key: prior.get(key) for key in ('time', 'enabled', 'next_run_at')}}
                 elif name == 'timer_list':

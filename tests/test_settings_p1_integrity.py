@@ -568,6 +568,10 @@ class SettingsIntegrityTests(unittest.TestCase):
             self.assertEqual(403, self.client.post(path, headers={"Sec-Fetch-Site": "cross-site"}, json={}).status_code)
             self.assertEqual(403, self.client.get("http://rebind.invalid:7788" + path,
                                                   headers={"Origin": "http://rebind.invalid:7788"}).status_code)
+            report_url = "http://rebind.invalid:7788/api/agent/daily-report?profile_id=role"
+            for method in ("GET", "PUT"):
+                self.assertEqual(403, self.client.request(method, report_url,
+                    headers={"Origin": "http://rebind.invalid:7788"}).status_code)
             for host in ("127.0.0.1", "192.168.1.15", "[::1]"):
                 origin = f"http://{host}:7788"
                 self.assertEqual(200, self.client.get(path, headers={
