@@ -93,7 +93,8 @@ test('profile catchup and SSE report due reminders once while the drawer is clos
   sandbox.EventSource = class {
     constructor() { sources.push(this); }
   };
-  sandbox.fetch = async () => {
+  sandbox.fetch = async url => {
+    if (new URL(url).pathname !== '/timers') return { ok: true, json: async () => ({ report: null }) };
     fetches++;
     return { ok: true, json: async () => ({ timers: [
       { id: 'rem-1', label: 'materials', kind: 'reminder', status: 'due', session_id: 'p1' },
@@ -115,6 +116,144 @@ test('profile catchup and SSE report due reminders once while the drawer is clos
   emit('rem-3', 'new reminder');
   assert.equal(fetches, 3);
   assert.equal(toasts.length, 2);
+});
+
+
+test('daily report loads defaults and saves the active character without sending other requests', async () => {
+  const calls = [];
+  const { model } = harness(async (url, options) => {
+    const body = options && JSON.parse(options.body);
+    calls.push({ url, method: options?.method || 'GET', body });
+    return { ok: true, json: async () => ({
+      report: body ? { ...body, next_run_at: 1794111000, last_run_at: null, last_status: null } : null,
+    }) };
+  }, { reactive: true });
+  model.currentSessionId = 'role /&';
+  await model.openAgentWorkspace('reminders');
+  assert.equal(calls[0]?.url, 'http://fixture.test/api/agent/daily-report?profile_id=role%20%2F%26');
+  assert.equal(model.dailyReport.draft.time, '09:00');
+  assert.equal(model.dailyReport.draft.instructions, '');
+  model.dailyReport.draft.time = '10:30';
+  model.dailyReport.draft.instructions = 'Summarize the open plans.';
+  await model.saveDailyReport();
+  assert.deepEqual(calls.slice(1), [{
+    url: calls[0].url, method: 'PUT', body: {
+      time: '10:30', instructions: 'Summarize the open plans.', enabled: true,
+    },
+  }]);
+  assert.equal(model.dailyReport.saved.next_run_at, 1794111000);
+  assert.equal(model.agentToolLabel('mcp__shikigami__timer_daily_report'), 'Configure daily report');
+  model.locale = 'zh';
+  assert.equal(model.agentToolLabel('timer_daily_report'), '设置每日汇报');
+});
+
+test('daily report ignores a late load after a same-tick character round trip', async () => {
+  const oldLoad = deferred();
+  const report = instructions => ({
+    ok: true, json: async () => ({ report: { time: '12:00', enabled: true, instructions, last_status: 'completed' } }),
+  });
+  let first = true;
+  const { model } = harness(url => {
+    if (first) { first = false; return oldLoad.promise; }
+    return Promise.resolve(report(new URL(url).searchParams.get('profile_id')));
+  }, { watch: true });
+  const opening = model.openAgentWorkspace('reminders');
+  model.currentSessionId = 'p2';
+  model.currentSessionId = 'p1';
+  await model.selectAgentWorkspaceTab('reminders');
+  assert.equal(model.dailyReport?.draft.instructions, 'p1');
+  model.dailyReport.draft.instructions = 'new draft';
+  oldLoad.resolve(report('stale response'));
+  await opening;
+  assert.equal(model.dailyReport.draft.instructions, 'new draft');
+});
+
+test('daily report serializes writes across drawer reopen and isolates a pending save from another character', async () => {
+  const put = deferred();
+  const calls = [];
+  const original = { time: '11:00', instructions: 'Original', enabled: true };
+  const response = report => ({ ok: true, json: async () => ({ report }) });
+  const { model } = harness((url, options) => {
+    const profile = new URL(url).searchParams.get('profile_id');
+    calls.push([profile, options?.method || 'GET']);
+    return options ? put.promise : Promise.resolve(response(profile === 'p1' ? original : null));
+  }, { watch: true });
+  await model.openAgentWorkspace('reminders');
+  model.dailyReport.draft.instructions = 'Only for p1';
+  const saving = model.saveDailyReport();
+  model.closeAgentWorkspace();
+  const reopening = model.openAgentWorkspace('reminders');
+  await model.saveDailyReport();
+  assert.deepEqual(calls, [['p1', 'GET'], ['p1', 'PUT']]);
+  model.currentSessionId = 'p2';
+  await realVue.nextTick();
+  await model.openAgentWorkspace('reminders');
+  model.dailyReport.draft.instructions = 'Only for p2';
+  put.resolve(response({ ...original, instructions: 'Only for p1' }));
+  await Promise.all([saving, reopening]);
+  assert.deepEqual(calls, [['p1', 'GET'], ['p1', 'PUT'], ['p2', 'GET']]);
+  assert.equal(model.dailyReport.draft.instructions, 'Only for p2');
+  assert.equal(model.dailyReport.saved, null);
+});
+
+test('daily report preserves edits during refresh and save, and pause and enable write only saved settings', async () => {
+  const refresh = deferred(), put = deferred();
+  const original = { time: '11:00', instructions: 'Saved instructions', enabled: true, last_status: 'running' };
+  const response = report => ({ ok: true, json: async () => ({ report }) });
+  const payloads = [];
+  let gets = 0;
+  const { model } = harness(async (url, options) => {
+    if (!options) return ++gets === 1 ? response(original) : refresh.promise;
+    const body = JSON.parse(options.body);
+    payloads.push(body);
+    return payloads.length === 1 ? put.promise : response(body);
+  }, { reactive: true });
+  await model.openAgentWorkspace('reminders');
+  await model.selectAgentWorkspaceTab('tasks');
+  const refreshing = model.selectAgentWorkspaceTab('reminders');
+  assert.equal(gets, 2);
+  model.dailyReport.draft.instructions = 'Edited during refresh';
+  refresh.resolve(response({ ...original, last_status: 'completed' }));
+  await refreshing;
+  assert.equal(model.dailyReport.draft.instructions, 'Edited during refresh');
+  assert.equal(model.dailyReport.saved.last_status, 'completed');
+  const saving = model.saveDailyReport();
+  model.dailyReport.draft.instructions = 'Edited during save';
+  await model.saveDailyReport();
+  put.resolve(response({ ...original, instructions: 'Edited during refresh' }));
+  await saving;
+  assert.equal(model.dailyReport.draft.instructions, 'Edited during save');
+  assert.equal(payloads.length, 1);
+  await model.toggleDailyReport();
+  await model.toggleDailyReport();
+  assert.deepEqual(payloads.slice(1), [false, true].map(enabled => ({
+    time: '11:00', instructions: 'Edited during refresh', enabled,
+  })));
+  assert.equal(model.dailyReport.draft.instructions, 'Edited during save');
+});
+
+test('daily report accepts an empty saved schedule without clearing the draft', async () => {
+  const { model } = harness(async () => ({ ok: true, json: async () => ({ report: null }) }));
+  await model.openAgentWorkspace('reminders');
+  model.dailyReport.draft.instructions = 'Keep this';
+  await model.saveDailyReport();
+  assert.equal(model.dailyReport.saved, null);
+  assert.equal(model.dailyReport.error, '');
+  assert.equal(model.dailyReport.draft.instructions, 'Keep this');
+});
+
+test('daily report keeps the draft and shows a save error after a failed write', async () => {
+  const { model } = harness(async (url, options) => ({
+    ok: !options, json: async () => options ? { detail: 'Schedule rejected' } : { report: null },
+  }), { reactive: true });
+  await model.openAgentWorkspace('reminders');
+  assert.equal(model.dailyReport?.loaded, true);
+  model.dailyReport.draft.instructions = 'Keep this';
+  await model.saveDailyReport();
+  assert.match(model.dailyReport.error, /Schedule rejected/);
+  assert.equal(model.dailyReport.draft.instructions, 'Keep this');
+  assert.equal(model.dailyReport.saved, null);
+  assert.equal(model.dailyReport.saving, false);
 });
 
 test('countdown display ticks only while Reminders is selected and cleans up on close', async () => {
@@ -148,6 +287,7 @@ test('countdown display ticks only while Reminders is selected and cleans up on 
 test('same-tick profile round trip invalidates an open Reminders load and countdown submission', async () => {
   const list = deferred(), creation = deferred(), calls = [];
   const { model, app } = harness((url, options) => {
+    if (new URL(url).pathname !== '/timers') return Promise.resolve({ ok: true, json: async () => ({ report: null }) });
     calls.push([url, options]);
     return options ? creation.promise : list.promise;
   }, { watch: true });
@@ -180,6 +320,22 @@ test('Reminders holds the countdown form, reminder dates and scoped actions in d
   assert.match(panel, /v-for="timer in timerList"/);
   assert.match(panel, /fmtReminderTime\(timer.end_timestamp\)/);
   assert.match(panel, /timerReminderDismiss[\s\S]*@click="cancelTimer\(timer.id\)"/);
+  const dailyReport = panel.match(/<section\b[^>]*class="agent-daily-report"[\s\S]*?<\/section>/)[0];
+  assert.ok(panel.indexOf('cancelTimer(timer.id)') < panel.indexOf(dailyReport));
+  assert.match(dailyReport, /<label for="agent-daily-report-time"/);
+  assert.match(dailyReport, /<label for="agent-daily-report-instructions"/);
+  assert.match(dailyReport, /role="alert"[^>]*>\{\{ dailyReport.error \}\}/);
+  assert.match(dailyReport, /fmtReminderTime\(dailyReport.saved.next_run_at\)/);
+  assert.match(dailyReport, /fmtReminderTime\(dailyReport.saved.last_run_at\)/);
+  assert.match(dailyReport, /@submit.prevent="saveDailyReport\(\)"/);
+  assert.match(dailyReport, /@click="toggleDailyReport\(\)"/);
+  const keys = Array.from(dailyReport.matchAll(/'(dailyReport\w+)'/g), match => match[1])
+    .filter(key => key !== 'dailyReportStatus_');
+  keys.push(...['running', 'completed', 'skipped', 'missed', 'failed'].map(status => 'dailyReportStatus_' + status));
+  for (const locale of ['zh', 'en']) {
+    model.locale = locale;
+    for (const key of keys) assert.notEqual(model.t(key), key);
+  }
   assert.equal(model.t('agentWorkspaceRemindersTab'), 'Reminders');
   model.locale = 'zh';
   assert.equal(model.t('agentWorkspaceRemindersTab'), '提醒');

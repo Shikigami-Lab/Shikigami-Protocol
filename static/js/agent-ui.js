@@ -9,6 +9,9 @@
   };
   const capabilityKeys = ['workspace_enabled', 'code_enabled', 'web_enabled', 'history_enabled', 'memory_enabled', 'todo_enabled'];
   const workspaceTabs = ['files', 'plans', 'reminders', 'tasks'];
+  const dailyReportFields = report => ({ time: report?.time ?? '09:00', instructions: report?.instructions ?? '' });
+  const sameDailyReportFields = (draft, { time, instructions }) =>
+    draft.time === time && draft.instructions === instructions;
   const workspaceWidthKey = 'agentWorkspaceWidth';
   const minWorkspaceWidth = 320;
   const maxWorkspaceWidth = 720;
@@ -54,6 +57,7 @@
       agentContinueRunId: '', agentHistorySequence: 0, agentCapabilities: capabilityKeys,
       agentWorkspaceOpen: false, agentWorkspaceFiles: [], agentWorkspaceInventory: {}, agentWorkspaceSelected: null,
       agentWorkspaceTab: 'files', agentDrawerNarrow: false,
+      dailyReport: null, dailyReportWrites: new Map(),
       agentWorkspaceWidth: 400, agentWorkspacePreferredWidth: 400,
       agentWorkspaceMinWidth: minWorkspaceWidth, agentWorkspaceMaxWidth: maxWorkspaceWidth,
       agentWorkspaceResize: null,
@@ -682,6 +686,7 @@
         this.agentArtifactOpenSequence++;
         this.agentWorkspaceEpoch++;
         this.agentWorkspaceOpen = false;
+        this.dailyReport = null;
         this.agentWorkspaceFiles = [];
         this.agentWorkspaceInventory = {};
         this.agentWorkspaceSelected = null;
@@ -711,7 +716,7 @@
         this.refreshAgentRuns();
         this.$nextTick(() => this.$refs?.agentWorkspaceClose?.focus?.());
         if (this.agentWorkspaceTab === 'plans') return this.refreshTodos();
-        if (this.agentWorkspaceTab === 'reminders') return this.refreshTimers();
+        if (this.agentWorkspaceTab === 'reminders') return this.refreshAgentReminders();
         return this.refreshAgentWorkspace();
       },
       selectAgentWorkspaceTab(tab) {
@@ -721,8 +726,86 @@
         if (tab !== 'files') this.agentArtifactOpenSequence++;
         this.agentWorkspaceTab = tab;
         if (tab === 'plans') return this.refreshTodos();
-        if (tab === 'reminders') return this.refreshTimers();
+        if (tab === 'reminders') return this.refreshAgentReminders();
         if (tab === 'files') return this.refreshAgentWorkspace();
+      },
+      refreshAgentReminders() {
+        return Promise.all([this.refreshTimers(), this.refreshDailyReport()]);
+      },
+      dailyReportIsCurrent(view) {
+        return this.agentWorkspaceOpen && !this.currentGroupId &&
+          this.currentSessionId === view.profile && this.dailyReport === view;
+      },
+      async refreshDailyReport() {
+        if (!this.agentRemindersVisible) return;
+        const profile = this.currentSessionId;
+        if (this.dailyReport?.profile !== profile) {
+          this.dailyReport = { profile, draft: dailyReportFields(null), saved: null, loaded: false,
+            loading: false, saving: false, loadFailed: false, error: '' };
+        }
+        const view = this.dailyReport;
+        if (view.loading) return;
+        view.loading = true;
+        view.loadFailed = false;
+        view.error = '';
+        try {
+          // A drawer reopened during a save must read after the write settles.
+          const pending = this.dailyReportWrites.get(profile);
+          if (pending) await pending.catch(() => {});
+          if (!this.agentRemindersVisible || !this.dailyReportIsCurrent(view)) return;
+          const { report } = await this.agentFetch(API_PATHS.agentDailyReport(profile));
+          if (!this.dailyReportIsCurrent(view)) return;
+          if (report !== null && typeof report?.time !== 'string') throw new Error();
+          if (sameDailyReportFields(view.draft, dailyReportFields(view.saved))) {
+            view.draft = dailyReportFields(report);
+          }
+          view.saved = report;
+          view.loaded = true;
+        } catch (error) {
+          if (this.dailyReportIsCurrent(view)) {
+            view.loadFailed = true;
+            view.error = [this.t('dailyReportLoadError'), error.message].filter(Boolean).join(' ');
+          }
+        } finally {
+          view.loading = false;
+        }
+      },
+      saveDailyReport() {
+        return this.writeDailyReport(false);
+      },
+      toggleDailyReport() {
+        return this.writeDailyReport(true);
+      },
+      async writeDailyReport(toggle) {
+        const view = this.dailyReport;
+        if (!this.agentRemindersVisible || !view?.loaded || !this.dailyReportIsCurrent(view) ||
+            view.loading || this.dailyReportWrites.has(view.profile) || (toggle && !view.saved)) return;
+        // Pause and enable apply to the saved schedule, even if the form has edits.
+        const fields = dailyReportFields(toggle ? view.saved : view.draft);
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(fields.time)) return;
+        const enabled = toggle ? !view.saved.enabled : (view.saved?.enabled ?? true);
+        view.saving = true;
+        view.error = '';
+        try {
+          const request = this.agentFetch(API_PATHS.agentDailyReport(view.profile), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...fields, enabled }),
+          });
+          this.dailyReportWrites.set(view.profile, request);
+          const { report } = await request;
+          if (!this.dailyReportIsCurrent(view)) return;
+          if (report !== null && typeof report?.time !== 'string') throw new Error();
+          if (report && sameDailyReportFields(view.draft, fields)) view.draft = dailyReportFields(report);
+          view.saved = report;
+        } catch (error) {
+          if (this.dailyReportIsCurrent(view)) {
+            view.error = [this.t('dailyReportSaveError'), error.message].filter(Boolean).join(' ');
+          }
+        } finally {
+          this.dailyReportWrites.delete(view.profile);
+          view.saving = false;
+        }
       },
       navigateAgentWorkspaceTabs(event) {
         if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key) || this.currentGroupId || !this.agentWorkspaceOpen) return;

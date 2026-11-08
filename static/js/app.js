@@ -2916,6 +2916,7 @@ const App = {
 
     resetWorkspaceProfile() {
       this.workspaceProfileEpoch++;
+      this.dailyReport = null;
       this.todoFetchSequence++;
       this.todos = [];
       this.todoOwner = 'user';

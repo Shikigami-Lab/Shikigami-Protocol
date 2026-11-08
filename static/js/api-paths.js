@@ -25,6 +25,7 @@ window.API_PATHS = {
   sessionMessagesFrom: (sid, storeIdx) => `/sessions/${encodeURIComponent(sid)}/messages/from/${storeIdx}`,
   sessionMessagesDelete: (sid, storeIdx) => `/sessions/${encodeURIComponent(sid)}/messages/${storeIdx}`,
 
+  agentDailyReport: (pid) => `/api/agent/daily-report?profile_id=${encodeURIComponent(pid)}`,
   agentWorkspaceFiles: (pid) => `/api/agent/workspace/files?profile_id=${encodeURIComponent(pid)}`,
   agentWorkspaceFile: (pid, path, download = false) => `/api/agent/workspace/file?profile_id=${encodeURIComponent(pid)}&path=${encodeURIComponent(path)}${download ? '&download=true' : ''}`,
   agentWorkspaceVersions: (pid, path) => `/api/agent/workspace/versions?profile_id=${encodeURIComponent(pid)}&path=${encodeURIComponent(path)}`,
