@@ -35,6 +35,9 @@ class FakeSessionManager:
                          for name in ("alpha", "beta")}
         self.lookups = []
 
+    def list_sessions(self):
+        return list(self.sessions.values())
+
     def get_by_id(self, profile_id):
         self.lookups.append(profile_id)
         return self.sessions.get(profile_id)
@@ -106,6 +109,24 @@ class AgentAPITests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.request(method, "/api/agent" + path, **kwargs)
         self.assertNotIn(FAKE_KEY, response.text)
         return response
+
+    async def test_daily_report_settings_and_chat_tool_are_character_bound(self):
+        args = {"time": "08:15", "instructions": "List today's to-dos", "enabled": True}
+        url = "/daily-report?profile_id=alpha"
+        self.assertEqual((await self.request("GET", url)).json(), {"report": None})
+        saved = (await self.request("PUT", url, json=args)).json()["report"]
+        self.assertEqual({key: saved[key] for key in args}, args)
+        self.assertEqual((await self.request("GET", "/daily-report?profile_id=beta")).json(), {"report": None})
+        self.assertEqual((await self.request("PUT", "/daily-report?profile_id=unloaded", json=args)).status_code, 404)
+        self.assertEqual((await self.request("PUT", url, json={**args, "time": "25:00"})).status_code, 422)
+
+        run = self.prepare()
+        result = await self.runtime.execute_tool(run.id, "timer_daily_report", {"enabled": False}, "daily-pause")
+        self.assertFalse(result["enabled"])
+        paused = (await self.request("GET", url)).json()["report"]
+        self.assertEqual(paused["instructions"], args["instructions"])
+        self.assertFalse(paused["enabled"])
+        self.assertIsNone(paused["next_run_at"])
 
     async def test_settings_get_returns_only_public_global_fields(self):
         response = await self.request("GET", "/settings")

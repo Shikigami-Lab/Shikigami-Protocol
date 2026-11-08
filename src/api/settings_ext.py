@@ -1561,6 +1561,8 @@ async def delete_profile(profile_id: str, request: Request):
         # There is no await between the purge and removing the profile card.
         await runtime.invalidate(profile_id)
         runtime.reminders.remove_profile(profile_id)
+        if getattr(runtime, 'daily_reports', None) is not None:
+            runtime.daily_reports.remove_profile(profile_id)
 
     session_obj = None
     try:

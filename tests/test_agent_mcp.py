@@ -68,7 +68,7 @@ assert adapter.mcp.settings.lifespan is None
     async def test_native_discovery_has_only_typed_timer_inputs(self):
         async with connected(self.call_tool) as (client, adapter, _, session_id):
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-            self.assertEqual(set(tools), {"timer_create", "timer_schedule", "timer_list", "timer_cancel"})
+            self.assertEqual(set(tools), {"timer_create", "timer_schedule", "timer_list", "timer_cancel", "timer_daily_report"})
             self.assertEqual(adapter.mcp.name, "shikigami")
             self.assertIsNone(session_id())
             self.assertTrue(adapter.mcp.settings.stateless_http)
@@ -88,6 +88,9 @@ assert adapter.mcp.settings.lifespan is None
             self.assertEqual(set(schedule.inputSchema["required"]), {"due_at", "label"})
             self.assertFalse(schedule.annotations.readOnlyHint)
             self.assertFalse(schedule.annotations.idempotentHint)
+            daily = tools["timer_daily_report"]
+            self.assertEqual(set(daily.inputSchema["properties"]), {"time", "instructions", "enabled"})
+            self.assertFalse(daily.annotations.readOnlyHint)
             timer_list = tools["timer_list"].inputSchema
             self.assertEqual(set(timer_list["properties"]), {"label"})
             self.assertEqual(timer_list["properties"]["label"]["default"], "")
@@ -160,7 +163,7 @@ assert adapter.mcp.settings.lifespan is None
             result = await client.call_tool("timer_list", {})
             self.assertTrue(result.isError)
             self.assertIn("timer disabled for this run", result.content[0].text)
-            self.assertEqual(len((await client.list_tools()).tools), 4)
+            self.assertIn("timer_daily_report", {tool.name for tool in (await client.list_tools()).tools})
         self.assertEqual(len(self.calls), 1)
 
     async def test_service_error_receipt_is_preserved_without_reinterpretation(self):

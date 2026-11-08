@@ -335,7 +335,12 @@ async def lifespan(app: FastAPI):
     logger.info("[server] ╚══════════════════════════════════════╝")
     logger.info("[server] 监听地址: http://%s:%s", config.host, config.port)
 
-    async with app.state.agent_runtime.reminders.running(publish_reminder_expiry):
+    from functools import partial
+    from src.agent.daily_report_delivery import run_daily_report
+
+    agent_runtime = app.state.agent_runtime
+    async with (agent_runtime.reminders.running(publish_reminder_expiry),
+                agent_runtime.daily_reports.running(partial(run_daily_report, agent_runtime))):
         yield
 
     for _task_attr in ("daily_memory_task", "weather_fetcher_task"):

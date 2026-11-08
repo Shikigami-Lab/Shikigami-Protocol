@@ -444,7 +444,7 @@ class LinkStore:
         _id(profile_id, "profile_id")
         with self._transaction() as db:
             rows = db.execute("""
-                SELECT r.run_id, r.origin, r.state, r.created_at, r.user_message_id,
+                SELECT r.run_id, r.origin, r.state, r.created_at, r.updated_at, r.user_message_id,
                        e.payload AS terminal_event, o.payload AS outcome
                 FROM runs r JOIN profiles p USING (profile_id)
                 LEFT JOIN events e ON e.run_id=r.run_id AND e.seq=r.last_seq

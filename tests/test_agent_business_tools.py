@@ -739,7 +739,7 @@ class BusinessMCPTests(unittest.IsolatedAsyncioTestCase):
         names = ("history_search", "history_context", "web_search", "task_context")
         async with business_client(callback, names) as client:
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-            self.assertEqual(set(tools), set(names) | {"timer_create", "timer_schedule", "timer_list", "timer_cancel"})
+            self.assertEqual(set(tools), set(names) | {"timer_create", "timer_schedule", "timer_list", "timer_cancel", "timer_daily_report"})
             for name in names:
                 self.assertFalse(tools[name].inputSchema["additionalProperties"])
                 self.assertTrue(tools[name].annotations.readOnlyHint)
@@ -779,7 +779,7 @@ class BusinessMCPTests(unittest.IsolatedAsyncioTestCase):
         callback = AsyncMock(return_value=receipt)
         async with business_client(callback, ("task_context",)) as client:
             self.assertEqual({t.name for t in (await client.list_tools()).tools},
-                             {"timer_create", "timer_schedule", "timer_list", "timer_cancel", "task_context"})
+                             {"timer_create", "timer_schedule", "timer_list", "timer_cancel", "timer_daily_report", "task_context"})
             self.assertTrue((await client.call_tool("history_search", {})).isError)
             result = await client.call_tool("task_context", {})
             self.assertEqual(result.structuredContent, receipt)

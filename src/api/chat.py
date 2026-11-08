@@ -126,7 +126,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                                  'with due_at as an ISO date and time and a label. Omit the offset for local time. '
                                  'Use local time unless the user specifies another zone. Resolve relative dates '
                                  'using the local time above. Ask if the intended duration, date, time or zone '
-                                 'needed for the request is unclear. Use timer_list and timer_cancel for both types.')
+                                 'needed for the request is unclear. Use timer_list and timer_cancel for both types. '
+                                 'For a user-requested daily report or its pause, delegate to timer_daily_report. '
+                                 'Give the local time as HH:MM and the report instructions on creation.')
                     _inject_context(messages, info)
                 else:
                     _inject_context(messages, '[Tool availability]\nNo tools are enabled for this turn. '

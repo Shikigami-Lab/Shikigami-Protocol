@@ -104,6 +104,24 @@ def create_timer_mcp_app(
         """Schedule a persistent, one-time reminder for a specific date and time."""
         return await call_tool("timer_schedule", {"due_at": due_at, "label": label}, ctx.request_id)
 
+    async def timer_daily_report(
+        ctx: Context,
+        time: Annotated[str, Field(strict=True, pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")] | None = None,
+        instructions: Annotated[str, Field(strict=True, min_length=1, max_length=1000)] | None = None,
+        enabled: Annotated[bool, Field(strict=True)] | None = None,
+    ) -> dict[str, Any]:
+        """Configure or pause this character's daily report at a host-local HH:MM.
+
+        Creation needs both time and the user's report instructions. Omit fields
+        to keep their current values. Pass enabled=false to pause. The report
+        writes into this character's chat and uses available local task data.
+        Only configure a recurring model call when the user requests it.
+        """
+        return await call_tool("timer_daily_report", {
+            key: value for key, value in (("time", time), ("instructions", instructions), ("enabled", enabled))
+            if value is not None
+        }, ctx.request_id)
+
     async def timer_list(ctx: Context, label: Annotated[str, Field(strict=True, max_length=128)] = "") -> dict[str, Any]:
         """List upcoming timers and reminders first. Filter by label to find a specific ID."""
         return await call_tool("timer_list", {"label": label} if label else {}, ctx.request_id)
@@ -236,6 +254,7 @@ def create_timer_mcp_app(
     entries = [
         (timer_create, False, False, False, False),
         (timer_schedule, False, False, False, False),
+        (timer_daily_report, False, False, False, False),
         (timer_list, True, False, True, False),
         (timer_cancel, False, True, True, False),
     ]

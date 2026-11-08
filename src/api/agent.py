@@ -24,6 +24,38 @@ def _runtime(request):
     return runtime
 
 
+class DailyReportSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    time: str = Field(strict=True, pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+    instructions: str = Field(strict=True, min_length=1, max_length=1000)
+    enabled: bool = Field(strict=True)
+
+
+def _require_loaded_report_profile(request, profile_id):
+    from src.agent.daily_report_delivery import loaded_report_session
+    if loaded_report_session(request.app.state.session_manager, profile_id) is None:
+        raise HTTPException(404, "Character is not loaded in chat")
+
+
+@router.get("/daily-report")
+async def get_daily_report(request: Request, profile_id: str = Query(min_length=1, max_length=256)):
+    runtime = _runtime(request)
+    _require_loaded_report_profile(request, profile_id)
+    return {"report": await asyncio.to_thread(runtime.daily_reports.get, profile_id)}
+
+
+@router.put("/daily-report")
+async def configure_daily_report(request: Request, body: DailyReportSettings,
+                                 profile_id: str = Query(min_length=1, max_length=256)):
+    runtime = _runtime(request)
+    _require_loaded_report_profile(request, profile_id)
+    try:
+        report = runtime.daily_reports.configure(profile_id, body.time, body.instructions, body.enabled)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    return {"report": report}
+
+
 class SettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: Optional[bool] = Field(default=None, strict=True)

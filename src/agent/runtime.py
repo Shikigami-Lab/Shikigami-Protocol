@@ -71,6 +71,7 @@ class AgentRuntime:
         from src.config.profile_loader import ProfileLoader
         from src.tools.timer.manager import _timer_manager
         from src.tools.timer.reminders import ReminderStore
+        from src.agent.daily_reports import DailyReportStore
         self.app = app
         self.root = Path(root or get_project_root()).resolve()
         self.bundle_root = Path(__file__).resolve().parents[2] / "integrations" / "deepseek-harness"
@@ -84,6 +85,7 @@ class AgentRuntime:
         self.store.recover_interrupted()
         self.timers = timer_manager or _timer_manager
         self.reminders = ReminderStore(self.data_root.parent / 'reminders.sqlite3')
+        self.daily_reports = DailyReportStore(self.data_root.parent / 'daily_reports.sqlite3')
         self.profile_loader = profile_loader or ProfileLoader().load
         self.model_client = model_client
         self._runs = {}
@@ -798,7 +800,7 @@ class AgentRuntime:
             if run is None:
                 raise ValueError("Unknown task")
             self._authorize(run, timer=True)
-            if name not in ('timer_create', 'timer_schedule', 'timer_list', 'timer_cancel'):
+            if name not in ('timer_create', 'timer_schedule', 'timer_list', 'timer_cancel', 'timer_daily_report'):
                 raise ValueError("Unknown tool")
             # Bind the native MCP request, not just its parameters. Distinct
             # calls may intentionally create two identical timers; a reused
@@ -818,6 +820,15 @@ class AgentRuntime:
                     reminder = self.reminders.schedule(run.profile_id, args.get('due_at'), args.get('label'))
                     result = {'ok': True, 'timer_id': reminder['id'], 'label': reminder['label'],
                               'due_at': reminder['due_at']}
+                elif name == 'timer_daily_report':
+                    prior = self.daily_reports.get(run.profile_id) or {}
+                    if args:
+                        values = {key: args.get(key, prior.get(key)) for key in ('time', 'instructions', 'enabled')}
+                        if values['enabled'] is None:
+                            values['enabled'] = True
+                        prior = self.daily_reports.configure(run.profile_id, values['time'], values['instructions'], values['enabled'])
+                    result = {'ok': True, 'configured': bool(prior),
+                              **{key: prior.get(key) for key in ('time', 'enabled', 'next_run_at')}}
                 elif name == 'timer_list':
                     visible = [{k: t[k] for k in ('id', 'label', 'seconds', 'end_timestamp')}
                                for t in self.timers.list_timers() if t.get('session_id') == run.session_id]
