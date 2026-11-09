@@ -16,6 +16,7 @@ def capabilities(settings, profile):
     result = {key: restrictions.get('enabled') is not False and resolve_setting(settings, profile, key) for key in KEYS}
     result['code_enabled'] &= result['workspace_enabled']
     result['todo_enabled'] &= (((profile or {}).get('tool_configs') or {}).get('todo') or {}).get('enabled', True) is True
+    result['weather_enabled'] = (((profile or {}).get('tool_configs') or {}).get('weather') or {}).get('enabled', False) is True
     return result
 
 
@@ -38,6 +39,8 @@ def business_tools(access):
         tools.append('memory_search')
     if access['web_enabled']:
         tools.append('web_search')
+    if access.get('weather_enabled'):
+        tools.append('weather_query')
     if access.get('todo_enabled'):
         from src.agent.todo_tools import TODO_TOOLS
         tools.extend(TODO_TOOLS)

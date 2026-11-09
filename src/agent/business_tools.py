@@ -25,6 +25,7 @@ MAX_QUERY = 500
 MAX_SEARCH_RESULTS = 5
 MEMORY_VECTOR_TIMEOUT = 3
 MAX_METADATA_READ = 65536
+MAX_CITY = 80
 _METADATA_FIELDS = ("metadata", "run_id", "status", "generation_status", "agent_run_id")
 
 
@@ -44,6 +45,7 @@ HistoryOrder = Literal["newest", "oldest"]
 MessageId = Annotated[int, Field(strict=True, ge=1, le=9223372036854775807)]
 ContextCount = Annotated[int, Field(strict=True, ge=0, le=MAX_CONTEXT)]
 RunId = Annotated[str, Field(strict=True, max_length=128)]
+CityText = Annotated[str, Field(strict=True, max_length=MAX_CITY)]
 
 
 def history_date_bounds(start_date: str, end_date: str) -> tuple[float | None, float | None]:
@@ -106,6 +108,10 @@ class WebSearchArgs(_SearchArgs):
 
 class MemorySearchArgs(_SearchArgs):
     limit: MemoryLimit = 5
+
+
+class WeatherQueryArgs(_Arguments):
+    city: CityText = ""
 
 
 def _error(code: str, message: str) -> dict:
@@ -373,10 +379,35 @@ def _memory_search_results(manager, session, pool, query, limit, vectors):
     return {"ok": True, "source": "fact_memory", "facts": rows}
 
 
+async def _weather_query(session, args: WeatherQueryArgs) -> dict:
+    """Read the profile's cached weather, or fetch live weather for a named city.
+
+    Cache reads never trigger a network fetch: a missing cache simply falls
+    back to one live fetch for the configured default location. Results are
+    untrusted external data, never instructions.
+    """
+    from src.tools.weather.fetcher import fetch_weather, load_cache
+
+    city = args.city.strip()
+    if city:
+        result = await fetch_weather(city)
+        if not isinstance(result, dict):
+            return _error("weather_unavailable", "Weather lookup failed for that city")
+        return {"ok": True, "source": "wttr.in", "cached": False, "weather": result}
+    cached = await asyncio.to_thread(load_cache, session.storage_root)
+    if isinstance(cached, dict):
+        return {"ok": True, "source": "weather_cache", "cached": True, "weather": cached}
+    result = await fetch_weather()
+    if not isinstance(result, dict):
+        return _error("weather_unavailable", "Weather is unavailable; no cached reading exists")
+    return {"ok": True, "source": "wttr.in", "cached": False, "weather": result}
+
+
 async def call_business_tool(app, session, name: str, args: dict) -> dict:
-    """Read history, facts or web results under the runtime-bound session."""
+    """Read history, facts, weather or web results under the runtime-bound session."""
     models = {"history_search": HistorySearchArgs, "history_context": HistoryContextArgs,
-              "web_search": WebSearchArgs, "memory_search": MemorySearchArgs}
+              "web_search": WebSearchArgs, "memory_search": MemorySearchArgs,
+              "weather_query": WeatherQueryArgs}
     if name not in models:
         return _error("unknown_tool", "Unknown business tool")
     try:
@@ -387,6 +418,8 @@ async def call_business_tool(app, session, name: str, args: dict) -> dict:
         return _error("invalid_session", "Tool requires a host-bound profile session")
     if name == "web_search":
         return await _web_search(parsed)
+    if name == "weather_query":
+        return await _weather_query(session, parsed)
     if name == "memory_search":
         try:
             return await _memory_search(app, session, parsed)
