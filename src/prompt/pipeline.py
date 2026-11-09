@@ -188,6 +188,12 @@ def build_messages(
         return targets_chat(inject_into)
 
     for seg_cls in [cls for cls in get_registered() if _seg_matches_mode(cls.inject_into)]:
+        # ASE hint segments are injected by the ASE engine
+        # (_compute_ase_segment_injections → greeting_hint), which owns their
+        # user content overrides and trigger state; building them here too
+        # would inject the same hint twice in one heartbeat.
+        if pipeline_mode == "ase" and getattr(seg_cls, "ase_engine_injected", False):
+            continue
         seg = _get_instance(seg_cls, session.profile_id)
         meta: Optional[SegmentMeta] = seg_cfg.get_meta(seg_cls.segment_id)
 
@@ -252,7 +258,10 @@ def build_messages(
 
     # ── Custom (user-defined) segments ────────────────────────────────────────
     today_str = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d")
-    custom_segs = [c for c in seg_cfg.custom_segments if _seg_matches_mode(c.inject_into)]
+    # In mode="ase", ASE-targeted custom segments are injected by the ASE
+    # engine alongside the built-in hints; skip them here to avoid duplicates.
+    custom_segs = [c for c in seg_cfg.custom_segments if _seg_matches_mode(c.inject_into)
+                   and not (pipeline_mode == "ase" and targets_ase(c.inject_into))]
     for custom in custom_segs:
         if not _custom_triggered(custom, ctx):
             continue

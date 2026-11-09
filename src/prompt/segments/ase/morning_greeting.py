@@ -21,11 +21,14 @@ class AseMorningGreetingSegment(PromptSegment):
     default_trigger_mode = "time_window"
     default_trigger_param = 510.0  # 5–10 AM  (start*100+end)
 
+    # Injected by the ASE engine (_compute_ase_segment_injections), which owns
+    # user content overrides and trigger state; the pipeline skips segments
+    # with this marker in mode="ase" so the hint is not injected twice.
+    ase_engine_injected = True
+
     DEFAULT_CONTENT = "若自然，可简单问好（如早上好）。"
 
     def build(self, ctx) -> SegmentResult:
-        # For ASE segments, the engine reads content from SegmentMeta.content
-        # (falling back to DEFAULT_CONTENT) and evaluates triggers independently.
-        # This build() is only called if an ASE segment is built via the segment
-        # system directly; the content returned here is the default.
+        # Unreachable in production (the pipeline skips ase_engine_injected
+        # segments in mode="ase"); kept as a fallback default.
         return SegmentResult(messages=[{"role": "system", "content": self.DEFAULT_CONTENT}])
