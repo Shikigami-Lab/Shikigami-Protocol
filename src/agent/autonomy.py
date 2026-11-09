@@ -8,7 +8,6 @@ from contextlib import aclosing
 import logging
 import uuid
 
-from src.agent.capabilities import capability_context
 from src.agent.public_topics import is_public_query
 
 logger = logging.getLogger(__name__)
@@ -71,7 +70,10 @@ class AutonomyRunner:
         return build_messages(session, goal, session.conversation_store,
             n_history_turns=get_effective_max_history_turns(runtime.app, session.profile_id),
             preset=preset, app=runtime.app,
-            extra_system=capability_context(access, origin='reflection'))
+            # Capability/workspace text comes from pipeline segments now.
+            extra_context={"include_tool_capability": True,
+                           "agent_origin": "reflection",
+                           "include_workspace_catalog": True})
 
     async def start(self, session, goal, cycle_id, *, from_tool_results=False):
         if from_tool_results:

@@ -85,6 +85,7 @@ class LongTermFactsSegment(PromptSegment):
     label = "长期事实记忆"
     description = "注入 AI 记住的关于用户的长期持久性事实"
     is_core = False
+    requires = ("feature:memory",)
     default_trigger_mode = "always"
 
     def build(self, ctx: BuildContext) -> SegmentResult:

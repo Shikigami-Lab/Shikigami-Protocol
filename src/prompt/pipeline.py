@@ -26,6 +26,7 @@ from src.core.session import Session
 from src.memory.conversation_store import ConversationStore
 from src.llm.message_normalization import PromptMessage, normalize_messages
 from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat, targets_ase
+from src.prompt.dependencies import unavailable_reason
 from src.prompt.macros import build_macro_table, expand_messages
 from src.prompt.registry import get_registered
 from src.prompt.segment_config import CustomSegmentDef, SegmentMeta, effective_segment_enabled, load_segment_config
@@ -60,6 +61,9 @@ import src.prompt.segments.ase.initiation_frame      # noqa: F401
 import src.prompt.segments.ase.behavioral_guidance   # noqa: F401
 import src.prompt.segments.ase.scene_context         # noqa: F401
 import src.prompt.segments.health_mode               # noqa: F401
+import src.prompt.segments.tool_capability           # noqa: F401  (capability/dispatch + no-tools guard)
+import src.prompt.segments.workspace_catalog         # noqa: F401  (workspace directory)
+import src.prompt.segments.proactive_activity        # noqa: F401  (autonomous action record)
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +193,15 @@ def build_messages(
 
         # Resolve effective settings — meta overrides class defaults
         enabled       = effective_segment_enabled(meta, seg_cls)
+
+        # Engine/tool/feature dependencies: an unmet dependency skips the
+        # segment regardless of the enabled flag (UI shows the same reason).
+        if enabled and getattr(seg_cls, "requires", ()):
+            dep_reason = unavailable_reason(seg_cls.requires, extras.get("app"),
+                                            session.profile_id, profile)
+            if dep_reason:
+                logger.debug(f"[Pipeline] '{seg_cls.segment_id}' skipped (dependency: {dep_reason})")
+                continue
         trigger_mode  = (meta.trigger_mode  if meta and meta.trigger_mode  is not None
                          else seg_cls.default_trigger_mode)
         trigger_param = (meta.trigger_param if meta and meta.trigger_param is not None

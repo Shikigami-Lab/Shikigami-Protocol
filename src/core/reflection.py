@@ -134,6 +134,10 @@ def build_reflection_messages(profile_id: str, ctx: ReflectionBuildContext) -> l
         enabled = effective_segment_enabled(meta, seg_cls)
         if not enabled and not seg_cls.is_core:
             continue
+        if enabled and getattr(seg_cls, "requires", ()):
+            from src.prompt.dependencies import unavailable_reason
+            if unavailable_reason(seg_cls.requires, ctx.app, profile_id, ctx.profile):
+                continue
         try:
             instance = seg_cls()
             result = instance.build(ctx)

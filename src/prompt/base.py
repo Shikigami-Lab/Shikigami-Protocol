@@ -59,6 +59,13 @@ class PromptSegment(ABC):
     # Whether this segment can be disabled by the user (core segments cannot)
     is_core: bool = False
 
+    # Dependency keys ("engine:emotion", "tool:timer", "feature:agent_tools",
+    # "feature:memory", "capability:workspace") — evaluated by
+    # src/prompt/dependencies.py.  An unmet dependency skips the segment in
+    # every pipeline and locks its checkbox in the settings UI with a reason.
+    # Never set on core segments: core segments must always run.
+    requires: tuple = ()
+
     # 当 profiles/<id>/segments_config.json 里没有该 segment 的 overrides 时，是否默认启用（新 segment 可设为 False 以免打扰老用户）
     default_enabled: bool = True
 

@@ -281,6 +281,34 @@ class LinkStore:
                 db.execute('INSERT INTO autonomy_admissions VALUES (?,?,?,?,?)', (admission_id, profile_id, digest, now, allowance))
             return allowance
 
+    def recent_autonomous_activity(self, profile_id, limit=5):
+        """Bounded projection of recent autonomous runs for prompt context.
+
+        Autonomous goals are never stored (claim_autonomy keeps only intent
+        hashes), so the projection carries origin/state/timestamps and tool
+        usage counts — enough for the character to know what it did on its
+        own initiative, without keeping a second copy of private goals.
+        """
+        _id(profile_id, "profile_id")
+        limit = max(1, min(20, int(limit)))
+        with self._transaction() as db:
+            rows = db.execute("""SELECT run_id, origin, state, created_at, updated_at
+                FROM runs WHERE profile_id=? AND origin IN ('reflection','proactive')
+                AND state IN ('completed','cancelled','failed')
+                ORDER BY ordinal DESC LIMIT ?""", (profile_id, limit)).fetchall()
+            result = []
+            for row in rows:
+                tools = db.execute(
+                    "SELECT tool_name, COUNT(*) AS c FROM actions WHERE run_id=? "
+                    "GROUP BY tool_name", (row["run_id"],)).fetchall()
+                result.append({
+                    "run_id": row["run_id"], "origin": row["origin"],
+                    "state": row["state"], "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "tools": {t["tool_name"]: t["c"] for t in tools},
+                })
+            return result
+
     def begin_run(self, run_id, profile_id, session_id, origin="user"):
         for name, value in (("run_id", run_id), ("profile_id", profile_id), ("session_id", session_id)):
             _id(value, name)

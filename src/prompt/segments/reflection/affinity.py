@@ -17,6 +17,7 @@ class ReflectionAffinitySegment(PromptSegment):
     priority = 40
     label = "好感度状态"
     description = "向自省引擎注入当前好感度（affinity_state.json）"
+    requires = ("engine:affinity",)
 
     def build(self, ctx) -> SegmentResult:  # ctx: ReflectionBuildContext
         if not isinstance(ctx, ReflectionBuildContext):

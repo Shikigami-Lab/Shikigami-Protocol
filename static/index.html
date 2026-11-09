@@ -2710,14 +2710,15 @@
                   <template v-else>
                   <div v-for="seg in segmentList" :key="seg.segment_id" class="seg-row">
                     <div class="seg-row-top">
-                      <input type="checkbox" :disabled="seg.is_core" v-model="seg.enabled" :title="seg.is_core ? t('hintCoreSegment') : ''" />
-                      <span class="seg-label-text">{{ seg.label }}</span>
+                      <input type="checkbox" :disabled="seg.is_core || !!seg.disabled_reason" v-model="seg.enabled" :title="seg.is_core ? t('hintCoreSegment') : (seg.disabled_reason || '')" />
+                      <span class="seg-label-text" :style="seg.disabled_reason ? 'opacity:0.55;' : ''">{{ seg.label }}</span>
                       <span v-if="seg.is_core" class="seg-core-badge">{{ t('lblCoreBadge') }}</span>
                       <span style="flex:1"></span>
                       <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
                       <input type="number" class="seg-num-input" v-model.number="seg.priority" min="0" max="200" :disabled="seg.is_core" />
                     </div>
                     <div class="seg-row-desc">{{ seg.description }}</div>
+                    <div v-if="seg.disabled_reason" class="seg-row-desc" style="color:var(--accent,#c96);">{{ seg.disabled_reason }}</div>
                     <div class="seg-row-trigger" v-if="!seg.is_core">
                       <label style="font-size:11px;opacity:0.7;">{{ t('lblTriggerMode') }}</label>
                       <select class="seg-select" v-model="seg.trigger_mode">
@@ -3075,9 +3076,9 @@
                       <div v-show="activeReflectionSegTab === 'reflection'">
                         <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
-                            <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
+                            <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core || !!seg.disabled_reason" :title="seg.disabled_reason || ''" />
                             <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;"><app-icon name="lock" :size="14"></app-icon></span>
-                            <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
+                            <span class="seg-label-text" :style="seg.disabled_reason ? 'opacity:0.55;' : ''">{{ seg.label || seg.segment_id }}</span>
                             <span v-if="seg.is_builtin" class="seg-core-badge">{{ t('lblBuiltinBadge') }}</span>
                             <span style="flex:1"></span>
                             <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
@@ -3085,6 +3086,7 @@
                             <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                           </div>
                           <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
+                          <div v-if="seg.disabled_reason" class="seg-row-desc" style="color:var(--accent,#c96);">{{ seg.disabled_reason }}</div>
                           <div class="seg-row-trigger" v-if="!seg.is_core">
                             <label style="font-size:11px;opacity:0.7;">{{ t('lblTriggerMode') }}</label>
                             <select class="seg-select" v-model="seg.trigger_mode">
@@ -3196,8 +3198,8 @@
                       <div v-show="activeReflectionSegTab === 'ase'">
                         <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                           <div class="seg-row-top">
-                            <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
-                            <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
+                            <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core || !!seg.disabled_reason" :title="seg.disabled_reason || ''" />
+                            <span class="seg-label-text" :style="seg.disabled_reason ? 'opacity:0.55;' : ''">{{ seg.label || seg.segment_id }}</span>
                             <span v-if="seg.is_builtin" class="seg-core-badge">{{ t('lblBuiltinBadge') }}</span>
                             <span style="flex:1"></span>
                             <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
@@ -3205,6 +3207,7 @@
                             <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                           </div>
                           <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
+                          <div v-if="seg.disabled_reason" class="seg-row-desc" style="color:var(--accent,#c96);">{{ seg.disabled_reason }}</div>
                           <div class="seg-row-trigger">
                             <label style="font-size:11px;opacity:0.7;">{{ t('lblTriggerMode') }}</label>
                             <select class="seg-select" v-model="seg.trigger_mode">
@@ -3728,9 +3731,9 @@
                     <div v-show="activeReflectionSegTab === 'reflection'">
                       <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['reflection','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
-                          <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
+                          <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core || !!seg.disabled_reason" :title="seg.disabled_reason || ''" />
                           <span v-if="seg.is_readonly" style="font-size:12px;opacity:0.5;margin-right:4px;"><app-icon name="lock" :size="14"></app-icon></span>
-                          <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
+                          <span class="seg-label-text" :style="seg.disabled_reason ? 'opacity:0.55;' : ''">{{ seg.label || seg.segment_id }}</span>
                           <span v-if="seg.is_builtin" class="seg-core-badge">{{ t('lblBuiltinBadge') }}</span>
                           <span style="flex:1"></span>
                           <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
@@ -3738,6 +3741,7 @@
                           <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                         </div>
                         <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
+                        <div v-if="seg.disabled_reason" class="seg-row-desc" style="color:var(--accent,#c96);">{{ seg.disabled_reason }}</div>
                         <div class="seg-row-trigger" v-if="!seg.is_core">
                           <label style="font-size:11px;opacity:0.7;">{{ t('lblTriggerMode') }}</label>
                           <select class="seg-select" v-model="seg.trigger_mode">
@@ -3849,8 +3853,8 @@
                     <div v-show="activeReflectionSegTab === 'ase'">
                       <div v-for="(seg, idx) in (reflectionProfileForm.segments || []).filter(s => ['ase','reflection_ase'].includes(s.inject_into))" :key="seg.segment_id" class="seg-row">
                         <div class="seg-row-top">
-                          <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core" />
-                          <span class="seg-label-text">{{ seg.label || seg.segment_id }}</span>
+                          <input type="checkbox" v-model="seg.enabled" :disabled="seg.is_core || !!seg.disabled_reason" :title="seg.disabled_reason || ''" />
+                          <span class="seg-label-text" :style="seg.disabled_reason ? 'opacity:0.55;' : ''">{{ seg.label || seg.segment_id }}</span>
                           <span v-if="seg.is_builtin" class="seg-core-badge">{{ t('lblBuiltinBadge') }}</span>
                           <span style="flex:1"></span>
                           <label style="font-size:11px;opacity:0.7;margin-right:4px;">{{ t('lblSegPriority') }}</label>
@@ -3858,6 +3862,7 @@
                           <button v-if="!seg.is_builtin" class="seg-del-btn" @click="deleteRefaseSeg((reflectionProfileForm.segments||[]).indexOf(seg))" :title="t('titleDeleteFact')"><app-icon name="x" :size="14"></app-icon></button>
                         </div>
                         <div v-if="seg.description" class="seg-row-desc">{{ seg.description }}</div>
+                        <div v-if="seg.disabled_reason" class="seg-row-desc" style="color:var(--accent,#c96);">{{ seg.disabled_reason }}</div>
                         <div class="seg-row-trigger">
                           <label style="font-size:11px;opacity:0.7;">{{ t('lblTriggerMode') }}</label>
                           <select class="seg-select" v-model="seg.trigger_mode">

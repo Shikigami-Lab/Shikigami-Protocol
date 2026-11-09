@@ -37,6 +37,7 @@ class AffinityStateSegment(PromptSegment):
     label = "好感度与关系等级"
     description = "注入当前好感度数值与对应的关系风格建议"
     is_core = False
+    requires = ("engine:affinity",)
     default_trigger_mode = "always"
     default_trigger_param = 1.0
 

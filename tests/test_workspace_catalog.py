@@ -122,12 +122,22 @@ class RuntimeCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(folder, self.root/'profiles/a/workspace')
         (folder/'diary.txt').write_text('PRIVATE DIARY BODY')
         self.rt.catalog.describe('a', 'diary.txt', 'A notebook about experiments', 'note', True)
+        # User/reflection-origin runs receive the catalog from the
+        # workspace_catalog pipeline segment; prepare() must not add a second
+        # copy.  Only proactive research runs (which bypass the chat pipeline)
+        # still get the catalog appended here.
         messages = [{'role': 'system', 'content': 'Persona'}, {'role': 'user', 'content': 'Hello'}]
         run = self.rt.prepare(self.session, messages, self.preset)
-        self.assertIn('A notebook about experiments', run.envelope['messages'][0]['content'])
-        self.assertNotIn('PRIVATE DIARY BODY', str(run.envelope))
+        self.assertNotIn('A notebook about experiments', run.envelope['messages'][0]['content'])
         self.assertEqual(messages[0]['content'], 'Persona')
         self.assertEqual(run.envelope['messages'][-1], messages[-1])
+
+        # Proactive research runs bypass the chat pipeline and still get the
+        # catalog from prepare(); both paths draw on the same bounded text,
+        # which must contain metadata only, never file bodies.
+        catalog_text = self.rt.workspace_context('a')
+        self.assertIn('A notebook about experiments', catalog_text)
+        self.assertNotIn('PRIVATE DIARY BODY', catalog_text)
         self.config.agent['workspace_enabled'] = False
         self.assertEqual(self.rt.workspace_context('a'), '')
 

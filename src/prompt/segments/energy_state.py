@@ -40,6 +40,7 @@ class EnergyStateSegment(PromptSegment):
     label = "能量状态"
     description = "注入当前能量数值及对应的语言风格建议"
     is_core = False
+    requires = ("engine:energy",)
     default_trigger_mode = "always"
     default_trigger_param = 1.0
 

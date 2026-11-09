@@ -43,6 +43,7 @@ class MidTermMemorySegment(PromptSegment):
     label = "中期记忆（对话摘要）"
     description = "注入最近几天的对话主题和情绪基调摘要"
     is_core = False
+    requires = ("feature:memory",)
     default_trigger_mode = "always"
 
     def build(self, ctx: BuildContext) -> SegmentResult:

@@ -3222,7 +3222,9 @@ const SettingsMixin = {
         if (!current()) return;
         this.segmentList = (data.segments || []).filter(s =>
             s.inject_into === 'chat'
-        ).map(s => ({ ...s }));
+        // Dependency-locked segments render disabled; keep the local model
+        // consistent with what the server will persist (enabled=false).
+        ).map(s => ({ ...s, enabled: s.disabled_reason ? false : s.enabled }));
         this.reflectionSegmentList = (data.segments || []).filter(s =>
             s.inject_into === 'reflection' && !s.is_core
         ).map(s => ({ ...s }));
@@ -5781,6 +5783,9 @@ const SettingsMixin = {
         if (profileId !== this.selectedProfileId || sequence !== this.reflectionProfileLoadSequence) return;
         const segments = (data.segments || []).map(s => ({
           ...s,
+          // Dependency-locked segments render disabled; keep the local model
+          // consistent with what the server will persist (enabled=false).
+          enabled: s.disabled_reason ? false : s.enabled,
           trigger_param: this.coerceRefaseTriggerParam(s),
         }));
         this.reflectionProfileForm = {

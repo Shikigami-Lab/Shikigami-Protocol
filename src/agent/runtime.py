@@ -201,7 +201,10 @@ class AgentRuntime:
             if sum(not r.terminal for r in self._runs.values()) >= 2:
                 raise ValueError("Two tasks are already running; wait or stop one")
             revision = self.store.revision(session.profile_id)
-            directory_context = self.workspace_context(session.profile_id) if origin != 'proactive' else ''
+            # Chat/reflection-origin runs receive the catalog from the
+            # workspace_catalog pipeline segment (build_messages path); only
+            # proactive research runs bypass that pipeline and need it here.
+            directory_context = self.workspace_context(session.profile_id) if origin == 'proactive' else ''
             if directory_context:
                 messages = [copy(m) for m in messages]
                 next(m for m in messages if m['role'] == 'system')['content'] += directory_context

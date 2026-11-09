@@ -21,6 +21,7 @@ class ReflectionMemoryFactsSegment(PromptSegment):
     priority = 70
     label = "记忆引用（惊喜感）"
     description = "让自省时引用长期记忆，产生「她怎么记得」的效果"
+    requires = ("feature:memory",)
 
     def build(self, ctx) -> SegmentResult:
         if not isinstance(ctx, ReflectionBuildContext):

@@ -17,6 +17,7 @@ class ReflectionEmotionSegment(PromptSegment):
     priority = 30
     label = "当前情感"
     description = "向自省引擎注入当前情绪状态（emotion_state.json）"
+    requires = ("engine:emotion",)
 
     def build(self, ctx) -> SegmentResult:  # ctx: ReflectionBuildContext
         if not isinstance(ctx, ReflectionBuildContext):

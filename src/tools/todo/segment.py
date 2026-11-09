@@ -14,6 +14,7 @@ class TodosSegment(PromptSegment):
     label = "待办事项"
     description = "定期注入当前待完成事项，每5小时提醒一次（Cooldown触发，UI可调）"
     priority = 50
+    requires = ("tool:todo",)
     default_trigger_mode = "cooldown"
     default_trigger_param = 300.0   # 5小时 = 300分钟
 

@@ -46,6 +46,7 @@ class ReflectionStateSegment(PromptSegment):
     label = "当前内心状态"
     description = "将自省引擎最近一次的内心独白注入到 prompt 中"
     is_core = False
+    requires = ("engine:reflection",)
     default_trigger_mode = "always"
 
     def build(self, ctx: BuildContext) -> SegmentResult:

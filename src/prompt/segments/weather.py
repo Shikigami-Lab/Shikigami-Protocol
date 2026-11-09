@@ -40,6 +40,7 @@ class WeatherSegment(PromptSegment):
     is_core = False
     inject_into = "chat"
     is_readonly = True
+    requires = ("tool:weather",)
     default_trigger_mode = "cooldown"
     default_trigger_param = 120.0   # 分钟，默认 2h
 

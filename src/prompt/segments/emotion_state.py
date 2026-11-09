@@ -25,6 +25,7 @@ class EmotionStateSegment(PromptSegment):
     label = "情绪状态"
     description = "注入 AI 当前多层情绪名及其对应的角色描述文本，影响回复风格"
     is_core = False
+    requires = ("engine:emotion",)
     default_trigger_mode = "always"
     default_trigger_param = 1.0
 

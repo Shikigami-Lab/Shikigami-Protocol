@@ -91,9 +91,27 @@ class ChatTaskModelTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(run.envelope["messages"][-1]["content"], reminder_request)
             await original_drive(run)
 
-        # build_messages in this fixture supplies no optional time segment.
-        with patch.object(chat, "datetime") as clock, patch.object(self.runtime, "_drive", side_effect=drive):
+        # Timer instructions + host-local anchor are emitted by the
+        # tool_capability pipeline segment (formerly chat.py's injection).
+        # The fixture mocks build_messages away, so route the mock through the
+        # real segment to keep covering anchor sharing end to end.
+        from src.prompt.segments import tool_capability
+
+        def build_with_capability(*a, **k):
+            ctx = SimpleNamespace(
+                extras={"include_tool_capability": True, "agent_origin": "user",
+                        "conversation_only": False, "continue_run_id": False,
+                        "app": self.app},
+                session=self.session, user_msg=a[1])
+            result = tool_capability.ToolCapabilitySegment().build(ctx)
+            capability = result.messages[0]["content"] if result.messages else ""
+            return [{"role": "system", "content": "Character context\n\n" + capability},
+                    {"role": "user", "content": a[1]}]
+
+        with patch("src.prompt.segments.tool_capability.datetime") as clock, \
+                patch.object(self.runtime, "_drive", side_effect=drive):
             clock.now.return_value.astimezone.return_value = local_now
+            chat.build_messages.side_effect = build_with_capability
             frames = await self.send(message=reminder_request)
 
         self.assertTrue(frames[-1]["done"])

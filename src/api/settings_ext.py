@@ -2174,15 +2174,18 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
 # ── Segment config ────────────────────────────────────────────────────────────
 
 @router.get("/profiles/{profile_id}/segments")
-async def get_segment_config(profile_id: str):
+async def get_segment_config(profile_id: str, request: Request):
     """Return the merged segment config: registered segments + per-profile overrides + custom segments."""
     # Import pipeline + reflection to ensure all @register decorators have run
     from src.prompt.pipeline import build_messages  # noqa: F401 — triggers chat segment imports
     import src.core.reflection  # noqa: F401 — triggers reflection segment imports
     from src.prompt.registry import get_registered
     from src.prompt.segment_config import effective_segment_enabled, load_segment_config
+    from src.prompt.dependencies import unavailable_reason
+    from src.config.effective_config import _load_profile_card
 
     seg_cfg = load_segment_config(profile_id)
+    profile_card = _load_profile_card(profile_id)
     result = []
     for seg_cls in get_registered():
         meta = seg_cfg.get_meta(seg_cls.segment_id)
@@ -2193,7 +2196,12 @@ async def get_segment_config(profile_id: str):
             content_val = (meta.content or "").strip() if meta else ""
             if not content_val:
                 content_val = default_content_val
+        requires = tuple(getattr(seg_cls, "requires", ()) or ())
+        disabled_reason = (unavailable_reason(requires, request.app, profile_id, profile_card)
+                           if requires and not seg_cls.is_core else None)
         result.append({
+            "requires":        list(requires),
+            "disabled_reason": disabled_reason,
             "segment_id":     seg_cls.segment_id,
             "label":          seg_cls.label,
             "description":    seg_cls.description,
@@ -2244,7 +2252,7 @@ class SaveSegmentConfigBody(BaseModel):
 
 
 @router.put("/profiles/{profile_id}/segments")
-async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigBody):
+async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigBody, request: Request):
     """Persist segment configuration overrides + custom segments for a profile."""
     from src.prompt.segment_config import (
         CustomSegmentDef,
@@ -2258,10 +2266,25 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
     # reflection_config endpoint — overwriting with a fresh object would wipe them.
     cfg = load_segment_config(profile_id)
 
+    # Defense in depth: a segment whose engine/tool dependency is unmet cannot
+    # be persisted as enabled, even if a client sends enabled=true.
+    from src.prompt.pipeline import build_messages  # noqa: F401 — trigger @register
+    from src.prompt.registry import get_segment_class
+    from src.prompt.dependencies import unavailable_reason
+    from src.config.effective_config import _load_profile_card
+    profile_card = _load_profile_card(profile_id)
+
     for s in body.segments:
+        enabled = s.enabled
+        if enabled:
+            seg_cls = get_segment_class(s.segment_id)
+            requires = tuple(getattr(seg_cls, "requires", ()) or ()) if seg_cls else ()
+            if requires and not seg_cls.is_core and unavailable_reason(
+                    requires, request.app, profile_id, profile_card):
+                enabled = False
         cfg.set_meta(SegmentMeta(
             segment_id=s.segment_id,
-            enabled=s.enabled,
+            enabled=enabled,
             priority=s.priority,
             trigger_mode=s.trigger_mode,
             trigger_param=s.trigger_param,
@@ -2707,12 +2730,13 @@ async def save_profile_engine_config(profile_id: str, body: ProfileEngineConfigB
 
 
 @router.get("/profiles/{profile_id}/reflection_config")
-async def get_profile_reflection_config(profile_id: str):
+async def get_profile_reflection_config(profile_id: str, request: Request):
     """返回该人格的自省配置：custom_prompt + 所有 reflection/ASE 段落（来自统一 segments_config）。"""
     from src.prompt.pipeline import build_messages  # noqa: F401 — triggers @register for all segments
     from src.prompt.registry import get_registered
     from src.prompt.base import targets_reflection, targets_ase
     from src.prompt.segment_config import effective_segment_enabled, load_segment_config
+    from src.prompt.dependencies import unavailable_reason
 
     path = os.path.join(_PROFILES_DIR, f"{profile_id}.json")
     if not os.path.exists(path):
@@ -2739,8 +2763,13 @@ async def get_profile_reflection_config(profile_id: str):
         content_val = (meta.content or "").strip() if meta else ""
         if not content_val:
             content_val = default_content
+        requires = tuple(getattr(seg_cls, "requires", ()) or ())
+        disabled_reason = (unavailable_reason(requires, request.app, profile_id, card)
+                           if requires and not seg_cls.is_core else None)
         segments.append({
             "segment_id":     seg_cls.segment_id,
+            "requires":        list(requires),
+            "disabled_reason": disabled_reason,
             "label":          seg_cls.label,
             "description":    seg_cls.description,
             "is_core":        seg_cls.is_core,
@@ -2827,7 +2856,7 @@ def _normalize_trigger_param(mode: str, param) -> float:
 
 
 @router.put("/profiles/{profile_id}/reflection_config")
-async def save_profile_reflection_config(profile_id: str, body: ProfileReflectionConfigBody):
+async def save_profile_reflection_config(profile_id: str, body: ProfileReflectionConfigBody, request: Request):
     """更新该人格的自省配置。segments 写入 segments_config.json；其余写入 profile.json。"""
     from src.prompt.base import targets_reflection, targets_ase
 
@@ -2862,15 +2891,25 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
             if not (targets_reflection(c.inject_into) or targets_ase(c.inject_into))
         ]
 
+        from src.prompt.dependencies import unavailable_reason
+        from src.prompt.registry import get_segment_class
         for s in body.segments:
             seg_id = (s.get("segment_id") or "").strip()
             if not seg_id:
                 continue
             if seg_id in builtin_ids:
-                # Built-in: update override in segments_config
+                # Built-in: update override in segments_config.  A segment whose
+                # engine/tool dependency is unmet cannot be persisted enabled.
+                enabled = s.get("enabled", True)
+                if enabled:
+                    seg_cls = get_segment_class(seg_id)
+                    requires = tuple(getattr(seg_cls, "requires", ()) or ()) if seg_cls else ()
+                    if requires and not seg_cls.is_core and unavailable_reason(
+                            requires, request.app, profile_id, card):
+                        enabled = False
                 seg_cfg.set_meta(SegmentMeta(
                     segment_id=seg_id,
-                    enabled=s.get("enabled", True),
+                    enabled=enabled,
                     priority=s.get("priority"),
                     trigger_mode=s.get("trigger_mode") or None,
                     trigger_param=_normalize_trigger_param(s.get("trigger_mode", "always"), s.get("trigger_param", 1.0)),

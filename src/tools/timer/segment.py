@@ -14,6 +14,7 @@ class ActiveTimersSegment(PromptSegment):
     label = "进行中的计时器"
     description = "当有活跃计时器时注入倒计时信息（always触发，无计时器时自动为空）"
     priority = 48
+    requires = ("tool:timer",)
     default_trigger_mode = "always"
 
     def build(self, ctx: BuildContext) -> SegmentResult:

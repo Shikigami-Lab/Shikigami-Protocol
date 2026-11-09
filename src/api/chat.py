@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.agent.chat_routing import DISPATCH_INSTRUCTION, route_chat_reply
+from src.agent.chat_routing import route_chat_reply
 from src.config.effective_config import get_effective_max_history_turns
 from src.core.broadcast import broadcast
 from src.prompt.pipeline import build_messages
@@ -111,28 +111,18 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 n_history_turns=n_turns,
                 preset=preset,
                 app=request.app,
+                # Tool capability / workspace catalog / tool guard are pipeline
+                # segments gated by these flags (formerly _inject_context calls).
+                extra_context={
+                    "include_tool_capability": True,
+                    "agent_origin": "user",
+                    "conversation_only": bool(body.conversation_only),
+                    "continue_run_id": bool(body.continue_run_id),
+                    "include_workspace_catalog": use_agent,
+                },
             )
             if body.continue_run_id and not use_agent:
                 raise ValueError('Enable AI tools to continue a task')
-            if not user_msg.startswith('/'):
-                if use_agent:
-                    from src.agent.capabilities import capability_context
-                    info = capability_context(agent_runtime.access_for(session.profile_id))
-                    if agent_runtime.timer_allowed(session.profile_id):
-                        local_now = datetime.now().astimezone().isoformat(timespec='seconds')
-                        info += (f'\nCurrent host-local time with offset is {local_now}. '
-                                 'Use timer_create for a countdown with a duration. '
-                                 'Delegate a one-time reminder for a specific date/time to timer_schedule '
-                                 'with due_at as an ISO date and time and a label. Omit the offset for local time. '
-                                 'Use local time unless the user specifies another zone. Resolve relative dates '
-                                 'using the local time above. Ask if the intended duration, date, time or zone '
-                                 'needed for the request is unclear. Use timer_list and timer_cancel for both types. '
-                                 'For a user-requested daily report or its pause, delegate to timer_daily_report. '
-                                 'Give the local time as HH:MM and the report instructions on creation.')
-                    _inject_context(messages, info)
-                else:
-                    _inject_context(messages, '[Tool availability]\nNo tools are enabled for this turn. '
-                        'Chat normally, but do not claim to have executed operations. Manual toolbar buttons and slash commands remain available.')
 
             # ── log: incoming user turn ──────────────────────────────
             log_chat_request(
@@ -215,8 +205,6 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 llm = get_provider(preset)
                 if not body.continue_run_id:
                     chat_messages = [dict(message) for message in messages]
-                    if use_agent:
-                        _inject_context(chat_messages, DISPATCH_INSTRUCTION)
                     log_llm_call(messages=chat_messages, model=preset.get("model", ""),
                                  gen_kwargs=gen_kwargs, session_id=session.id)
                     async with aclosing(llm.stream_chat(chat_messages)) as tokens:
