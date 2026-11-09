@@ -13,6 +13,7 @@ from unittest import mock
 
 import src.core.persona_evolution as persona_evolution
 import src.core.user_portrait as user_portrait
+import src.config.profile_loader as profile_loader
 
 PROFILE_ID = "portrait_test"
 FORM_RULE_STYLE = "【风格约束】\n称呼用户为「投喂者」或直呼其名；极高信任后才自然改口。"
@@ -39,6 +40,8 @@ class _TempProfileTest(unittest.TestCase):
             (user_portrait, "get_locale", lambda: "zh"),
             (persona_evolution, "_PROFILES_DIR", self.profiles_dir),
             (persona_evolution, "get_locale", lambda: "zh"),
+            # Shared normalized card reader resolves via profile_loader.PROFILES_DIR.
+            (profile_loader, "PROFILES_DIR", self.profiles_dir),
         ):
             patcher = mock.patch.object(target, name, value)
             patcher.start()

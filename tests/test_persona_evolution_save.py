@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from src.core import persona_evolution as pe
+from src.config import profile_loader
 
 
 def _reply(**fields):
@@ -54,9 +55,10 @@ class TriggerEvolutionSaveTests(unittest.IsolatedAsyncioTestCase):
         self.profiles = tmp.name
         self.storage_root = os.path.join(tmp.name, "p1")
         os.makedirs(self.storage_root)
-        patcher = mock.patch.object(pe, "_PROFILES_DIR", self.profiles)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for target, name in ((pe, "_PROFILES_DIR"), (profile_loader, "PROFILES_DIR")):
+            patcher = mock.patch.object(target, name, self.profiles)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _write_card(self, card):
         with open(os.path.join(self.profiles, "p1.json"), "w", encoding="utf-8") as f:

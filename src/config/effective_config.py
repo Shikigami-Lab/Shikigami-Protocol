@@ -1,26 +1,14 @@
 """Resolve effective config per profile: global + profile overrides."""
-import json
 import logging
-import os
 from typing import Any, Dict
-
-from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
-PROFILES_DIR = os.path.join(get_project_root(), "profiles")
-
 
 def _load_profile_card(profile_id: str) -> Dict[str, Any]:
-    path = os.path.join(PROFILES_DIR, f"{profile_id}.json")
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("[effective_config] failed to load profile %s: %s", profile_id, e)
-        return {}
+    # Delegate to the shared normalized reader (migrations/defaults applied).
+    from src.config.profile_loader import load_profile_card
+    return load_profile_card(profile_id)
 
 
 def get_effective_max_history_turns(app, profile_id: str) -> int:

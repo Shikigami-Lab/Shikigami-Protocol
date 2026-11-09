@@ -62,6 +62,28 @@ def _ensure_user_portrait_defaults(card: Dict[str, Any]) -> None:
     card.setdefault("user_portrait_config", dict(DEFAULT_USER_PORTRAIT_CONFIG))
 
 
+def load_profile_card(profile_id: str) -> Dict[str, Any]:
+    """Load a profile card with migrations/defaults applied; {} if missing/unreadable.
+
+    Single raw-card reader for every consumer (engines, commands, settings,
+    dependency checks) so they all see the same normalized view that
+    ProfileLoader.load produces, without its FileNotFoundError contract.
+    Migrations/defaults are in-memory only; nothing is written back here.
+    """
+    path = os.path.join(PROFILES_DIR, f"{profile_id}.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            card = json.load(f)
+    except Exception as e:
+        logger.warning(f"[ProfileLoader] failed to read profile card {profile_id}: {e}")
+        return {}
+    _migrate_user_persona(card)
+    _ensure_user_portrait_defaults(card)
+    return card
+
+
 class ProfileLoader:
     def list_profiles(self) -> List[Dict[str, Any]]:
         """Return full profile cards for all profile JSON files."""

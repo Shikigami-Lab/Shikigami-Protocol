@@ -97,15 +97,9 @@ def _changelog_path(storage_root: str) -> str:
 
 
 def _load_profile_card(profile_id: str) -> Dict[str, Any]:
-    path = _profile_card_path(profile_id)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("[PersonaEvolution] 读取 profile card 失败 %s: %s", profile_id, e)
-        return {}
+    # Delegate to the shared normalized reader (migrations/defaults applied).
+    from src.config.profile_loader import load_profile_card
+    return load_profile_card(profile_id)
 
 
 def _save_profile_card(profile_id: str, card: Dict[str, Any]) -> None:
