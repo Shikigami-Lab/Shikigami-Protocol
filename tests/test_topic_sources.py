@@ -26,7 +26,7 @@ class TopicSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse({"trend", "web_research"} & {source.source_id for source in enabled})
 
     async def test_manual_life_topic_honors_the_existing_source_setting(self):
-        with tempfile.TemporaryDirectory() as root, patch("src.config.effective_config.PROFILES_DIR", root):
+        with tempfile.TemporaryDirectory() as root, patch("src.config.profile_loader.PROFILES_DIR", root):
             session = SimpleNamespace(profile_id="example", storage_root=root)
             fact = "Synthetic fact for the manual command."
             memory = SimpleNamespace(get_reflection_context_facts=lambda **kwargs: [{"content": fact}])
