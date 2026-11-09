@@ -181,7 +181,20 @@ async def stt_transcribe(
     if audio:
         body = await audio.read()
     if not body:
-        body = await request.body()
+        if request.headers.get("content-type", "").startswith("multipart/form-data"):
+            # FastAPI 已消费请求流用于解析表单；字段名不对时 audio 为 None，
+            # 再读 request.body() 会抛 RuntimeError("Stream consumed")。
+            return JSONResponse(
+                status_code=400,
+                content={"error": 'multipart 表单中未找到音频：字段名应为 "audio"，或直接以 application/octet-stream 发送原始 WAV 字节'},
+            )
+        try:
+            body = await request.body()
+        except RuntimeError:
+            return JSONResponse(
+                status_code=400,
+                content={"error": '请求体不可读：请以 multipart 字段 "audio" 或 application/octet-stream 原始字节发送 WAV 音频'},
+            )
     if not body:
         return JSONResponse(status_code=400, content={"error": "未收到音频数据"})
 
