@@ -122,6 +122,50 @@ GEMINI_API_KEY=your_key_here
 
 ---
 
+## AI tools (Harness, optional)
+
+Lets a character actually perform tasks: read/write files in its workspace, run code, search the web, look up chat history, manage todos and timers, and more. **All tool capabilities are off by default** — if you don't plan to use tools, skip this section entirely; normal chat is unaffected.
+
+> **There is nothing to "start":** Harness is not a background service. Each task is launched by the app itself as a one-shot Docker container that is destroyed when the task ends. After the setup below, daily use is just **keep Docker running + open the app** — no extra startup step exists.
+
+### Step 1: Install and start Docker
+
+Tool code runs inside an isolated Docker container (no network, read-only filesystem), so a container engine is required:
+
+- **Windows**: install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (requires WSL2; the installer guides you). **Keep Docker Desktop running while using tools**; enable "Start Docker Desktop when you sign in" in its settings to avoid starting it manually.
+- **macOS**: Docker Desktop for Mac, or a free alternative like [OrbStack](https://orbstack.dev/) / [colima](https://github.com/abiosoft/colima) — anything that provides the `docker` command works.
+- **Linux**: `sudo apt install docker.io` (or your distro's equivalent) and start the service; add your user to the `docker` group to skip sudo.
+
+**Verify** (new terminal): `docker version` should show both a Client and a Server section. Client only = the engine isn't running.
+
+### Step 2: Build the Harness image (one time, needs network)
+
+From the repository root:
+
+```bash
+docker build -t shikigami-harness:workspace-0.2.1rc2 integrations/deepseek-harness
+```
+
+### Step 3: Enable in the app
+
+1. **Settings → Models → Tool execution model**: pick a saved model preset (defaults to following the active chat model).
+2. **Settings → Tools**: turn on the master switch and enable capabilities as needed (workspace / code / web / history / memory / todo; code requires workspace). Status showing **ready** means you're set.
+3. **Profiles → Tools** (optional): override the global defaults per character — e.g. enable tools for one character only.
+
+For the full capability reference, see [integrations/deepseek-harness/README.md](../integrations/deepseek-harness/README.md).
+
+### Tool errors: what they mean
+
+| Error message | Meaning and fix |
+| --- | --- |
+| `Docker is not installed or not on PATH` | Docker isn't installed or isn't on PATH → back to Step 1 |
+| `Docker is installed but its engine is not running` | Docker is installed but the engine is stopped → open Docker Desktop (or start the docker service), wait until ready, retry |
+| `the Harness image is missing` | The image hasn't been built → run the `docker build` from Step 2 |
+| `Install the pinned project requirements` | Backend dependencies incomplete → activate `.venv` and run `pip install -r requirements.txt` |
+| `AI tools are disabled for this character` | Tools are off for this character → enable them in Settings → Tools or Profiles → Tools |
+
+---
+
 ## Troubleshooting
 
 ### Instant exit / error code 103

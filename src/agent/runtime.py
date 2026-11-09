@@ -260,11 +260,18 @@ class AgentRuntime:
             model_route(preset)
             import importlib.metadata
             if importlib.metadata.version('mcp') != '1.26.0':
-                return {'available': False, 'detail': 'Install the pinned project requirements to prepare the tool server.'}
+                return {'available': False, 'detail': 'Install the pinned project requirements (pip install -r requirements.txt) to prepare the tool server.'}
+            try:
+                engine = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                    capture_output=True, timeout=8, **self._hidden())
+            except FileNotFoundError:
+                return {"available": False, "detail": 'Docker is not installed or not on PATH. Install Docker Desktop (Windows/macOS) or Docker Engine (Linux), start it, then retry. See docs/SETUP_FIRST_RUN ("AI tools (Harness)").'}
+            if engine.returncode:
+                return {"available": False, "detail": "Docker is installed but its engine is not running. Start Docker Desktop (Windows/macOS) or the docker service (Linux), wait until it is ready, then retry."}
             result = subprocess.run(["docker", "image", "inspect", HARNESS_IMAGE, "--format", "{{.Id}}"],
                 capture_output=True, timeout=8, **self._hidden())
             if result.returncode:
-                return {"available": False, "detail": "Docker or the Harness image is unavailable. Prepare the runtime and retry."}
+                return {"available": False, "detail": "Docker is running but the Harness image is missing. From the repository root run: docker build -t " + HARNESS_IMAGE + " integrations/deepseek-harness"}
             return {"available": True, "detail": ""}
         except Exception:
             return {"available": False, "detail": "Check the selected model and Docker runtime, then retry."}

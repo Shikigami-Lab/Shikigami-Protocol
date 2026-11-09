@@ -122,6 +122,50 @@ GEMINI_API_KEY=你的密钥
 
 ---
 
+## AI 工具（Harness，可选）
+
+让角色真正执行任务：读写其工作区文件、运行代码、搜索网页、查找历史消息、操作待办与计时器等。**所有工具能力默认关闭**——不打算用工具的话，本节可以完全跳过，普通聊天不受影响。
+
+> **Harness 无需"启动"**：它不是常驻服务。每次任务由应用自动拉起一个一次性 Docker 容器，跑完自动销毁。完成下面的准备后，日常使用只需保持 **Docker 运行 + 打开应用**，没有任何额外的启动步骤。
+
+### 第 1 步：安装并启动 Docker
+
+工具代码在隔离的 Docker 容器里执行（无网络、只读文件系统），所以需要一个容器引擎：
+
+- **Windows**：安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（需要 WSL2，安装向导会引导）。**使用工具期间保持 Docker Desktop 运行**；可在其设置里勾选 "Start Docker Desktop when you sign in" 免每次手动开。
+- **macOS**：Docker Desktop for Mac，或免费替代品 [OrbStack](https://orbstack.dev/) / [colima](https://github.com/abiosoft/colima)——能提供 `docker` 命令即可。
+- **Linux**：`sudo apt install docker.io`（或发行版等价命令）并启动服务；把用户加入 docker 组免 sudo。
+
+**验证**（新开终端）：`docker version` 应同时显示 Client 和 Server 两段。只有 Client 说明引擎没启动。
+
+### 第 2 步：构建 Harness 镜像（一次性，需联网）
+
+在仓库根目录执行：
+
+```bash
+docker build -t shikigami-harness:workspace-0.2.1rc2 integrations/deepseek-harness
+```
+
+### 第 3 步：在应用里启用
+
+1. **设置 → 模型 → 工具执行模型**：选一个已保存的模型预设（留空则跟随当前聊天模型）。
+2. **设置 → 工具**：打开"默认启用 AI 工具"，按需开启 workspace / code / web / history / memory / todo 等能力（code 需要先开 workspace）。状态显示 **ready** 即就绪。
+3. **人格 → 工具配置**（可选）：对单个角色覆盖全局默认，比如只给某个角色开工具。
+
+更细的能力说明见 [integrations/deepseek-harness/README.md](../integrations/deepseek-harness/README.md)。
+
+### 工具报错对照表
+
+| 报错提示 | 含义与处理 |
+| --- | --- |
+| `Docker is not installed or not on PATH` | 未安装 Docker 或未加入 PATH → 回到第 1 步 |
+| `Docker is installed but its engine is not running` | Docker 装了但引擎没启动 → 打开 Docker Desktop（或启动 docker 服务），等它就绪后重试 |
+| `the Harness image is missing` | 镜像还没构建 → 执行第 2 步的 `docker build` |
+| `Install the pinned project requirements` | 后端依赖不完整 → 激活 `.venv` 后 `pip install -r requirements.txt` |
+| `AI tools are disabled for this character` | 该角色没开工具 → 设置 → 工具 或 人格 → 工具配置 中启用 |
+
+---
+
 ## 常见问题与排查
 
 ### 闪退 / exit code 103
