@@ -70,11 +70,6 @@ async def dispatch_command(message: str, session, app) -> CommandResult:
             from src.commands.memory_cmds import handle_memory_status
             return await handle_memory_status(session, app)
 
-        # /todo <sub> [args]
-        if cmd == "todo":
-            from src.commands.todo_cmds import handle_todo
-            return await handle_todo(sub, args, session, app)
-
         # /topic [source] — have the AI bring up a new topic right away
         if cmd == "topic":
             from src.commands.topic_cmds import handle_topic
