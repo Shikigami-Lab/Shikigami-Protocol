@@ -26,6 +26,7 @@ from src.utils.memory_time import write_time_context
 
 from src.memory.long_term_store import LongTermFact, LongTermStore
 from src.memory.day_store import DaySummaryStore
+from src.memory.rolling_store import RollingSummaryStore
 from src.memory.extraction_batches import is_memory_turn as _is_memory_turn, plan_batch
 from src.memory.merged_history import memory_group_sources_allowed
 from src.memory.vector_store import VectorMemoryStore
@@ -92,6 +93,11 @@ class MemoryManager:
             "max_facts_in_prompt": 8,
             "day_summary_enabled": False,
             "day_summary_keep_days": 14,
+            # 会话内滚动摘要（当天早些时候的压缩，独立于日摘要）
+            "rolling_summary_enabled": False,
+            "rolling_summary_interval_turns": 20,
+            "rolling_summary_keep_turns": 60,
+            "rolling_summary_max_chars": 800,
             # 每日遗忘（只跑已加载且昨日有对话的 session）
             "daily_forgetting_enabled": False,
             "daily_decay_factor": 0.998,
@@ -125,6 +131,7 @@ class MemoryManager:
         # 初始化各子存储
         self.facts = LongTermStore(storage_root)
         self.day_store = DaySummaryStore(storage_root)
+        self.rolling = RollingSummaryStore(storage_root)
 
         # Search is optional. The old index can still be migrated and cleaned locally.
         memory_enabled = self._cfg.get("enabled")
@@ -144,6 +151,7 @@ class MemoryManager:
         # turn_counter（用于 auto_extract 频率控制）
         self._meta_path = os.path.join(storage_root, "memory_meta.json")
         self._extraction_lock = asyncio.Lock()
+        self._rolling_lock = asyncio.Lock()
         index_path = os.path.normcase(os.path.realpath(storage_root))
         self._fact_index_lock = _FACT_INDEX_LOCKS.setdefault(index_path, asyncio.Lock())
         if self.fact_index:
@@ -598,6 +606,12 @@ class MemoryManager:
                 conv_text = conv_text[:max_conv_chars] + "\n...（内容过长，已截断）"
                 truncated_text = True
 
+        # 会话内滚动摘要交接：当天的滚动压缩并入日摘要输入，避免时间轴断档
+        rolling_data = self.rolling.get()
+        if rolling_data and rolling_data.get("date") == date_str and rolling_data.get("summary"):
+            rolling_section = f"【当天滚动摘要】\n{rolling_data['summary']}"
+            conv_text = f"{rolling_section}\n\n{conv_text}" if conv_text else rolling_section
+
         ctx = self._build_day_summary_context(date_str, len(day_msgs), profile, app)
 
         task_prompt = self._memory_system_prompt("day_summary_prompt", profile, app)
@@ -654,6 +668,7 @@ class MemoryManager:
                                            message_count=len(day_msgs),
                                            keep_days=keep_days,
                                            experience_ids=sorted(experience_links_by_day(self.facts.get_all()).get(date_str, ())))
+                self.rolling.clear_if_date(date_str)
                 logger.info("[MemoryManager] 日摘要已生成 date=%s len=%d profile=%s",
                             date_str, len(summary), self._profile_id)
                 log_summary_generate(self._profile_id, date_str, len(day_msgs), summary)
@@ -666,6 +681,95 @@ class MemoryManager:
             logger.error("[MemoryManager] 生成日摘要失败: %s", e)
             log_error("memory", str(e), {"profile_id": self._profile_id, "op": "day_summary"}, traceback_str=traceback.format_exc())
         return None
+
+    async def maybe_update_rolling_summary(self, store, profile: Dict, app) -> bool:
+        """会话内滚动摘要：每当窗口外积压满 interval 个用户轮次，就把窗口外的旧对话
+        压缩进当天滚动摘要。只覆盖当天；跨天时若日摘要开启且昨日摘要未生成则等待交接，
+        否则直接重置。返回是否产生了新摘要。"""
+        if not self._cfg.get("enabled") or not self._cfg.get("rolling_summary_enabled"):
+            return False
+        preset_name = self._cfg.get("extraction_llm_preset", "")
+        if preset_name == "__none__":
+            return False
+
+        today = date.today().strftime("%Y-%m-%d")
+        async with self._rolling_lock:
+            data = self.rolling.get()
+            if data and data.get("date") != today:
+                # 跨天：日摘要开且该日摘要未生成 → 等交接，避免摘要丢失
+                if self._cfg.get("day_summary_enabled") and not self.day_store.has_summary_for(data["date"]):
+                    return False
+                self.rolling.reset(today)
+                data = None
+            covered = int((data or {}).get("covered_up_to_id", 0))
+            keep_turns = max(10, min(200, int(self._cfg.get("rolling_summary_keep_turns", 60))))
+            interval = max(5, min(100, int(self._cfg.get("rolling_summary_interval_turns", 20))))
+            max_chars = max(200, min(4000, int(self._cfg.get("rolling_summary_max_chars", 800))))
+
+            # 窗口边界：最近 keep_turns 轮保持原文，更早的才允许压缩
+            window = store.get_recent_with_ts(keep_turns)
+            boundary = window[0]["id"] if window else 0
+            batch = store.memory_turn_batch_after(covered, interval * 2)
+            pending = [m for m in batch if 0 < m["id"] < boundary]
+            if sum(1 for m in pending if m.get("role") == "user") < interval:
+                return False
+
+            persona_name = profile.get("display_name") or profile.get("name", "AI")
+            conv_text = "\n".join(
+                f'{("用户" if m["role"] == "user" else m.get("sender") or persona_name)}: {m.get("content", "")}'
+                for m in pending if _is_memory_turn(m)
+            )
+            if not conv_text.strip():
+                return False
+            max_conv_chars = max(2000, min(100000, int(self._cfg.get("day_summary_max_conv_chars", 12000))))
+            if len(conv_text) > max_conv_chars:
+                conv_text = conv_text[:max_conv_chars] + "\n...（内容过长，已截断）"
+
+            prev_summary = ((data or {}).get("summary") or "").strip()
+            task_prompt = get_prompt("memory.rolling_summary_task")
+            rolling_input = Template(get_prompt("memory.rolling_summary_input")).safe_substitute(
+                prev_summary=prev_summary or "（无）",
+                conv_text=conv_text,
+                max_chars=max_chars,
+            )
+
+            try:
+                from src.llm.registry import get_provider
+                preset = app.state.config.get_llm_preset(preset_name) if preset_name else app.state.config.get_active_llm_preset()
+                llm = get_provider(preset)
+                model = preset.get("model", "unknown") if preset else "unknown"
+                messages = [
+                    {"role": "system", "content": task_prompt},
+                    {"role": "user", "content": rolling_input},
+                ]
+                log_secondary_llm_call(
+                    role="memory_rolling", messages=messages, model=model,
+                    gen_kwargs={}, session_id=self._profile_id,
+                )
+                _t0 = time.time()
+                summary = ""
+                async for token in llm.stream_chat(messages):
+                    if token.startswith("[LLM Error:") or len(summary) > max_chars * 2:
+                        raise ValueError("Invalid rolling summary model response")
+                    summary += token
+                log_secondary_llm_response(
+                    role="memory_rolling", response=summary, model=model,
+                    session_id=self._profile_id, duration_ms=int((time.time() - _t0) * 1000),
+                )
+                summary = summary.strip()
+                if not summary:
+                    return False
+                if len(summary) > max_chars * 1.2:
+                    summary = summary[:max_chars] + "…"
+                self.rolling.update(summary, pending[-1]["id"], today)
+                logger.info("[MemoryManager] 滚动摘要已更新 profile=%s covered=%d len=%d",
+                            self._profile_id, pending[-1]["id"], len(summary))
+                return True
+            except Exception as e:
+                logger.error("[MemoryManager] 滚动摘要生成失败: %s", e)
+                log_error("memory", str(e), {"profile_id": self._profile_id, "op": "rolling_summary"},
+                          traceback_str=traceback.format_exc())
+                return False
 
     async def reembed_fact(self, fact_id: str, emotion_context: Optional[Dict] = None) -> bool:
         """Refresh a fact's unique vector, or drop it when the fact is no longer recallable."""

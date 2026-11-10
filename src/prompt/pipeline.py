@@ -41,6 +41,7 @@ import src.prompt.segments.energy_state     # noqa: F401
 import src.prompt.segments.affinity_state   # noqa: F401
 import src.prompt.segments.long_term_facts  # noqa: F401
 import src.prompt.segments.mid_term_memory  # noqa: F401
+import src.prompt.segments.rolling_summary  # noqa: F401  (RollingSummarySegment, in-session compaction)
 import src.tools.todo.segment                # noqa: F401  (TodosSegment, cooldown 5h)
 import src.tools.timer.segment               # noqa: F401  (ActiveTimersSegment)
 import src.prompt.segments.reflection_state  # noqa: F401  (ReflectionStateSegment)

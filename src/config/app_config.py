@@ -130,6 +130,10 @@ class AppConfig:
             "day_summary_keep_days": 14,
             "day_summary_max_messages": 100,      # 写日记/日摘要时单日最多取多少条对话（超出截断）
             "day_summary_max_conv_chars": 12000,   # 发给模型的对话总文本最大字符数（超出截断）
+            "rolling_summary_enabled": False,       # 会话内滚动摘要（当天窗口外旧对话压缩）
+            "rolling_summary_interval_turns": 20,   # 每积压多少用户轮次触发一次压缩
+            "rolling_summary_keep_turns": 60,       # 最近多少轮保持原文不进摘要
+            "rolling_summary_max_chars": 800,       # 滚动摘要最大字符数（硬约束）
             "daily_forgetting_enabled": False,
             "daily_curation_enabled": False,
             "curation_interval_days": 1,

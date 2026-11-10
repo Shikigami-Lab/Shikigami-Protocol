@@ -384,6 +384,10 @@ const SettingsMixin = {
         day_summary_keep_days: 14,
         day_summary_max_messages: 100,
         day_summary_max_conv_chars: 12000,
+        rolling_summary_enabled: false,
+        rolling_summary_interval_turns: 20,
+        rolling_summary_keep_turns: 60,
+        rolling_summary_max_chars: 800,
         recent_fact_quota: 3,
         semantic_fact_quota: 2,
         recent_days: 3,
@@ -441,7 +445,7 @@ const SettingsMixin = {
       memoryGlobalFormLoaded: false,
       _memGlobalSaveStateTimer: null,
       _memProfileSaveStateTimer: null,
-      memGlobalAdvOpen: { ltm: false, vector: false, daySummary: false },
+      memGlobalAdvOpen: { ltm: false, vector: false, daySummary: false, rolling: false },
       memProfileAdvOpen: { extract: false, vector: false },
       memoryContentProfileId: '',   // 记忆内容（事实/向量/摘要/历史）所属人格，load 完成后设置
       memoryFacts: [],
@@ -720,6 +724,9 @@ const SettingsMixin = {
     // 记忆「当前生效」开关（用于总开关关闭时禁用子项）
     memoryGlobalEffectiveDaySummaryEnabled() {
       return this.memoryGlobalForm.enabled && this.memoryGlobalForm.day_summary_enabled;
+    },
+    memoryGlobalEffectiveRollingEnabled() {
+      return this.memoryGlobalForm.enabled && this.memoryGlobalForm.rolling_summary_enabled;
     },
     memoryProfileEffectiveEnabled() {
       return this.memoryTabProfileForm.enabled ?? this.memoryGlobalForm.enabled;
@@ -4201,6 +4208,10 @@ const SettingsMixin = {
           day_summary_keep_days:   data.day_summary_keep_days   ?? 14,
           day_summary_max_messages:   data.day_summary_max_messages   ?? 100,
           day_summary_max_conv_chars: data.day_summary_max_conv_chars ?? 12000,
+          rolling_summary_enabled:         data.rolling_summary_enabled         ?? false,
+          rolling_summary_interval_turns:  data.rolling_summary_interval_turns  ?? 20,
+          rolling_summary_keep_turns:      data.rolling_summary_keep_turns      ?? 60,
+          rolling_summary_max_chars:       data.rolling_summary_max_chars       ?? 800,
           recent_fact_quota: data.recent_fact_quota ?? 3,
           semantic_fact_quota: data.semantic_fact_quota ?? 2,
           recent_days:       data.recent_days       ?? 3,
@@ -4245,6 +4256,10 @@ const SettingsMixin = {
         day_summary_keep_days:   parseInt(this.memoryGlobalForm.day_summary_keep_days, 10) || 14,
         day_summary_max_messages:   Math.max(10, Math.min(500, parseInt(this.memoryGlobalForm.day_summary_max_messages, 10) || 100)),
         day_summary_max_conv_chars: Math.max(2000, Math.min(100000, parseInt(this.memoryGlobalForm.day_summary_max_conv_chars, 10) || 12000)),
+        rolling_summary_enabled: !!this.memoryGlobalForm.rolling_summary_enabled,
+        rolling_summary_interval_turns: Math.max(5, Math.min(100, parseInt(this.memoryGlobalForm.rolling_summary_interval_turns, 10) || 20)),
+        rolling_summary_keep_turns: Math.max(10, Math.min(200, parseInt(this.memoryGlobalForm.rolling_summary_keep_turns, 10) || 60)),
+        rolling_summary_max_chars: Math.max(200, Math.min(4000, parseInt(this.memoryGlobalForm.rolling_summary_max_chars, 10) || 800)),
         recent_fact_quota: number('recent_fact_quota', 3),
         semantic_fact_quota: number('semantic_fact_quota', 2),
         recent_days:       number('recent_days', 3),
@@ -4486,6 +4501,7 @@ const SettingsMixin = {
           enabled:              cfg.enabled              ?? null,
           vector_enabled:       cfg.vector_enabled       ?? null,
           day_summary_enabled:  cfg.day_summary_enabled  ?? null,
+          rolling_summary_enabled: cfg.rolling_summary_enabled ?? null,
           extraction_frequency:   _pn(cfg.extraction_frequency),
           extraction_weight_threshold: _pn(cfg.extraction_weight_threshold),
           max_facts_in_prompt:    _pn(cfg.max_facts_in_prompt),
@@ -4526,7 +4542,7 @@ const SettingsMixin = {
       };
       const savedReview = this.memoryTabProfileSavedReview;
       const cfg = { extraction_llm_preset: form.extraction_llm_preset };
-      for (const key of ['enabled', 'vector_enabled', 'day_summary_enabled', 'daily_forgetting_enabled',
+      for (const key of ['enabled', 'vector_enabled', 'day_summary_enabled', 'rolling_summary_enabled', 'daily_forgetting_enabled',
         'daily_reinforcement_enabled', 'daily_consolidation_enabled']) {
         cfg[key] = form[key];
       }

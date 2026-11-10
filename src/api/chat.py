@@ -652,6 +652,14 @@ def _fire_memory_tasks(session, store, app, *, group_id=None, user_message_id=No
         retries=0,
     ))
 
+    # 会话内滚动摘要（v1 只单聊）：窗口外积压满 interval 轮时压缩
+    if group_id is None and mgr._cfg.get("rolling_summary_enabled"):
+        asyncio.create_task(_fire_task(
+            lambda: mgr.maybe_update_rolling_summary(store, profile, app),
+            "rolling_summary",
+            retries=0,
+        ))
+
     # day_summary：检测昨天有无对话+摘要（合并开启时用按日合并）
     if mgr._cfg.get("day_summary_enabled"):
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")

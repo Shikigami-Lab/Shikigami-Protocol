@@ -79,6 +79,31 @@ memory:
     zh: "当天没有对话。"
     en: "There was no conversation that day."
 
+  rolling_summary_task:
+    zh: |
+      把给定的对话压缩成一段客观、中立的摘要，不超过 $max_chars 字。用第三人称陈述事实：谈了什么话题、达成了什么结论、约定了什么待办。保留具体的人名、数字、决定和未完结的约定；丢掉寒暄、重复和过程性闲聊。
+      若提供了上一版摘要，把它与新对话合并成一段连贯摘要，而不是简单拼接。不评价、不抒情、不用角色口吻，不编造对话中没有的内容。
+      直接输出摘要正文。
+    en: |
+      Compress the given conversation into an objective, neutral summary of at most $max_chars characters. State facts in the third person: topics discussed, conclusions reached, follow-ups agreed. Keep concrete names, numbers, decisions and open commitments; drop greetings, repetition and procedural chatter.
+      If a previous summary is provided, merge it with the new conversation into one coherent summary instead of appending. No commentary, no sentiment, no character voice, nothing not present in the conversation.
+      Output the summary directly.
+
+  rolling_summary_input:
+    zh: |
+      【上一版摘要】
+      $prev_summary
+
+      【新增对话】
+      $conv_text
+    en: |
+      [Previous summary]
+      $prev_summary
+
+      [New conversation]
+      $conv_text
+
+
   consolidation_user:
     zh: "请严格只输出 JSON 数组，不要任何前缀或后缀。"
     en: "Output only the JSON array, strictly. No prefix or suffix."

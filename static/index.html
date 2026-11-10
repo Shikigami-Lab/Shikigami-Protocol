@@ -5485,6 +5485,42 @@
             </div>
           </div><!-- end Day Summary card -->
 
+          <!-- ── Card 2b: 会话内滚动摘要 ── -->
+          <div class="s-card">
+            <div class="s-card-title">{{ t('memSectRollingSummary') }}</div>
+            <p class="form-hint" style="margin-bottom:12px;">{{ t('hintEnableRollingSummary') }}</p>
+            <toggle-row :label="t('lblEnableRollingSummary')" v-model="memoryGlobalForm.rolling_summary_enabled"
+                        :disabled="!memoryGlobalForm.enabled"></toggle-row>
+
+            <div class="settings-param-block" :class="{ disabled: !memoryGlobalEffectiveRollingEnabled }">
+              <div class="param-row" style="margin-top:8px;">
+                <span class="param-label">{{ t('lblRollingInterval') }}</span>
+                <input type="number" class="seg-num-input" min="5" max="100"
+                       v-model.number="memoryGlobalForm.rolling_summary_interval_turns" style="width:64px;" :disabled="!memoryGlobalEffectiveRollingEnabled" />
+              </div>
+              <div class="form-hint">{{ t('hintRollingInterval') }}</div>
+              <div class="param-row" style="margin-top:8px;">
+                <span class="param-label">{{ t('lblRollingMaxChars') }}</span>
+                <input type="number" class="seg-num-input" min="200" max="4000" step="100"
+                       v-model.number="memoryGlobalForm.rolling_summary_max_chars" style="width:80px;" :disabled="!memoryGlobalEffectiveRollingEnabled" />
+              </div>
+              <div class="form-hint">{{ t('hintRollingMaxChars') }}</div>
+
+              <div class="section-divider" role="button" tabindex="0" :aria-expanded="memGlobalAdvOpen.rolling"
+                   @click="memGlobalAdvOpen.rolling = !memGlobalAdvOpen.rolling" @keydown.enter.self.prevent="$event.currentTarget.click()" @keydown.space.self.prevent="$event.currentTarget.click()" style="cursor:pointer;margin-top:10px;">
+                {{ t('lblTtsAdvanced') }} <app-icon :name="memGlobalAdvOpen.rolling ? 'chevron-up' : 'chevron-down'" :size="14"></app-icon>
+              </div>
+              <div v-show="memGlobalAdvOpen.rolling">
+                <div class="param-row" style="margin-top:8px;">
+                  <span class="param-label">{{ t('lblRollingKeepTurns') }}</span>
+                  <input type="number" class="seg-num-input" min="10" max="200"
+                         v-model.number="memoryGlobalForm.rolling_summary_keep_turns" style="width:64px;" :disabled="!memoryGlobalEffectiveRollingEnabled" />
+                </div>
+                <div class="form-hint">{{ t('hintRollingKeepTurns') }}</div>
+              </div>
+            </div>
+          </div><!-- end Rolling Summary card -->
+
           <!-- ── Shared daily clock ── -->
           <div class="s-card">
             <div class="s-card-title">{{ t('memSectSharedDailyClock') }}</div>
@@ -5623,6 +5659,17 @@
                 </select>
               </div>
               <p class="mem-cfg-hint">{{ t('hintDaySummarySchedule') }}</p>
+            </div>
+            <div class="mem-cfg-item">
+              <div class="param-row">
+                <span class="param-label">{{ t('lblProfileRollingSummary') }}</span>
+                <select class="form-select" v-model="memoryTabProfileForm.rolling_summary_enabled" style="min-width:120px;" :disabled="!memoryProfileEffectiveEnabled">
+                  <option :value="null">{{ t('optInheritGlobal') }}</option>
+                  <option :value="true">{{ t('optOn') }}</option>
+                  <option :value="false">{{ t('optOff') }}</option>
+                </select>
+              </div>
+              <p class="mem-cfg-hint">{{ t('hintEnableRollingSummary') }}</p>
             </div>
             <!-- Extraction & Vector params -->
             <div class="param-row" style="margin-top:14px;">
