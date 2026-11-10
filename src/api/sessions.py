@@ -104,9 +104,29 @@ async def clear_session_history(
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     if type == "recent":
-        # Non-destructive context reset: messages stay in the file (still visible
-        # in the UI) but get_recent() will exclude them from the LLM context.
+        # Compact-then-reset: 若滚动摘要开启，先把即将移出上下文的对话压缩进
+        # 滚动摘要（force_all，不受窗口/间隔限制），再重置短期上下文。
+        # 消息仍留在文件里（UI 可见），get_recent() 只是不再把它们放进 LLM 上下文。
         # 同时重置该人格参与的所有群的短期上下文，与单聊+群聊合并语义一致。
+        compacted = False
+        profile = None
+        try:
+            from src.config.profile_loader import load_profile_card
+            profile = load_profile_card(session.profile_id)
+        except Exception:
+            profile = None
+        mgr = None
+        try:
+            from src.api.memory import get_or_create_manager
+            mgr = get_or_create_manager(request, session.profile_id)
+        except Exception:
+            mgr = None
+        if mgr and mgr._cfg.get("enabled") and mgr._cfg.get("rolling_summary_enabled"):
+            try:
+                compacted = await mgr.maybe_update_rolling_summary(
+                    store, profile or {}, request.app, force_all=True)
+            except Exception as e:
+                logger.warning("[sessions] 重置前压缩失败（继续重置）: %s", e)
         store.reset_context()
         gm = getattr(request.app.state, "group_manager", None)
         if gm and getattr(session, "profile_id", None):
@@ -123,7 +143,7 @@ async def clear_session_history(
     runtime = getattr(request.app.state, "agent_runtime", None)
     if runtime:
         await runtime.invalidate(session.profile_id)
-    return {"ok": True}
+    return {"ok": True, "compacted": compacted if type == "recent" else False}
 
 
 @router.delete("/sessions/{session_id}/messages/from/{msg_idx}")

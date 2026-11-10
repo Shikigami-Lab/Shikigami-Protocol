@@ -3002,7 +3002,7 @@ class MemoryConfigBody(BaseModel):
     day_summary_max_messages: int = 100      # 写日记单日最多消息条数
     day_summary_max_conv_chars: int = 12000  # 对话内容最大字符数
     rolling_summary_enabled: bool = False        # 会话内滚动摘要
-    rolling_summary_interval_turns: int = 20     # 每积压多少用户轮次触发一次压缩
+    rolling_summary_interval_turns: int = 60     # 每积压多少用户轮次触发一次压缩
     rolling_summary_keep_turns: int = 60         # 最近多少轮保持原文
     rolling_summary_max_chars: int = 800         # 摘要最大字符数
     # 检索槽位配额
@@ -3043,7 +3043,7 @@ async def save_memory_config(request: Request, body: MemoryConfigBody):
         "max_history_turns": (1, 200),
         "day_summary_max_messages": (10, 500),
         "day_summary_max_conv_chars": (2_000, 100_000),
-        "rolling_summary_interval_turns": (5, 100),
+        "rolling_summary_interval_turns": (5, 200),
         "rolling_summary_keep_turns": (10, 200),
         "rolling_summary_max_chars": (200, 4000),
         "vector_dedup_distance_threshold": (0.01, 0.5),

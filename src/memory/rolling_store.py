@@ -1,7 +1,7 @@
 """会话内滚动摘要存储 — profiles/{id}/rolling_summary.json
 
-保存"当天早些时候"的滚动压缩摘要，最多一份（只覆盖当天）。
-跨天时由 MemoryManager 决定交接给日摘要或直接重置；本层只管读写。
+保存滚动压缩摘要，最多一份。摘要与日期无关：只记录生成时间（updated_at），
+不跨天重置、不交接给日摘要；由 MemoryManager 决定何时压缩/压缩多少，本层只管读写。
 """
 import json
 import logging
@@ -22,33 +22,25 @@ class RollingSummaryStore:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def get(self) -> Optional[Dict]:
-        """返回当前记录 {date, summary, covered_up_to_id, updated_at}；无则 None。"""
+        """返回当前记录 {summary, covered_up_to_id, updated_at}；无则 None。"""
         return dict(self._data) if self._data else None
 
-    def update(self, summary: str, covered_up_to_id: int, date_str: str):
-        """写入/覆盖当天的滚动摘要。"""
+    def update(self, summary: str, covered_up_to_id: int):
+        """写入/覆盖滚动摘要，记录生成时间。"""
         self._data = {
-            "date": date_str,
             "summary": summary.strip(),
             "covered_up_to_id": int(covered_up_to_id),
             "updated_at": time.time(),
         }
         self._save()
 
-    def reset(self, date_str: str):
-        """跨天重置：清空摘要，covered 归零（日摘要已关闭或无需交接时）。"""
+    def clear(self) -> bool:
+        """清空摘要（如有）。返回是否有内容被清掉。"""
         if self._data is None:
-            return
+            return False
         self._data = None
         self._save()
-
-    def clear_if_date(self, date_str: str) -> bool:
-        """日摘要交接成功后调用：若记录属于该日期则清除。"""
-        if self._data and self._data.get("date") == date_str:
-            self._data = None
-            self._save()
-            return True
-        return False
+        return True
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -59,7 +51,8 @@ class RollingSummaryStore:
         try:
             with open(self._path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
-            if isinstance(data, dict) and data.get("date") and data.get("summary"):
+            if isinstance(data, dict) and data.get("summary"):
+                data.pop("date", None)  # 旧格式带 date 字段，忽略
                 self._data = data
             else:
                 self._data = None

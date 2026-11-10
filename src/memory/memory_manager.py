@@ -93,9 +93,9 @@ class MemoryManager:
             "max_facts_in_prompt": 8,
             "day_summary_enabled": False,
             "day_summary_keep_days": 14,
-            # 会话内滚动摘要（当天早些时候的压缩，独立于日摘要）
+            # 会话内滚动摘要（窗口外旧对话的压缩，与日期无关，独立于日摘要）
             "rolling_summary_enabled": False,
-            "rolling_summary_interval_turns": 20,
+            "rolling_summary_interval_turns": 60,
             "rolling_summary_keep_turns": 60,
             "rolling_summary_max_chars": 800,
             # 每日遗忘（只跑已加载且昨日有对话的 session）
@@ -606,12 +606,6 @@ class MemoryManager:
                 conv_text = conv_text[:max_conv_chars] + "\n...（内容过长，已截断）"
                 truncated_text = True
 
-        # 会话内滚动摘要交接：当天的滚动压缩并入日摘要输入，避免时间轴断档
-        rolling_data = self.rolling.get()
-        if rolling_data and rolling_data.get("date") == date_str and rolling_data.get("summary"):
-            rolling_section = f"【当天滚动摘要】\n{rolling_data['summary']}"
-            conv_text = f"{rolling_section}\n\n{conv_text}" if conv_text else rolling_section
-
         ctx = self._build_day_summary_context(date_str, len(day_msgs), profile, app)
 
         task_prompt = self._memory_system_prompt("day_summary_prompt", profile, app)
@@ -668,7 +662,6 @@ class MemoryManager:
                                            message_count=len(day_msgs),
                                            keep_days=keep_days,
                                            experience_ids=sorted(experience_links_by_day(self.facts.get_all()).get(date_str, ())))
-                self.rolling.clear_if_date(date_str)
                 logger.info("[MemoryManager] 日摘要已生成 date=%s len=%d profile=%s",
                             date_str, len(summary), self._profile_id)
                 log_summary_generate(self._profile_id, date_str, len(day_msgs), summary)
@@ -682,36 +675,53 @@ class MemoryManager:
             log_error("memory", str(e), {"profile_id": self._profile_id, "op": "day_summary"}, traceback_str=traceback.format_exc())
         return None
 
-    async def maybe_update_rolling_summary(self, store, profile: Dict, app) -> bool:
+    def _rolling_segment_enabled(self) -> bool:
+        """prompt 设置里关掉了注入段就不再做压缩（避免白烧 LLM）。"""
+        try:
+            from src.prompt.registry import get_segment_class
+            from src.prompt.segment_config import effective_segment_enabled, load_segment_config
+            seg_cls = get_segment_class("rolling_summary")
+            if seg_cls is None:
+                return True  # 段未注册（如裁剪部署）时不额外拦截
+            meta = load_segment_config(self._profile_id).get_meta("rolling_summary")
+            return effective_segment_enabled(meta, seg_cls)
+        except Exception:
+            return True
+
+    async def maybe_update_rolling_summary(self, store, profile: Dict, app,
+                                           force_all: bool = False) -> bool:
         """会话内滚动摘要：每当窗口外积压满 interval 个用户轮次，就把窗口外的旧对话
-        压缩进当天滚动摘要。只覆盖当天；跨天时若日摘要开启且昨日摘要未生成则等待交接，
-        否则直接重置。返回是否产生了新摘要。"""
+        压缩进滚动摘要。摘要与日期无关，只记录生成时间；不跨天重置、不交接日摘要。
+        force_all=True（重置短期上下文前调用）：压缩 covered 之后的全部对话，
+        不受窗口与积压间隔限制。返回是否产生了新摘要。"""
         if not self._cfg.get("enabled") or not self._cfg.get("rolling_summary_enabled"):
+            return False
+        if not self._rolling_segment_enabled():
             return False
         preset_name = self._cfg.get("extraction_llm_preset", "")
         if preset_name == "__none__":
             return False
 
-        today = date.today().strftime("%Y-%m-%d")
         async with self._rolling_lock:
             data = self.rolling.get()
-            if data and data.get("date") != today:
-                # 跨天：日摘要开且该日摘要未生成 → 等交接，避免摘要丢失
-                if self._cfg.get("day_summary_enabled") and not self.day_store.has_summary_for(data["date"]):
-                    return False
-                self.rolling.reset(today)
-                data = None
             covered = int((data or {}).get("covered_up_to_id", 0))
             keep_turns = max(10, min(200, int(self._cfg.get("rolling_summary_keep_turns", 60))))
-            interval = max(5, min(100, int(self._cfg.get("rolling_summary_interval_turns", 20))))
+            interval = max(5, min(200, int(self._cfg.get("rolling_summary_interval_turns", 60))))
             max_chars = max(200, min(4000, int(self._cfg.get("rolling_summary_max_chars", 800))))
 
-            # 窗口边界：最近 keep_turns 轮保持原文，更早的才允许压缩
-            window = store.get_recent_with_ts(keep_turns)
-            boundary = window[0]["id"] if window else 0
-            batch = store.memory_turn_batch_after(covered, interval * 2)
-            pending = [m for m in batch if 0 < m["id"] < boundary]
-            if sum(1 for m in pending if m.get("role") == "user") < interval:
+            if force_all:
+                # 重置前压缩：covered 之后的全部记忆轮都进摘要
+                batch = store.memory_turn_batch_after(covered, 100000)
+                pending = [m for m in batch if m["id"] > 0]
+            else:
+                # 窗口边界：最近 keep_turns 轮保持原文，更早的才允许压缩
+                window = store.get_recent_with_ts(keep_turns)
+                boundary = window[0]["id"] if window else 0
+                batch = store.memory_turn_batch_after(covered, interval * 2)
+                pending = [m for m in batch if 0 < m["id"] < boundary]
+                if sum(1 for m in pending if m.get("role") == "user") < interval:
+                    return False
+            if force_all and not any(m.get("role") == "user" for m in pending):
                 return False
 
             persona_name = profile.get("display_name") or profile.get("name", "AI")
@@ -761,7 +771,7 @@ class MemoryManager:
                     return False
                 if len(summary) > max_chars * 1.2:
                     summary = summary[:max_chars] + "…"
-                self.rolling.update(summary, pending[-1]["id"], today)
+                self.rolling.update(summary, pending[-1]["id"])
                 logger.info("[MemoryManager] 滚动摘要已更新 profile=%s covered=%d len=%d",
                             self._profile_id, pending[-1]["id"], len(summary))
                 return True
