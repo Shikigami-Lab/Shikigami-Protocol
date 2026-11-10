@@ -8,7 +8,7 @@ MANIFEST = {
     "label": "网络搜索",
     "type": "interactive",
     "agent_capable": True,
-    "description": "搜索网络信息，结果经 AI 过滤后以角色风格回复。也作为趋势感知的数据源。",
+    "description": "搜索网络信息，结果经 AI 过滤后以角色风格回复。",
     "has_segment": False,
     "has_commands": True,
     "has_fetcher": False,
