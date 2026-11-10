@@ -20,9 +20,6 @@ MANIFEST = {
 
 def register(app) -> None:
     from src.tools.registry import register_tool
-    register_tool(MANIFEST)
-
-    import src.tools.timer.commands  # noqa: F401  — registers command on import
-    import src.tools.timer.segment   # noqa: F401  — registers segment on import
+    register_tool(MANIFEST)  # has_commands/has_segment 驱动约定模块接线
 
     logger.info("[tools.timer] registered")
