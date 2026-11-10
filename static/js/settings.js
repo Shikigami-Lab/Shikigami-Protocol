@@ -728,6 +728,10 @@ const SettingsMixin = {
     memoryGlobalEffectiveRollingEnabled() {
       return this.memoryGlobalForm.enabled && this.memoryGlobalForm.rolling_summary_enabled;
     },
+    agentCapableTimerTools() {
+      // agent 可用的计时器类工具（模板里避免内联 filter 表达式）
+      return (this.toolsList || []).filter(tw => tw.tool_id === 'timer' && tw.agent_capable === true);
+    },
     memoryProfileEffectiveEnabled() {
       return this.memoryTabProfileForm.enabled ?? this.memoryGlobalForm.enabled;
     },
@@ -6311,7 +6315,7 @@ const SettingsMixin = {
       try {
         if (isCurrent()) {
           this.showToast(this.t('savedOk'), 'success');
-          if (toolId === 'agent') await this.loadProfiles();
+          if (toolId === 'agent' || toolId === 'timer' || toolId === 'todo') await this.loadProfiles();
           if (isCurrent()) await this.loadToolsConfig(pid);
         }
       } catch (e) {
@@ -6338,6 +6342,21 @@ const SettingsMixin = {
       const profile = this.profiles.find(p => p.profile_id === this.selectedProfileId);
       const value = profile?.tool_configs?.agent?.[key];
       return typeof value === 'boolean' ? value : null;
+    },
+
+    getProfileToolEnabledOverride(toolId) {
+      // 工具级 enabled 的原始覆盖值：true/false 覆盖，其余（含缺失）= 继承默认
+      const profile = this.profiles.find(p => p.profile_id === this.selectedProfileId);
+      const value = profile?.tool_configs?.[toolId]?.enabled;
+      return typeof value === 'boolean' ? value : null;
+    },
+
+    profileToolEnabledSummary(toolId) {
+      const choice = this.getProfileToolEnabledOverride(toolId);
+      const effective = choice ?? true;  // 计时器等工具的默认即开启
+      return this.t('agentEffectivePermission')
+        .replace('{state}', this.t(effective ? 'optOn' : 'optOff'))
+        .replace('{source}', this.t(choice === null ? 'optInheritGlobal' : 'agentPersonaOverride'));
     },
 
     getToolConfig(toolId) {

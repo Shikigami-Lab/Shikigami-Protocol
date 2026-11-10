@@ -4016,10 +4016,15 @@
                       @update:model-value="saveToolConfig('agent', {[capability]: $event}, selectedProfileId)"></tri-toggle>
                   </fieldset>
                   <p class="form-hint">{{ t('agentProfileNativeHint') }}</p>
-                  <toggle-row v-for="tool in toolsList.filter(tw => tw.tool_id === 'timer' && tw.agent_capable === true)" :key="tool.tool_id"
-                    :label="t('agentTimerPermission')" :model-value="tool.config?.enabled !== false" :disabled="toolsSaving.timer"
-                    @update:model-value="saveToolConfig('timer', {enabled: $event}, selectedProfileId)"></toggle-row>
-                  <p v-if="!toolsList.some(tw => tw.tool_id === 'timer' && tw.agent_capable === true)" class="form-hint">{{ t('agentNoCapableTools') }}</p>
+                  <fieldset class="param-row" v-for="tool in agentCapableTimerTools" :key="tool.tool_id"
+                    style="border:0;padding:0;min-width:0;margin-left:0;margin-right:0;"
+                    :disabled="toolsSaving.timer || !selectedProfileId" aria-labelledby="agent-profile-timer-label">
+                    <span id="agent-profile-timer-label" class="param-label" style="flex:1;width:auto;">{{ t('agentTimerPermission') }}</span>
+                    <tri-toggle :model-value="getProfileToolEnabledOverride(tool.tool_id)"
+                      @update:model-value="saveToolConfig(tool.tool_id, {enabled: $event}, selectedProfileId)"></tri-toggle>
+                  </fieldset>
+                  <p v-if="agentCapableTimerTools.length" class="form-hint">{{ profileToolEnabledSummary('timer') }}</p>
+                  <p v-if="!agentCapableTimerTools.length" class="form-hint">{{ t('agentNoCapableTools') }}</p>
                 </div>
                 <div v-if="toolsLoading" class="hint-text" style="padding:20px 0 0;">{{ t('loading') }}</div>
                 <template v-else-if="!toolsList.filter(tw => tw.type === 'awareness').length">

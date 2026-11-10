@@ -96,12 +96,18 @@ async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Req
         from src.agent.capabilities import KEYS
         if any(key not in (*KEYS, 'enabled', 'autonomy_enabled') or (value is not None and type(value) is not bool) for key, value in cfg.items()):
             raise HTTPException(status_code=422, detail='Agent settings must be known boolean or null (inherit) fields')
-    if tool_id in ('timer', 'todo') and 'enabled' in cfg and type(cfg['enabled']) is not bool:
-        raise HTTPException(status_code=422, detail='Tool permission must be a boolean')
+    if tool_id in ('timer', 'todo') and 'enabled' in cfg and cfg['enabled'] is not None and type(cfg['enabled']) is not bool:
+        raise HTTPException(status_code=422, detail='Tool permission must be a boolean or null (inherit)')
 
     tool_cfgs = data.get("tool_configs") or {}
     existing = tool_cfgs.get(tool_id) or {}
-    tool_cfgs[tool_id] = {**existing, **cfg}
+    merged_cfg = dict(existing)
+    for key, value in cfg.items():
+        if value is None and tool_id in ('timer', 'todo'):
+            merged_cfg.pop(key, None)  # null = 删除覆盖，回到继承默认
+        else:
+            merged_cfg[key] = value
+    tool_cfgs[tool_id] = merged_cfg
     data["tool_configs"] = tool_cfgs
 
     _save_profile(profile_id, data)

@@ -423,8 +423,8 @@ test('persona template reuses labeled tri-toggles and only locks for saving or n
   const card = html.slice(html.indexOf('<div v-if="profileSubTab === \'tools\'"'))
     .split('<div v-if="toolsLoading"')[0];
   const rows = [...card.matchAll(/<fieldset\b[^>]*class="param-row"[^>]*>([\s\S]*?)<\/fieldset>/g)];
-  assert.equal(rows.length, 3, 'two masters and one loop for the five capabilities');
-  for (const row of rows) {
+  assert.equal(rows.length, 4, 'two masters, one capability loop and the timer row');
+  for (const row of rows.slice(0, 3)) {
     assert.match(row[0], /:disabled="toolsSaving.agent \|\| !selectedProfileId"/);
     assert.match(row[1], /class="param-label"/);
     assert.match(row[1], /<tri-toggle\s+:model-value="getProfileAgentPermission\(/);
@@ -436,8 +436,14 @@ test('persona template reuses labeled tri-toggles and only locks for saving or n
   assert.match(rows[1][1], /t\('agentAutonomyProfileEnable'\)/);
   assert.match(rows[2][0], /v-for="capability in agentCapabilities"/);
   assert.match(rows[2][1], /t\('agentCapability_' \+ capability\)/);
+  // timer row shares the same labeled tri-toggle pattern
+  assert.match(rows[3][0], /v-for="tool in agentCapableTimerTools"/);
+  assert.match(rows[3][0], /:disabled="toolsSaving.timer \|\| !selectedProfileId"/);
+  assert.match(rows[3][1], /t\('agentTimerPermission'\)/);
+  assert.match(rows[3][1], /<tri-toggle\s+:model-value="getProfileToolEnabledOverride\(/);
+  assert.match(rows[3][1], /saveToolConfig\(tool.tool_id, \{enabled: \$event\}, selectedProfileId\)/);
   assert.doesNotMatch(card, /<toggle-row[^>]*getProfileAgentPermission/);
-  assert.match(card, /<toggle-row v-for="tool in toolsList.filter\(tw => tw.tool_id === 'timer'/);
+  assert.doesNotMatch(card, /<toggle-row[^>]*timer/);
 });
 
 test('both locales describe global defaults, explicit overrides and shared caps', () => {
@@ -907,7 +913,7 @@ test('timer permission uses existing per-profile PATCH shape', async () => {
     return { ok: true, json: async () => ({ ok: true }) };
   });
   model.selectedProfileId = 'p2';
-  model.loadToolsConfig = async () => {};
+  model.loadProfiles = model.loadToolsConfig = async () => {};
   await model.saveToolConfig('timer', { enabled: false }, 'p2');
   assert.equal(sent.url, 'http://fixture.test/api/profiles/p2/tool_configs');
   assert.equal(sent.method, 'PATCH');
