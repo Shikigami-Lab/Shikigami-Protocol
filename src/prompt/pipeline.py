@@ -28,43 +28,13 @@ from src.llm.message_normalization import PromptMessage, normalize_messages
 from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat, targets_ase
 from src.prompt.dependencies import unavailable_reason
 from src.prompt.macros import build_macro_table, expand_messages
-from src.prompt.registry import get_registered
+from src.prompt.registry import discover_segments, get_registered
 from src.prompt.segment_config import CustomSegmentDef, SegmentMeta, effective_segment_enabled, load_segment_config
 
-# ── Import all built-in segment modules to trigger @register decorators ───────
-import src.prompt.segments.persona          # noqa: F401
-import src.prompt.segments.user_persona     # noqa: F401
-import src.prompt.segments.history          # noqa: F401
-import src.prompt.segments.time_context     # noqa: F401
-import src.prompt.segments.emotion_state    # noqa: F401
-import src.prompt.segments.energy_state     # noqa: F401
-import src.prompt.segments.affinity_state   # noqa: F401
-import src.prompt.segments.long_term_facts  # noqa: F401
-import src.prompt.segments.mid_term_memory  # noqa: F401
-import src.prompt.segments.rolling_summary  # noqa: F401  (RollingSummarySegment, in-session compaction)
-import src.tools.todo.segment                # noqa: F401  (TodosSegment, cooldown 5h)
-import src.tools.timer.segment               # noqa: F401  (ActiveTimersSegment)
-import src.prompt.segments.reflection_state  # noqa: F401  (ReflectionStateSegment)
-import src.prompt.segments.current_context  # noqa: F401  (单聊时注明当前为一对一私聊)
-import src.prompt.segments.lorebook         # noqa: F401  (LoreBookSegment, keyword-triggered)
-import src.prompt.segments.weather          # noqa: F401  (WeatherSegment, cooldown 2h)
-import src.prompt.segments.reflection.persona        # noqa: F401
-import src.prompt.segments.reflection.ase_config     # noqa: F401
-import src.prompt.segments.reflection.prev_thought   # noqa: F401
-import src.prompt.segments.reflection.emotion        # noqa: F401
-import src.prompt.segments.reflection.affinity       # noqa: F401
-import src.prompt.segments.reflection.silence        # noqa: F401
-import src.prompt.segments.reflection.ase_context    # noqa: F401
-import src.prompt.segments.reflection.recent_dialogue # noqa: F401
-import src.prompt.segments.ase.morning_greeting      # noqa: F401
-import src.prompt.segments.ase.long_silence_check_in # noqa: F401
-import src.prompt.segments.ase.initiation_frame      # noqa: F401
-import src.prompt.segments.ase.behavioral_guidance   # noqa: F401
-import src.prompt.segments.ase.scene_context         # noqa: F401
-import src.prompt.segments.health_mode               # noqa: F401
-import src.prompt.segments.tool_capability           # noqa: F401  (capability/dispatch + no-tools guard)
-import src.prompt.segments.workspace_catalog         # noqa: F401  (workspace directory)
-import src.prompt.segments.proactive_activity        # noqa: F401  (autonomous action record)
+# Auto-discover and register every built-in segment module (chat, ase/ and
+# reflection/ subpackages) — no hardcoded import list to maintain. Tool-package
+# segments register through their tool's register(app) instead.
+discover_segments()
 
 logger = logging.getLogger(__name__)
 

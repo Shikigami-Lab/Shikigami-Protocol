@@ -30,22 +30,12 @@ from src.utils.debug_logger import log_error
 from src.utils.paths import get_project_root
 from src.utils.persona_context import get_persona_context_for_secondary_llm
 from src.prompt.base import ReflectionBuildContext, targets_reflection
+from src.prompt.registry import discover_segments
 from src.prompt.segment_config import effective_segment_enabled, load_segment_config
 
-# Import reflection segments to trigger @register
-import src.prompt.segments.reflection.persona        # noqa: F401
-import src.prompt.segments.reflection.user_persona   # noqa: F401
-import src.prompt.segments.reflection.ase_config     # noqa: F401
-import src.prompt.segments.reflection.prev_thought   # noqa: F401
-import src.prompt.segments.reflection.emotion        # noqa: F401
-import src.prompt.segments.reflection.affinity       # noqa: F401
-import src.prompt.segments.reflection.silence        # noqa: F401
-import src.prompt.segments.reflection.ase_context     # noqa: F401
-import src.prompt.segments.reflection.topic_candidates # noqa: F401
-import src.prompt.segments.reflection.proactive_log   # noqa: F401
-import src.prompt.segments.reflection.memory_facts    # noqa: F401
-import src.prompt.segments.reflection.user_engagement # noqa: F401
-import src.prompt.segments.reflection.recent_dialogue # noqa: F401
+# Reflection segments register via pipeline-time discovery; call it here too so
+# direct importers of this module (scripts/tests) get the full inventory.
+discover_segments()
 
 logger = logging.getLogger(__name__)
 

@@ -51,3 +51,31 @@ def get_segment_class(segment_id: str) -> Type[PromptSegment] | None:
 
 def all_segment_ids() -> List[str]:
     return list(_registry.keys())
+
+
+_discovery_done = False
+
+
+def discover_segments() -> None:
+    """Import every module under ``src.prompt.segments`` (including the ``ase/``
+    and ``reflection/`` subpackages) so all ``@register`` decorators run.
+
+    Idempotent. Called once at ``src.prompt.pipeline`` import time, so any
+    caller that imports the pipeline — server, script or test — gets the full
+    segment inventory, including reflection-only segments. Tool-package
+    segments (``src/tools/*/segment.py``) are not covered here; they register
+    through their tool's ``register(app)`` and stay inert without the tool.
+    """
+    global _discovery_done
+    if _discovery_done:
+        return
+    _discovery_done = True
+    import importlib
+    import pkgutil
+
+    import src.prompt.segments as _pkg
+    for info in pkgutil.walk_packages(_pkg.__path__, prefix="src.prompt.segments."):
+        try:
+            importlib.import_module(info.name)
+        except Exception:
+            logger.exception("[Registry] segment module %s failed to import", info.name)

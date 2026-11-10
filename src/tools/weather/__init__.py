@@ -19,4 +19,5 @@ MANIFEST = {
 
 def register(app):
     register_tool(MANIFEST)
-    import src.prompt.segments.weather  # noqa: F401  trigger @register
+    # The weather segment lives in src/prompt/segments and registers via
+    # pipeline-time discovery; injection stays gated by requires=("tool:weather",).

@@ -2176,9 +2176,8 @@ async def prompt_autofill_profile(body: PromptAutofillBody, request: Request):
 @router.get("/profiles/{profile_id}/segments")
 async def get_segment_config(profile_id: str, request: Request):
     """Return the merged segment config: registered segments + per-profile overrides + custom segments."""
-    # Import pipeline + reflection to ensure all @register decorators have run
-    from src.prompt.pipeline import build_messages  # noqa: F401 — triggers chat segment imports
-    import src.core.reflection  # noqa: F401 — triggers reflection segment imports
+    # Pipeline import triggers full segment auto-discovery (chat + ASE + reflection).
+    from src.prompt.pipeline import build_messages  # noqa: F401 — triggers segment discovery
     from src.prompt.registry import get_registered
     from src.prompt.segment_config import effective_segment_enabled, load_segment_config
     from src.prompt.dependencies import unavailable_reason
@@ -2268,7 +2267,7 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
 
     # Defense in depth: a segment whose engine/tool dependency is unmet cannot
     # be persisted as enabled, even if a client sends enabled=true.
-    from src.prompt.pipeline import build_messages  # noqa: F401 — trigger @register
+    from src.prompt.pipeline import build_messages  # noqa: F401 — triggers segment discovery
     from src.prompt.registry import get_segment_class
     from src.prompt.dependencies import unavailable_reason
     from src.config.effective_config import _load_profile_card
@@ -2732,7 +2731,7 @@ async def save_profile_engine_config(profile_id: str, body: ProfileEngineConfigB
 @router.get("/profiles/{profile_id}/reflection_config")
 async def get_profile_reflection_config(profile_id: str, request: Request):
     """返回该人格的自省配置：custom_prompt + 所有 reflection/ASE 段落（来自统一 segments_config）。"""
-    from src.prompt.pipeline import build_messages  # noqa: F401 — triggers @register for all segments
+    from src.prompt.pipeline import build_messages  # noqa: F401 — triggers segment discovery
     from src.prompt.registry import get_registered
     from src.prompt.base import targets_reflection, targets_ase
     from src.prompt.segment_config import effective_segment_enabled, load_segment_config
@@ -2880,7 +2879,7 @@ async def save_profile_reflection_config(profile_id: str, body: ProfileReflectio
     # Handle segment changes → write to segments_config.json
     if body.segments is not None:
         from src.prompt.segment_config import load_segment_config, save_segment_config, SegmentMeta, CustomSegmentDef
-        from src.prompt.pipeline import build_messages  # noqa: F401 — ensure @register has run
+        from src.prompt.pipeline import build_messages  # noqa: F401 — triggers segment discovery
         from src.prompt.registry import get_registered
         builtin_ids = {cls.segment_id for cls in get_registered()}
         seg_cfg = load_segment_config(profile_id)

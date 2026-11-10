@@ -27,9 +27,11 @@ from typing import Any, Dict, List, Optional
 
 from src.config.prompt_loader import get_prompt, get_locale, get_raw, render
 
-# Import ASE segments to trigger @register
-import src.prompt.segments.ase.morning_greeting      # noqa: F401
-import src.prompt.segments.ase.long_silence_check_in # noqa: F401
+from src.prompt.registry import discover_segments
+
+# ASE hint segments register via discovery; keep registration independent of
+# whether the pipeline was imported first.
+discover_segments()
 
 logger = logging.getLogger(__name__)
 
