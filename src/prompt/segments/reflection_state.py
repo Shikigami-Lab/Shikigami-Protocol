@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 def _profile_reflection_config(profile_id: str) -> dict:
     """Per-profile reflection_config (e.g. chat_inject_topic_anchor, long_absence_hours)."""
     try:
-        from src.config.effective_config import _load_profile_card
-        card = _load_profile_card(profile_id)
+        from src.config.profile_loader import load_profile_card
+        card = load_profile_card(profile_id)
         return card.get("reflection_config") or {}
     except Exception:
         return {}

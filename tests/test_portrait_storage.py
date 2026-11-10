@@ -36,11 +36,10 @@ class _TempProfileTest(unittest.TestCase):
         self.storage_root = os.path.join(self.profiles_dir, PROFILE_ID)
         os.makedirs(self.storage_root)
         for target, name, value in (
-            (user_portrait, "_PROFILES_DIR", self.profiles_dir),
             (user_portrait, "get_locale", lambda: "zh"),
-            (persona_evolution, "_PROFILES_DIR", self.profiles_dir),
             (persona_evolution, "get_locale", lambda: "zh"),
-            # Shared normalized card reader resolves via profile_loader.PROFILES_DIR.
+            # Card read/write now lives in profile_loader (public load/save_profile_card);
+            # patching its PROFILES_DIR covers user_portrait and persona_evolution.
             (profile_loader, "PROFILES_DIR", self.profiles_dir),
         ):
             patcher = mock.patch.object(target, name, value)

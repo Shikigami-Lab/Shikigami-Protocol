@@ -73,8 +73,8 @@ def get_or_create_manager_for_session(app, session):
     return managers[profile_id]
 
 
-def _get_or_create_manager(request: Request, profile_id: str):
-    """懒创建并缓存 MemoryManager 到 app.state.memory_managers。"""
+def get_or_create_manager(request: Request, profile_id: str):
+    """懒创建并缓存 MemoryManager 到 app.state.memory_managers。供 chat/sessions 等模块复用。"""
     sm = getattr(request.app.state, "session_manager", None)
     if not sm:
         return None
@@ -87,6 +87,10 @@ def _get_or_create_manager(request: Request, profile_id: str):
     if session is None:
         return None
     return get_or_create_manager_for_session(request.app, session)
+
+
+# 历史私有名保留为兼容别名（模块内部沿用）
+_get_or_create_manager = get_or_create_manager
 
 
 def _require_manager(request: Request, profile_id: str):
@@ -293,8 +297,8 @@ class FactVersionRestore(BaseModel):
 
 
 def _require_curation(request: Request, profile_id: str):
-    from src.api.agent import _same_origin
-    _same_origin(request)
+    from src.api.agent import same_origin
+    same_origin(request)
     manager = _require_manager(request, profile_id)
     if manager._profile_id != profile_id:
         raise HTTPException(status_code=404, detail="Memory profile not found")

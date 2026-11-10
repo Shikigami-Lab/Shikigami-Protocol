@@ -1337,17 +1337,17 @@ def normalize_stt_model_path_for_config(raw: str) -> str:
 
 
 def wizard_apply_stt_model_cli(model_path: str) -> int:
-    from src.api.settings_ext import _load_yaml, _save_yaml
+    from src.api.settings_ext import load_yaml, save_yaml
 
     path = normalize_stt_model_path_for_config(model_path or "")
-    y, data = _load_yaml()
+    y, data = load_yaml()
     if "stt" not in data:
         data["stt"] = {}
     data["stt"]["model_path"] = path
     # Also enable STT — the wizard only reaches here when the user explicitly
     # sets a model path, so enabling is always the intended outcome.
     data["stt"]["enabled"] = True
-    _save_yaml(y, data)
+    save_yaml(y, data)
     return 0
 
 
@@ -2020,15 +2020,15 @@ class ApplySttModelBody(BaseModel):
 @router.post("/apply-stt-model")
 async def apply_stt_model(request: Request, body: ApplySttModelBody) -> Dict[str, Any]:
     """Write stt.model_path (and enable STT) to app.yaml and hot-reload config."""
-    from src.api.settings_ext import _load_yaml, _save_yaml
+    from src.api.settings_ext import load_yaml, save_yaml
     config = request.app.state.config
     path = normalize_stt_model_path_for_config(body.model_path)
-    y, data = _load_yaml()
+    y, data = load_yaml()
     if "stt" not in data:
         data["stt"] = {}
     data["stt"]["model_path"] = path
     data["stt"]["enabled"] = True
-    _save_yaml(y, data)
+    save_yaml(y, data)
     stt_cfg = config.get_stt_config()
     if isinstance(stt_cfg, dict):
         stt_cfg["model_path"] = path

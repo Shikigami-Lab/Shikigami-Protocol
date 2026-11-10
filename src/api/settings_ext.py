@@ -165,7 +165,8 @@ async def get_emotion_keys(request: Request):
 # YAML helpers (ruamel preserves comments)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load_yaml():
+def load_yaml():
+    """读取 app 配置 YAML（ruamel 保留注释）。供设置类 API 模块复用。"""
     from ruamel.yaml import YAML
     y = YAML()
     y.preserve_quotes = True
@@ -175,7 +176,8 @@ def _load_yaml():
         return y, y.load(f)
 
 
-def _save_yaml(y, data):
+def save_yaml(y, data):
+    """原子写 app 配置 YAML。"""
     os.makedirs(os.path.dirname(_YAML_PATH), exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=os.path.dirname(_YAML_PATH), delete=False,
@@ -188,6 +190,11 @@ def _save_yaml(y, data):
         finally:
             f.close()
             staged.unlink(missing_ok=True)
+
+
+# 历史私有名保留为兼容别名（模块内部沿用）
+_load_yaml = load_yaml
+_save_yaml = save_yaml
 
 
 _ENV_FILE = _ENV_FILE_PATH
@@ -2181,10 +2188,10 @@ async def get_segment_config(profile_id: str, request: Request):
     from src.prompt.registry import get_registered
     from src.prompt.segment_config import effective_segment_enabled, load_segment_config
     from src.prompt.dependencies import unavailable_reason
-    from src.config.effective_config import _load_profile_card
+    from src.config.profile_loader import load_profile_card
 
     seg_cfg = load_segment_config(profile_id)
-    profile_card = _load_profile_card(profile_id)
+    profile_card = load_profile_card(profile_id)
     result = []
     for seg_cls in get_registered():
         meta = seg_cfg.get_meta(seg_cls.segment_id)
@@ -2270,8 +2277,8 @@ async def save_segment_config_endpoint(profile_id: str, body: SaveSegmentConfigB
     from src.prompt.pipeline import build_messages  # noqa: F401 — triggers segment discovery
     from src.prompt.registry import get_segment_class
     from src.prompt.dependencies import unavailable_reason
-    from src.config.effective_config import _load_profile_card
-    profile_card = _load_profile_card(profile_id)
+    from src.config.profile_loader import load_profile_card
+    profile_card = load_profile_card(profile_id)
 
     for s in body.segments:
         enabled = s.enabled
@@ -3765,19 +3772,20 @@ async def extract_persona_anchor(profile_id: str, _body: PersonaEvolutionAnchorB
 
     persona_name = card.get("display_name") or card.get("name") or profile_id
     app = request.app
-    from src.core.persona_evolution import _load_profile_card, _save_profile_card, extract_anchor
+    from src.config.profile_loader import load_profile_card, save_profile_card
+    from src.core.persona_evolution import extract_anchor
     anchor = await extract_anchor(persona_name, base, style, app, profile_id=profile_id)
     if not anchor:
         raise HTTPException(status_code=500, detail="anchor extraction failed")
 
     # Reload before writing: a portrait refresh or an evolution may have saved the card during the call
-    latest = _load_profile_card(profile_id)
+    latest = load_profile_card(profile_id)
     if not latest:
         raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
     evolved = latest.get("persona_evolved") or {}
     evolved["core_anchor"] = anchor
     latest["persona_evolved"] = evolved
-    _save_profile_card(profile_id, latest)
+    save_profile_card(profile_id, latest)
 
     return {"ok": True, "core_anchor": anchor}
 

@@ -80,7 +80,8 @@ def _engagement_label(count_7d: int, locale: str) -> str:
     return ""
 
 
-def _human_delta(seconds: float, locale: str) -> str:
+def human_delta(seconds: float, locale: str) -> str:
+    """把秒数渲染成"N 分钟前"风格的人类可读间隔（ASE 场景段也复用）。"""
     minutes = int(seconds / 60)
     if minutes < 2:
         return get_prompt("time_context.human_delta.just_now", locale=locale, default="刚刚")
@@ -94,6 +95,10 @@ def _human_delta(seconds: float, locale: str) -> str:
     days = hours // 24
     return render("time_context.human_delta.days", locale=locale,
                   default="$days 天前", days=days)
+
+
+# 历史私有名保留为兼容别名（模块内部沿用）
+_human_delta = human_delta
 
 
 # ── Built-in Gregorian holidays (fallback if YAML missing) ───────────────────
@@ -248,8 +253,8 @@ class TimeContextSegment(PromptSegment):
         days_known = int((time.time() - first_ts) / 86400) if first_ts else 0
 
         try:
-            from src.config.effective_config import _load_profile_card
-            _rc = _load_profile_card(ctx.session.profile_id).get("reflection_config") or {}
+            from src.config.profile_loader import load_profile_card
+            _rc = load_profile_card(ctx.session.profile_id).get("reflection_config") or {}
             absence_threshold_h: float = float(_rc.get("long_absence_hours", 48))
         except Exception:
             absence_threshold_h = 48.0

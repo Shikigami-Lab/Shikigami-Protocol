@@ -93,9 +93,9 @@ def unavailable_reason(
 
 
 def _load_profile(profile_id: str) -> Dict[str, Any]:
-    from src.config.effective_config import _load_profile_card
+    from src.config.profile_loader import load_profile_card
 
-    return _load_profile_card(profile_id)
+    return load_profile_card(profile_id)
 
 
 def _check_one(key: str, app, profile_id: str, profile: Optional[Dict[str, Any]]) -> Optional[str]:

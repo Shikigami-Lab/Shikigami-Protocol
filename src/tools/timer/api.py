@@ -10,7 +10,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from src.api.agent import _same_origin
+from src.api.agent import same_origin
 from src.tools.timer.manager import list_timers, start_timer, stop_timer
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ async def get_timers(request: Request, session_id: str = ""):
             "session_id":     t.get("session_id", ""),
         })
     if session_id and (reminders := _reminders(request)) is not None:
-        _same_origin(request)
+        same_origin(request)
         result.extend(reminders.list_for(session_id))
     return {"timers": result}
 
@@ -63,7 +63,7 @@ async def create_timer(body: TimerCreateRequest):
 async def cancel_timer_endpoint(timer_id: str, request: Request, session_id: str = ""):
     info = stop_timer(timer_id)
     if info is None and session_id and (reminders := _reminders(request)) is not None:
-        _same_origin(request)
+        same_origin(request)
         info = reminders.cancel(session_id, timer_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Timer not found")

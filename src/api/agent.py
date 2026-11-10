@@ -7,14 +7,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.settings import normalize_settings, save_settings
 
-def _same_origin(request: Request):
+def same_origin(request: Request):
+    """同源检查：拒绝跨站来源调用 agent 控制接口。供各 API 模块复用。"""
     from urllib.parse import urlsplit
     origin = request.headers.get('origin')
     if origin and (urlsplit(origin).scheme != request.url.scheme or urlsplit(origin).netloc != request.url.netloc):
         raise HTTPException(403, 'Open agent controls from this application')
 
 
-router = APIRouter(prefix="/api/agent", dependencies=[Depends(_same_origin)])
+# 历史私有名保留为兼容别名
+_same_origin = same_origin
+
+
+router = APIRouter(prefix="/api/agent", dependencies=[Depends(same_origin)])
 
 
 def _runtime(request):

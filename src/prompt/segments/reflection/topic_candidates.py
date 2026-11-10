@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 _RECALL_COOLDOWN = 14 * 86400
 
 
-def _recently_used_refs(storage_root: str, window: int) -> set:
-    from src.core.ase import _load_ase_state
+def recently_used_refs(storage_root: str, window: int) -> set:
+    """从 ASE 状态读出最近用过的 topic 引用（供 ASE 与 /topic 命令共用）。"""
+    from src.core.ase import load_ase_state
 
-    state = _load_ase_state(storage_root)
+    state = load_ase_state(storage_root)
     refs = {
         f"{entry['source']}:{entry['item_id']}"
         for entry in (state.get("proactive_log") or [])[-max(1, window):]
@@ -34,6 +35,10 @@ def _recently_used_refs(storage_root: str, window: int) -> set:
     refs.update(f"conversation_recall:{i}" for i, ts in (state.get("recall_spoken") or {}).items()
                 if isinstance(ts, (int, float)) and ts > cutoff)
     return refs
+
+
+# 历史私有名保留为兼容别名
+_recently_used_refs = recently_used_refs
 
 
 def remember_recall_spoken(state, item_id, now):

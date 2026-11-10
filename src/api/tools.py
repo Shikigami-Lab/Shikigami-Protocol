@@ -83,8 +83,8 @@ class ToolConfigPatch(BaseModel):
 @router.patch("/api/profiles/{profile_id}/tool_configs")
 async def patch_tool_config(profile_id: str, body: ToolConfigPatch, request: Request):
     """保存某工具的配置到 profile JSON 的 tool_configs.{tool_id}。"""
-    from src.api.agent import _same_origin
-    _same_origin(request)
+    from src.api.agent import same_origin
+    same_origin(request)
     try:
         data = _load_profile(profile_id)
     except HTTPException:

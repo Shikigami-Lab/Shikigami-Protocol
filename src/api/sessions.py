@@ -296,7 +296,7 @@ async def debug_prompt_build(session_id: str, request: Request, body: PromptBuil
     preset = config.get_active_llm_preset()
     store = session.conversation_store
 
-    from src.api.memory import _get_or_create_manager as _ensure_mem_mgr
+    from src.api.memory import get_or_create_manager as _ensure_mem_mgr
 
     _ensure_mem_mgr(request, session.profile_id)
 

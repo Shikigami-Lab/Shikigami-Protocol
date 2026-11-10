@@ -14,7 +14,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.agent import _same_origin
+from src.api.agent import same_origin
 from src.tools.todo.store import TodoStore
 from src.utils.debug_logger import log_tool_todo
 
@@ -51,7 +51,7 @@ class TodoCreate(BaseModel):
     owner: Literal["user", "ai"] = "user"
 
 
-@router.post("/sessions/{session_id}/todos", status_code=201, dependencies=[Depends(_same_origin)])
+@router.post("/sessions/{session_id}/todos", status_code=201, dependencies=[Depends(same_origin)])
 async def create_todo(session_id: str, body: TodoCreate, request: Request):
     session = _get_session(request, session_id)
     content = body.content.strip()
@@ -70,7 +70,7 @@ class TodoPatch(BaseModel):
     content: Optional[str] = Field(default=None, max_length=2000)
 
 
-@router.patch("/sessions/{session_id}/todos/{todo_id}", dependencies=[Depends(_same_origin)])
+@router.patch("/sessions/{session_id}/todos/{todo_id}", dependencies=[Depends(same_origin)])
 async def update_todo(session_id: str, todo_id: str, body: TodoPatch, request: Request):
     session = _get_session(request, session_id)
     if body.content is not None and not body.content.strip():
@@ -84,7 +84,7 @@ async def update_todo(session_id: str, todo_id: str, body: TodoPatch, request: R
     return {"ok": True, "todo": item.to_dict()}
 
 
-@router.delete("/sessions/{session_id}/todos/{todo_id}", dependencies=[Depends(_same_origin)])
+@router.delete("/sessions/{session_id}/todos/{todo_id}", dependencies=[Depends(same_origin)])
 async def delete_todo(session_id: str, todo_id: str, request: Request):
     session = _get_session(request, session_id)
     store = TodoStore(session.storage_root)
@@ -96,7 +96,7 @@ async def delete_todo(session_id: str, todo_id: str, request: Request):
     return {"ok": True}
 
 
-@router.delete("/sessions/{session_id}/todos", dependencies=[Depends(_same_origin)])
+@router.delete("/sessions/{session_id}/todos", dependencies=[Depends(same_origin)])
 async def clear_done_todos(session_id: str, request: Request, owner: Literal["user", "ai"] = "user"):
     """清空已完成的待办。"""
     session = _get_session(request, session_id)

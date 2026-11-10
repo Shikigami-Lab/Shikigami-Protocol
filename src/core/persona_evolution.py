@@ -21,13 +21,11 @@ import traceback
 from string import Template
 from typing import Any, Dict, List, Optional
 
+from src.config.profile_loader import load_profile_card, save_profile_card
 from src.config.prompt_loader import get_prompt, get_locale
 from src.utils.debug_logger import log_secondary_llm_call, log_secondary_llm_response, log_error
-from src.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
-
-_PROFILES_DIR = os.path.join(get_project_root(), "profiles")
 _CHANGELOG_FILE = "persona_changelog.json"
 MAX_CHANGELOG_ENTRIES = 20  # 最多保留最近 N 条演化记录
 DEFAULT_BASELINE_REVIEW_INTERVAL = 3  # every Nth evolution rebuilds on the original persona; 0 = off
@@ -88,27 +86,14 @@ def _validate_evolution_output(
 
 # ── 路径工具 ──────────────────────────────────────────────────────────────────
 
-def _profile_card_path(profile_id: str) -> str:
-    return os.path.join(_PROFILES_DIR, f"{profile_id}.json")
-
-
 def _changelog_path(storage_root: str) -> str:
     return os.path.join(storage_root, _CHANGELOG_FILE)
 
 
-def _load_profile_card(profile_id: str) -> Dict[str, Any]:
-    # Delegate to the shared normalized reader (migrations/defaults applied).
-    from src.config.profile_loader import load_profile_card
-    return load_profile_card(profile_id)
-
-
-def _save_profile_card(profile_id: str, card: Dict[str, Any]) -> None:
-    # 原子写：人格卡是角色的核心文件，崩溃在写入中途会损坏整个角色
-    path = _profile_card_path(profile_id)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(card, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+# 人格卡读写统一走 src.config.profile_loader 的公开实现（迁移/默认值补全 + 原子写）。
+# 历史私有名保留为兼容别名。
+_load_profile_card = load_profile_card
+_save_profile_card = save_profile_card
 
 
 def _update_persona_evolved(profile_id: str, fields: Dict[str, Any]) -> bool:

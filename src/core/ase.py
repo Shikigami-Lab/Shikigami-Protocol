@@ -42,7 +42,7 @@ def _ase_state_path(storage_root: str) -> str:
     return os.path.join(storage_root, _ASE_STATE_FILE)
 
 
-def _load_ase_state(storage_root: str) -> Dict[str, Any]:
+def load_ase_state(storage_root: str) -> Dict[str, Any]:
     """Load persisted ASE state from disk; return empty dict on missing/error."""
     path = _ase_state_path(storage_root)
     if not os.path.exists(path):
@@ -53,6 +53,10 @@ def _load_ase_state(storage_root: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("[ASE] load_ase_state failed (%s): %s", path, e)
         return {}
+
+
+# 历史私有名保留为兼容别名（模块内部沿用）
+_load_ase_state = load_ase_state
 
 
 def _save_ase_state(storage_root: str, state: Dict[str, Any]) -> None:
@@ -70,8 +74,8 @@ def _save_ase_state(storage_root: str, state: Dict[str, Any]) -> None:
 def _get_reflection_config_for_profile(profile_id: str) -> Dict[str, Any]:
     """Load segment_overrides and custom_segments from profile reflection_config."""
     try:
-        from src.config.effective_config import _load_profile_card
-        card = _load_profile_card(profile_id)
+        from src.config.profile_loader import load_profile_card
+        card = load_profile_card(profile_id)
         ref = card.get("reflection_config") or {}
         return {
             "segment_overrides": ref.get("segment_overrides") or {},
@@ -638,7 +642,7 @@ class AseEngine:
 
         from src.core.topics import get_source
         from src.core.topics.base import TopicSourceContext
-        from src.prompt.segments.reflection.topic_candidates import _recently_used_refs
+        from src.prompt.segments.reflection.topic_candidates import recently_used_refs
 
         src = get_source(source_id)
         if src is None:
@@ -649,8 +653,8 @@ class AseEngine:
             return None
 
         # profile 卡 + 情绪状态（部分来源 resolve 需要）
-        from src.config.effective_config import _load_profile_card
-        profile = _load_profile_card(session.profile_id)
+        from src.config.profile_loader import load_profile_card
+        profile = load_profile_card(session.profile_id)
         emotion = None
         try:
             epath = os.path.join(session.storage_root, "emotion_state.json")
@@ -670,7 +674,7 @@ class AseEngine:
             storage_root=session.storage_root,
             profile=profile,
             config=td_cfg,
-            recently_used=_recently_used_refs(session.storage_root, td_cfg.get("recent_used_window", 10)),
+            recently_used=recently_used_refs(session.storage_root, td_cfg.get("recent_used_window", 10)),
             reflection_thought=rs.get("thought", ""),
             emotion=emotion,
             memory_manager=mm,
@@ -875,9 +879,9 @@ class AseEngine:
             late_error = ""
             if research_valid():
                 from src.core.proactive_research import stream_reply
-                from src.prompt.segments.reflection.topic_candidates import _recently_used_refs
+                from src.prompt.segments.reflection.topic_candidates import recently_used_refs
 
-                recent = _recently_used_refs(session.storage_root, 10)
+                recent = recently_used_refs(session.storage_root, 10)
                 tokens = stream_reply(llm, messages, lambda query: autonomy.research(session, query, now),
                                       research_valid, recent, research_topic)
             else:

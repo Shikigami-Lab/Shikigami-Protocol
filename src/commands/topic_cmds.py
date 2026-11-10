@@ -32,10 +32,10 @@ def _build_tctx(session, app, td_cfg):
     import json
     import os
     from src.core.topics.base import TopicSourceContext
-    from src.config.effective_config import _load_profile_card
-    from src.prompt.segments.reflection.topic_candidates import _recently_used_refs
+    from src.config.profile_loader import load_profile_card
+    from src.prompt.segments.reflection.topic_candidates import recently_used_refs
 
-    profile = _load_profile_card(session.profile_id)
+    profile = load_profile_card(session.profile_id)
     emotion = None
     try:
         epath = os.path.join(session.storage_root, "emotion_state.json")
@@ -57,7 +57,7 @@ def _build_tctx(session, app, td_cfg):
         storage_root=session.storage_root,
         profile=profile,
         config=td_cfg,
-        recently_used=_recently_used_refs(session.storage_root, window),
+        recently_used=recently_used_refs(session.storage_root, window),
         reflection_thought=(rs.get("thought") or ""),
         emotion=emotion,
         memory_manager=mm,

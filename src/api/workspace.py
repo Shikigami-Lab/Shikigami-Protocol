@@ -10,10 +10,10 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from src.agent import workspace
-from src.api.agent import _runtime, _same_origin
+from src.api.agent import _runtime, same_origin
 from src.agent.workspace_catalog import FileDescription
 
-router = APIRouter(prefix="/api/agent/workspace", dependencies=[Depends(_same_origin)])
+router = APIRouter(prefix="/api/agent/workspace", dependencies=[Depends(same_origin)])
 
 
 @contextmanager

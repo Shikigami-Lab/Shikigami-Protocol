@@ -131,7 +131,7 @@ class AseSceneContextSegment(PromptSegment):
         # they haven't appeared yet stops the model from treating that precondition as met.
         silent_seconds = float(extras.get("ase_silent_seconds") or 0)
         if silent_seconds >= ABSENCE_HINT_MIN_SECONDS:
-            from src.prompt.segments.time_context import _human_delta
+            from src.prompt.segments.time_context import human_delta as _human_delta
             parts.append(render(
                 "ase.absence_uncertainty", locale=locale,
                 default=(

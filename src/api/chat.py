@@ -42,8 +42,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     config = request.app.state.config
     runtime = getattr(request.app.state, 'agent_runtime', None)
     if runtime:
-        from src.api.agent import _same_origin
-        _same_origin(request)
+        from src.api.agent import same_origin
+        same_origin(request)
 
     if body.session_id in ('.', '..'):
         raise HTTPException(400, 'Invalid character identity')
@@ -100,7 +100,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                     raise ValueError('This task request already exists. Use Continue to resume it.')
                 plain_revision = agent_runtime.store.revision(session.profile_id)
             # 确保 MemoryManager 在 build_messages 之前存在（segments 需要它）
-            from src.api.memory import _get_or_create_manager as _ensure_mem_mgr
+            from src.api.memory import get_or_create_manager as _ensure_mem_mgr
             _ensure_mem_mgr(request, session.profile_id)
 
             n_turns = get_effective_max_history_turns(request.app, session.profile_id)
@@ -500,7 +500,7 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
 
         store = session.conversation_store
 
-        from src.api.memory import _get_or_create_manager as _ensure_mem_mgr
+        from src.api.memory import get_or_create_manager as _ensure_mem_mgr
         _ensure_mem_mgr(request, session.profile_id)
 
         n_turns = get_effective_max_history_turns(request.app, session.profile_id)
@@ -753,8 +753,8 @@ def _fire_persona_evolution_check(session, app):
         return  # 已有一次演化在跑，避免并发重复
 
     try:
-        from src.config.effective_config import _load_profile_card
-        card = _load_profile_card(profile_id)
+        from src.config.profile_loader import load_profile_card
+        card = load_profile_card(profile_id)
     except Exception:
         return
     evolved = card.get("persona_evolved") or {}

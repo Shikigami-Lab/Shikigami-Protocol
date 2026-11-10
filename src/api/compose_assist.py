@@ -134,8 +134,8 @@ async def compose_assist(request: Request, body: ComposeAssistRequest):
     if body.mode == "continue" and anchor_id != target["id"]:
         raise HTTPException(status_code=409, detail="The latest message must be a character reply to continue it")
 
-    from src.api.memory import _get_or_create_manager
-    _get_or_create_manager(request, session.profile_id)
+    from src.api.memory import get_or_create_manager
+    get_or_create_manager(request, session.profile_id)
     prompt = _task_prompt(body, target)
     writing_role = (
         "Continue speaking as the character. The request is to extend your previous reply, not to draft a user reply."

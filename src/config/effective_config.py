@@ -2,13 +2,12 @@
 import logging
 from typing import Any, Dict
 
+from src.config.profile_loader import load_profile_card
+
 logger = logging.getLogger(__name__)
 
-
-def _load_profile_card(profile_id: str) -> Dict[str, Any]:
-    # Delegate to the shared normalized reader (migrations/defaults applied).
-    from src.config.profile_loader import load_profile_card
-    return load_profile_card(profile_id)
+# 历史私有名保留为兼容别名；人格卡读取统一用 profile_loader.load_profile_card。
+_load_profile_card = load_profile_card
 
 
 def get_effective_max_history_turns(app, profile_id: str) -> int:

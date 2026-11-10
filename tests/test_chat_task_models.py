@@ -40,8 +40,8 @@ class ChatTaskModelTests(unittest.IsolatedAsyncioTestCase):
         for name in ("_fire_memory_tasks", "_fire_portrait_burst_check", "_fire_persona_evolution_check",
                      "log_chat_request", "log_llm_call", "log_llm_response"):
             guards.enter_context(patch.object(chat, name))
-        guards.enter_context(patch("src.api.agent._same_origin"))
-        guards.enter_context(patch("src.api.memory._get_or_create_manager"))
+        guards.enter_context(patch("src.api.agent.same_origin"))
+        guards.enter_context(patch("src.api.memory.get_or_create_manager"))
         guards.enter_context(patch("src.core.broadcast.broadcast.push", AsyncMock()))
         guards.enter_context(patch.object(chat, "get_effective_max_history_turns", return_value=10))
         guards.enter_context(patch.object(chat, "build_messages", side_effect=lambda *a, **k: [
