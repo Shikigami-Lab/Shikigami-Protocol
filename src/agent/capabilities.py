@@ -16,7 +16,11 @@ def capabilities(settings, profile):
     result = {key: restrictions.get('enabled') is not False and resolve_setting(settings, profile, key) for key in KEYS}
     result['code_enabled'] &= result['workspace_enabled']
     result['todo_enabled'] &= (((profile or {}).get('tool_configs') or {}).get('todo') or {}).get('enabled', True) is True
-    result['weather_enabled'] = (((profile or {}).get('tool_configs') or {}).get('weather') or {}).get('enabled', False) is True
+    # Non-standard switches come from the tool's own registered resolver.
+    from src.agent.tool_registry import all_business_tools
+    for spec in all_business_tools():
+        if spec.capability_resolver is not None:
+            result[spec.capability] = spec.capability_resolver(settings, profile)
     return result
 
 
@@ -30,17 +34,22 @@ def native_tools(access):
 
 
 def business_tools(access):
+    from src.agent.tool_registry import all_business_tools
+    registered = {spec.name for spec in all_business_tools() if access.get(spec.capability)}
     tools = ['task_context'] if any(access.values()) else []
     if access.get('workspace_enabled'):
         tools.append('workspace_describe')
     if access['history_enabled']:
-        tools.extend(['history_search', 'history_context', 'task_search'])
-    if access.get('memory_enabled'):
+        tools.extend(name for name in ('history_search', 'history_context') if name in registered)
+        tools.append('task_search')
+    if access.get('memory_enabled') and 'memory_search' in registered:
         tools.append('memory_search')
-    if access['web_enabled']:
+    if access['web_enabled'] and 'web_search' in registered:
         tools.append('web_search')
-    if access.get('weather_enabled'):
-        tools.append('weather_query')
+    # Registered tools beyond the core four need no code here (e.g. weather).
+    core = {'history_search', 'history_context', 'memory_search', 'web_search'}
+    tools.extend(spec.name for spec in all_business_tools()
+                 if spec.name in registered and spec.name not in core)
     if access.get('todo_enabled'):
         from src.agent.todo_tools import TODO_TOOLS
         tools.extend(TODO_TOOLS)
