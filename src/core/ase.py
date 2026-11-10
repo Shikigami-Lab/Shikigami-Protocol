@@ -91,49 +91,41 @@ def _ase_segment_is_triggered(
     ase_cfg: Dict[str, Any],
     last_user_ts: Optional[float] = None,
 ) -> bool:
-    """与人格 Prompt 段落一致的触发判断，用于 ASE 注入。"""
+    """ASE 注入的触发判断。模式语义统一走 base.evaluate_trigger_mode；
+    本函数只负责 ASE 侧状态（hint_last_used）与沉默期去重。"""
     from datetime import datetime
+
+    from src.prompt.base import evaluate_trigger_mode
+
     now = time.time()
     today_str = datetime.now().strftime("%Y-%m-%d")
     last = hint_last_used.get(segment_id)
+    numeric_last = last if isinstance(last, (int, float)) else None
 
-    if trigger_mode == "always":
-        return True
-    if trigger_mode == "probability":
-        return random.random() < float(trigger_param)
-    if trigger_mode == "cooldown":
-        if last is None:
-            return True
-        if isinstance(last, (int, float)):
-            return (now - last) / 60.0 >= float(trigger_param)
-        return True
-    if trigger_mode == "once_per_day":
-        if last is None:
-            return True
-        if isinstance(last, (int, float)):
-            return datetime.fromtimestamp(last).strftime("%Y-%m-%d") != today_str
-        return last != today_str
     if trigger_mode == "first_after_silence":
         # 沉默后首条：仅在本轮沉默期内第一次 ASE 发言时触发（用户最后发言后沉默≥N分钟，且该段尚未在本轮触发过）
         if last_user_ts is None:
             return False
-        silence_min = float(trigger_param)
-        if silent_seconds < silence_min * 60:
+        if not evaluate_trigger_mode(trigger_mode, trigger_param,
+                                     silence_minutes=silent_seconds / 60.0):
             return False
-        if last is None:
+        if numeric_last is None:
             return True
-        if isinstance(last, (int, float)):
-            return last < last_user_ts
-        return True
-    if trigger_mode == "time_window":
-        start = int(trigger_param) // 100
-        end = int(trigger_param) % 100
-        if start <= end:
-            return start <= hour <= end
-        return hour >= start or hour <= end
+        return numeric_last < last_user_ts
+
     if trigger_mode in ("every_n_turns", "first_turn_only"):
+        # ASE 心跳没有用户轮次上下文，这两类视为始终可触发
         return True
-    return True
+
+    fired_today = None
+    if trigger_mode == "once_per_day" and last is not None:
+        fired_today = (datetime.fromtimestamp(last).strftime("%Y-%m-%d") == today_str
+                       if numeric_last is not None else last == today_str)
+
+    return evaluate_trigger_mode(
+        trigger_mode, trigger_param,
+        now=now, last_fired=numeric_last, fired_today=fired_today, current_hour=hour,
+    )
 
 
 def _build_ase_segment_list(profile_id: str) -> List[Dict[str, Any]]:

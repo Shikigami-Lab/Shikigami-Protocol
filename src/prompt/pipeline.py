@@ -13,7 +13,6 @@ Debug: 每次 build_messages 会记录各 segment 与总耗时到 _last_build_ti
 chat 流结束后可配合 LLM 流式用时一并写入 build_timings.log。
 """
 import logging
-import random
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -25,7 +24,8 @@ from src.config.profile_loader import ProfileLoader
 from src.core.session import Session
 from src.memory.conversation_store import ConversationStore
 from src.llm.message_normalization import PromptMessage, normalize_messages
-from src.prompt.base import HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult, targets_chat, targets_ase
+from src.prompt.base import (HISTORY_PRIORITY, BuildContext, PromptSegment, SegmentResult,
+                             evaluate_trigger_mode, targets_chat, targets_ase)
 from src.prompt.dependencies import unavailable_reason
 from src.prompt.macros import build_macro_table, expand_messages
 from src.prompt.registry import discover_segments, get_registered
@@ -337,47 +337,29 @@ def build_messages(
 
 
 def _custom_triggered(custom: CustomSegmentDef, ctx: BuildContext) -> bool:
-    """Evaluate trigger condition for a custom segment."""
+    """Evaluate trigger condition for a custom segment.
+
+    Custom segments are stateless definitions: cooldown has no persisted
+    last-fired, so it passes last_fired=None ("never fired" → fires).
+    All mode semantics come from base.evaluate_trigger_mode.
+    """
     if not custom.enabled:
         return False
     mode = getattr(custom, "trigger_mode", "always")
     param = getattr(custom, "trigger_param", 1.0)
 
-    if mode == "always":
-        return True
-    if mode == "probability":
-        return random.random() < param
-    if mode == "cooldown":
-        # Custom segments: no persisted cooldown, treat as always
-        return True
+    kwargs: Dict[str, Any] = {}
     if mode == "first_after_silence":
-        elapsed = (time.time() - ctx.session.last_user_message_time) / 60.0
-        return elapsed >= param
-    if mode == "once_per_day":
+        kwargs["silence_minutes"] = (time.time() - ctx.session.last_user_message_time) / 60.0
+    elif mode == "once_per_day":
         today = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d")
-        last = ctx.session.get_segment_last_fired_date(custom.segment_id)
-        return last != today
-    if mode == "every_n_turns":
+        kwargs["fired_today"] = ctx.session.get_segment_last_fired_date(custom.segment_id) == today
+    elif mode in ("every_n_turns", "first_turn_only"):
         user_name = ctx.extras.get("user_name") or "用户"
-        n = ctx.store.total_user_messages_count(user_name)
-        return (n + 1) % max(1, int(param)) == 0
-    if mode == "first_turn_only":
-        user_name = ctx.extras.get("user_name") or "用户"
-        return ctx.store.total_user_messages_count(user_name) == 0
-    if mode == "time_window":
-        current_hour = ctx.extras.get("current_hour")
-        if current_hour is None:
-            current_hour = datetime.fromtimestamp(time.time()).hour
-        start = int(param) // 100
-        end = int(param) % 100
-        if start <= end:
-            return start <= current_hour <= end
-        return current_hour >= start or current_hour <= end
-    if mode == "keyword":
-        kw = getattr(custom, "trigger_keywords", None) or ""
-        keys = [k.strip().lower() for k in __import__('re').split(r"[,，;；\n]", kw) if k.strip()]
-        if not keys:
-            return False
+        kwargs["user_turn_count"] = ctx.store.total_user_messages_count(user_name)
+    elif mode == "time_window":
+        kwargs["current_hour"] = ctx.extras.get("current_hour")
+    elif mode == "keyword":
         scan_turns = max(1, min(50, int(param) if param else 10))
         parts = [ctx.user_msg or ""]
         try:
@@ -385,6 +367,7 @@ def _custom_triggered(custom: CustomSegmentDef, ctx: BuildContext) -> bool:
             parts.extend(turn.get("content", "") for turn in recent)
         except Exception:
             pass
-        scan_text = " ".join(parts).lower()
-        return any(k in scan_text for k in keys)
-    return True
+        kwargs["keyword_texts"] = parts
+        kwargs["trigger_keywords"] = getattr(custom, "trigger_keywords", None)
+
+    return evaluate_trigger_mode(mode, param, **kwargs)

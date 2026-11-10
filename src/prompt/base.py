@@ -28,6 +28,95 @@ def targets_ase(inject_into: str) -> bool:
     return inject_into in ("ase", "reflection_ase")
 
 
+def split_trigger_keywords(trigger_keywords: Optional[str]) -> List[str]:
+    """comma/semicolon/newline-separated keywords; accepts full-width delimiters."""
+    if not trigger_keywords:
+        return []
+    import re
+    return [k.strip().lower() for k in re.split(r"[,，;；\n]", trigger_keywords) if k.strip()]
+
+
+def evaluate_trigger_mode(
+    trigger_mode: str,
+    trigger_param: float,
+    *,
+    now: Optional[float] = None,
+    last_fired: Optional[float] = None,
+    fired_today: Optional[bool] = None,
+    current_hour: Optional[int] = None,
+    silence_minutes: Optional[float] = None,
+    user_turn_count: Optional[int] = None,
+    keyword_texts: Optional[List[str]] = None,
+    trigger_keywords: Optional[str] = None,
+) -> bool:
+    """Single implementation of trigger-mode semantics.
+
+    State is supplied by the caller — PromptSegment instances pass their own
+    ``_last_fired``, custom segments pass nothing (stateless), the ASE engine
+    passes its hint_last_used entries. Modes whose inputs are missing return
+    False (except cooldown/once_per_day, where "never fired" means fire).
+    Unknown modes default to True (fire), matching all legacy call sites.
+    """
+    import random
+
+    now = time.time() if now is None else now
+
+    if trigger_mode == "always":
+        return True
+
+    if trigger_mode == "probability":
+        return random.random() < float(trigger_param)
+
+    if trigger_mode == "cooldown":
+        # trigger_param = cooldown in minutes
+        if not last_fired:
+            return True
+        return (now - last_fired) / 60.0 >= float(trigger_param)
+
+    if trigger_mode == "first_after_silence":
+        # trigger_param = silence minutes before the triggering message
+        if silence_minutes is None:
+            return False
+        return silence_minutes >= float(trigger_param)
+
+    if trigger_mode == "once_per_day":
+        if fired_today is None:
+            if not last_fired:
+                return True
+            fired_today = (datetime.fromtimestamp(last_fired).strftime("%Y-%m-%d")
+                           == datetime.fromtimestamp(now).strftime("%Y-%m-%d"))
+        return not fired_today
+
+    if trigger_mode == "every_n_turns":
+        # trigger_param = N; fire on 1st, N+1th, 2N+1th user message
+        if user_turn_count is None:
+            return False
+        return (user_turn_count + 1) % max(1, int(trigger_param)) == 0
+
+    if trigger_mode == "first_turn_only":
+        if user_turn_count is None:
+            return False
+        return user_turn_count == 0
+
+    if trigger_mode == "time_window":
+        # trigger_param = start_hour * 100 + end_hour (e.g. 510 = 5–10 点，闭区间)
+        hour = current_hour if current_hour is not None else datetime.fromtimestamp(now).hour
+        start = int(trigger_param) // 100
+        end = int(trigger_param) % 100
+        if start <= end:
+            return start <= hour <= end
+        return hour >= start or hour <= end
+
+    if trigger_mode == "keyword":
+        keys = split_trigger_keywords(trigger_keywords)
+        if not keys:
+            return False
+        scan_text = " ".join(t for t in (keyword_texts or []) if t).lower()
+        return any(k in scan_text for k in keys)
+
+    return True
+
+
 @dataclass
 class SegmentResult:
     """What a segment builds: a list of LLM message dicts."""
@@ -94,75 +183,38 @@ class PromptSegment(ABC):
         if not enabled and not self.is_core:
             return False
 
-        if trigger_mode == "always":
-            return True
-
-        if trigger_mode == "probability":
-            import random
-            return random.random() < trigger_param
-
-        if trigger_mode == "cooldown":
-            # trigger_param = cooldown in minutes
-            elapsed = (time.time() - self._last_fired) / 60.0
-            return elapsed >= trigger_param
-
-        # Below modes need ctx (session, store, extras)
-        if ctx is None:
+        ctx_modes = ("first_after_silence", "once_per_day", "every_n_turns",
+                     "first_turn_only", "time_window", "keyword")
+        if trigger_mode in ctx_modes and ctx is None:
             return False
 
-        if trigger_mode == "first_after_silence":
-            # trigger_param = silence_minutes. 语义：用户沉默≥N分钟后发来的「首条」消息时触发。
-            # 对话流程中 build 在更新 last_user_message_time 之前调用，故 elapsed = 自上一句用户消息以来的分钟数（本句前的沉默时长）。
-            elapsed = (time.time() - ctx.session.last_user_message_time) / 60.0
-            return elapsed >= trigger_param
+        kwargs: Dict[str, Any] = {"last_fired": self._last_fired or None}
+        if ctx is not None:
+            if trigger_mode == "first_after_silence":
+                # build 在更新 last_user_message_time 之前调用，故 elapsed =
+                # 自上一句用户消息以来的分钟数（本句前的沉默时长）。
+                kwargs["silence_minutes"] = (time.time() - ctx.session.last_user_message_time) / 60.0
+            elif trigger_mode == "once_per_day":
+                today = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d")
+                kwargs["fired_today"] = ctx.session.get_segment_last_fired_date(self.segment_id) == today
+            elif trigger_mode in ("every_n_turns", "first_turn_only"):
+                user_name = ctx.extras.get("user_name") or "用户"
+                kwargs["user_turn_count"] = ctx.store.total_user_messages_count(user_name)
+            elif trigger_mode == "time_window":
+                kwargs["current_hour"] = ctx.extras.get("current_hour")
+            elif trigger_mode == "keyword":
+                # trigger_param = scan_turns (default 10)
+                scan_turns = max(1, min(50, int(trigger_param) if trigger_param else 10))
+                parts = [ctx.user_msg or ""]
+                try:
+                    recent = ctx.store.get_recent(scan_turns)
+                    parts.extend(turn.get("content", "") for turn in recent)
+                except Exception:
+                    pass
+                kwargs["keyword_texts"] = parts
+                kwargs["trigger_keywords"] = trigger_keywords
 
-        if trigger_mode == "once_per_day":
-            # Fire at most once per calendar day (compare with segment_last_fired_date)
-            today = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d")
-            last = ctx.session.get_segment_last_fired_date(self.segment_id)
-            return last != today
-
-        if trigger_mode == "every_n_turns":
-            # trigger_param = N; fire on 1st, N+1th, 2N+1th user message（认用户用 sender）
-            user_name = ctx.extras.get("user_name") or "用户"
-            n = ctx.store.total_user_messages_count(user_name)
-            return (n + 1) % max(1, int(trigger_param)) == 0
-
-        if trigger_mode == "first_turn_only":
-            user_name = ctx.extras.get("user_name") or "用户"
-            return ctx.store.total_user_messages_count(user_name) == 0
-
-        if trigger_mode == "time_window":
-            # trigger_param = start_hour * 100 + end_hour (e.g. 510 = 5–10 点，闭区间)
-            current_hour = ctx.extras.get("current_hour")
-            if current_hour is None:
-                current_hour = datetime.fromtimestamp(time.time()).hour
-            start = int(trigger_param) // 100
-            end = int(trigger_param) % 100
-            if start <= end:
-                return start <= current_hour <= end
-            return current_hour >= start or current_hour <= end
-
-        if trigger_mode == "keyword":
-            # trigger_keywords = comma/semicolon/newline-separated keywords; trigger_param = scan_turns (default 10)
-            # Accepts both full-width (，；) and half-width (, ;) delimiters.
-            if not trigger_keywords:
-                return False
-            import re as _re
-            keys = [k.strip().lower() for k in _re.split(r"[,，;；\n]", trigger_keywords) if k.strip()]
-            if not keys:
-                return False
-            scan_turns = max(1, min(50, int(trigger_param) if trigger_param else 10))
-            parts = [ctx.user_msg or ""]
-            try:
-                recent = ctx.store.get_recent(scan_turns)
-                parts.extend(turn.get("content", "") for turn in recent)
-            except Exception:
-                pass
-            scan_text = " ".join(parts).lower()
-            return any(k in scan_text for k in keys)
-
-        return True
+        return evaluate_trigger_mode(trigger_mode, trigger_param, **kwargs)
 
     def mark_fired(self):
         self._last_fired = time.time()
