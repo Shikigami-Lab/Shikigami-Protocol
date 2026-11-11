@@ -22,6 +22,7 @@ preset 示例（config/app.yaml 的 llm_presets 下）：
 import logging
 import traceback
 from typing import AsyncGenerator, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from src.llm.base import LLMProvider
 from src.llm.think_filter import ThinkTagFilter, strip_think_tags
@@ -40,6 +41,15 @@ def _lazy_import():
         return genai, types
     except ImportError as e:  # pragma: no cover - 取决于部署环境
         raise RuntimeError(_IMPORT_HINT) from e
+
+
+def _is_openai_compat_url(url: str) -> bool:
+    """识别 OpenAI 兼容端点地址（路径以 /openai 结尾），如 …/v1beta/openai/。"""
+    try:
+        path = urlsplit(url).path.rstrip("/").lower()
+    except ValueError:
+        return False
+    return path.endswith("/openai")
 
 
 def _split_system(messages: List[Dict[str, str]]):
@@ -69,8 +79,17 @@ class GeminiNativeProvider(LLMProvider):
     def __init__(self, api_key: str = "", base_url: str = "", model: str = "", **kwargs):
         self.model = model or "gemini-2.5-flash"
         self.api_key = api_key or ""
-        # base_url 可选：留空走 Google 默认端点；填写则走原生协议的代理/网关
-        self._base_url = (base_url or "").strip() or None
+        # base_url 可选：留空走 Google 默认端点；填写则走原生协议的代理/网关。
+        # 兼容端点地址（…/v1beta/openai）是旧 preset 的常见残留，原生协议打过去只会 404，
+        # 这里识别后忽略，避免迁移用户踩坑。
+        raw_base = (base_url or "").strip()
+        if raw_base and _is_openai_compat_url(raw_base):
+            logger.warning(
+                "[gemini_native] base_url 指向 OpenAI 兼容端点（%s），原生 provider 忽略该值，"
+                "改用 Google 默认端点", raw_base,
+            )
+            raw_base = ""
+        self._base_url = raw_base or None
         timeout = kwargs.get("timeout")
         self._timeout = float(timeout) if timeout is not None else 60.0
         self._gen_kwargs: Dict = {

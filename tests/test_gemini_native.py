@@ -203,6 +203,17 @@ class TestGeminiNativeProvider(unittest.TestCase):
         self.assertEqual(provider._client.http_options.base_url, "https://proxy.example.com")
         self.assertEqual(provider._client.http_options.timeout, 12000)
 
+    def test_openai_compat_url_is_ignored(self):
+        for url in (
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        ):
+            provider = _patched_provider(api_key="k", model="m", base_url=url)
+            self.assertIsNone(provider._base_url, url)
+        # 原生协议的代理地址不受影响
+        provider = _patched_provider(api_key="k", model="m", base_url="https://proxy.example.com")
+        self.assertEqual(provider._base_url, "https://proxy.example.com")
+
     def test_max_tokens_maps_to_max_output_tokens(self):
         provider = _patched_provider(api_key="k", model="m", max_tokens=1024)
         with _patch_import():
