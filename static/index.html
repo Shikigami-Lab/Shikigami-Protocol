@@ -1623,22 +1623,13 @@
                   <span class="param-val" style="font-size:11px;color:var(--text-secondary);">{{ presetForm.max_tokens_enabled ? '' : t('lblUnlimitedParen') }}</span>
                 </div>
 
-                <div class="form-field" style="margin-top:14px;">
+                <div class="form-field" style="margin-top:14px;" v-if="presetForm.type !== 'gemini'">
                   <div class="form-label">{{ t('llmExtraBodyLabel') }}</div>
                   <textarea class="form-input" rows="4" spellcheck="false"
                     style="font-family:monospace;font-size:12px;resize:vertical;"
                     v-model="presetForm.extra_body_raw"
                     :placeholder="t('llmExtraBodyPlaceholder')"></textarea>
                   <div class="form-hint">{{ t('llmExtraBodyHint') }}</div>
-                </div>
-
-                <div class="form-field" style="margin-top:14px;" v-if="presetForm.type === 'gemini'">
-                  <div class="form-label">{{ t('llmSafetySettingsLabel') }}</div>
-                  <textarea class="form-input" rows="5" spellcheck="false"
-                    style="font-family:monospace;font-size:12px;resize:vertical;"
-                    v-model="presetForm.safety_settings_raw"
-                    :placeholder="t('llmSafetySettingsPlaceholder')"></textarea>
-                  <div class="form-hint">{{ t('llmSafetySettingsHint') }}</div>
                 </div>
 
                 <div class="btn-row" style="margin-top:14px;">
@@ -4141,15 +4132,15 @@
           <p class="form-hint">{{ t('agentAutonomyHint') }}</p>
           <div class="form-field">
             <label class="form-label" for="agent-autonomy-interval">{{ t('agentAutonomyInterval') }}</label>
-            <input id="agent-autonomy-interval" class="form-input" type="number" min="60" max="86400" step="1" v-model.number="agentSettingsForm.autonomy_interval_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+            <input id="agent-autonomy-interval" class="form-input" type="number" min="60" max="86400" step="1" v-model.number="agentSettingsForm.autonomy_interval_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                   @change="saveAgentSettings({autonomy_interval_seconds: agentSettingsForm.autonomy_interval_seconds, autonomy_max_requests_per_hour: agentSettingsForm.autonomy_max_requests_per_hour})" />
           </div>
           <div class="form-field">
             <label class="form-label" for="agent-autonomy-hourly-cap">{{ t('agentAutonomyHourlyCap') }}</label>
-            <input id="agent-autonomy-hourly-cap" class="form-input" type="number" min="1" max="128" step="1" v-model.number="agentSettingsForm.autonomy_max_requests_per_hour" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+            <input id="agent-autonomy-hourly-cap" class="form-input" type="number" min="1" max="128" step="1" v-model.number="agentSettingsForm.autonomy_max_requests_per_hour" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                   @change="saveAgentSettings({autonomy_interval_seconds: agentSettingsForm.autonomy_interval_seconds, autonomy_max_requests_per_hour: agentSettingsForm.autonomy_max_requests_per_hour})" />
           </div>
           <p class="form-hint">{{ t('agentAutonomyBudgetHint') }}</p>
-          <button type="button" class="s-btn s-btn-secondary" :disabled="agentSettingsBusy || !agentSettingsLoaded"
-                  @click="saveAgentSettings({autonomy_interval_seconds: agentSettingsForm.autonomy_interval_seconds, autonomy_max_requests_per_hour: agentSettingsForm.autonomy_max_requests_per_hour})">{{ t('agentSaveAutonomyLimits') }}</button>
           <toggle-row v-for="capability in agentCapabilities" :key="capability" :label="t('agentDefaultLabel') + t('agentCapability_' + capability)"
             :title="capability === 'web_enabled' ? t('agentWebDnsHint') : ''"
             :model-value="agentSettingsForm[capability]"
@@ -4185,14 +4176,14 @@
             <p class="form-hint">{{ t('agentLimitsHint') }}</p>
             <div class="form-field">
               <label class="form-label" for="agent-request-limit">{{ t('agentMaxRequests') }}</label>
-              <input id="agent-request-limit" class="form-input" type="number" min="1" max="32" step="1" v-model.number="agentSettingsForm.max_model_requests" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+              <input id="agent-request-limit" class="form-input" type="number" min="1" max="32" step="1" v-model.number="agentSettingsForm.max_model_requests" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                     @change="saveAgentSettings({max_model_requests: agentSettingsForm.max_model_requests, timeout_seconds: agentSettingsForm.timeout_seconds})" />
             </div>
             <div class="form-field">
               <label class="form-label" for="agent-timeout">{{ t('agentTimeout') }}</label>
-              <input id="agent-timeout" class="form-input" type="number" min="10" max="600" step="1" v-model.number="agentSettingsForm.timeout_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded" />
+              <input id="agent-timeout" class="form-input" type="number" min="10" max="600" step="1" v-model.number="agentSettingsForm.timeout_seconds" :disabled="agentSettingsBusy || !agentSettingsLoaded"
+                     @change="saveAgentSettings({max_model_requests: agentSettingsForm.max_model_requests, timeout_seconds: agentSettingsForm.timeout_seconds})" />
             </div>
-            <button type="button" class="s-btn s-btn-secondary" :disabled="agentSettingsBusy || !agentSettingsLoaded"
-                    @click="saveAgentSettings({max_model_requests: agentSettingsForm.max_model_requests, timeout_seconds: agentSettingsForm.timeout_seconds})">{{ t('agentSaveLimits') }}</button>
           </details>
         </div>
 

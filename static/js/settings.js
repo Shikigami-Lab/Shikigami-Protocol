@@ -130,7 +130,6 @@ const SettingsMixin = {
         frequency_penalty: 0.4, frequency_penalty_enabled: true,
         max_tokens: null, max_tokens_enabled: false,
         extra_body_raw: '',
-        safety_settings_raw: '',
       },
       presetSaving: false,
       llmTestResult: null,   // { presetName, ok, latency_ms, error }
@@ -1582,7 +1581,6 @@ const SettingsMixin = {
         max_tokens: p.max_tokens != null ? p.max_tokens : 8192,
         max_tokens_enabled: p.max_tokens != null,
         extra_body_raw: p.extra_body ? JSON.stringify(p.extra_body, null, 2) : '',
-        safety_settings_raw: p.safety_settings ? JSON.stringify(p.safety_settings, null, 2) : '',
       };
       this.llmShowKey = false;
     },
@@ -1722,11 +1720,6 @@ const SettingsMixin = {
         body.extra_body = rawExtraBody ? JSON.parse(rawExtraBody) : null;
         if (body.extra_body !== null && (typeof body.extra_body !== 'object' || Array.isArray(body.extra_body))) {
           throw new Error(this.t('toastExtraBodyInvalid'));
-        }
-        const rawSafety = (this.presetForm.safety_settings_raw || '').trim();
-        body.safety_settings = rawSafety ? JSON.parse(rawSafety) : null;
-        if (body.safety_settings !== null && !Array.isArray(body.safety_settings)) {
-          throw new Error(this.t('toastSafetySettingsInvalid'));
         }
         // Only send api_key if the user typed something
         if (this.presetForm.api_key.trim()) {
