@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from src.llm.base import LLMProvider
+from src.llm.gemini_native import GeminiNativeProvider
 from src.llm.openai_compat import OpenAICompatProvider
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ _REGISTRY: Dict[str, type] = {
     "ollama": OpenAICompatProvider,
     "lmstudio": OpenAICompatProvider,
     "deepseek": OpenAICompatProvider,
-    "gemini": OpenAICompatProvider,
+    "gemini": GeminiNativeProvider,
 }
 
 
@@ -44,6 +45,7 @@ def get_provider(preset: Dict[str, Any], overrides: Optional[Dict[str, Any]] = N
         max_tokens=merged.get("max_tokens"),
         unsupported_params=merged.get("unsupported_params", []),
         extra_body=merged.get("extra_body"),
+        safety_settings=merged.get("safety_settings"),  # 仅 gemini_native 使用
         timeout=merged.get("timeout"),  # 可选，秒；不设则默认 60
     )
 

@@ -376,6 +376,7 @@ async def get_llm_presets(request: Request):
             "unsupported_params":     p.get("unsupported_params", []),
             "max_tokens":             p.get("max_tokens"),
             "extra_body":             p.get("extra_body"),
+            "safety_settings":        p.get("safety_settings"),
         }
     return {
         "presets": result,
@@ -430,10 +431,11 @@ class LLMPresetBody(BaseModel):
     unsupported_params: List[str] = []
     max_tokens: Optional[int] = Field(default=None, gt=0)
     extra_body: Optional[Dict[str, Any]] = None
+    safety_settings: Optional[List[Dict[str, Any]]] = None  # 仅 type=gemini 生效
 
 
 def _merge_preset_advanced_fields(body: LLMPresetBody, preset: dict, previous: dict) -> None:
-    for name in ("max_tokens", "extra_body"):
+    for name in ("max_tokens", "extra_body", "safety_settings"):
         value = getattr(body, name) if name in body.model_fields_set else previous.get(name)
         if value is not None:
             preset[name] = value
