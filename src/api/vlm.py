@@ -165,6 +165,15 @@ async def _call_vlm(
     """
     from openai import AsyncOpenAI
 
+    # gemini 原生 preset 走 google-genai SDK，此处直连 AsyncOpenAI 会把 key 发到错误端点；
+    # 在原生视觉接入前明确拒绝，而不是静默打去 api.openai.com。
+    ptype = (preset.get("type") or "openai_compat").strip()
+    if ptype == "gemini":
+        raise RuntimeError(
+            "VLM 暂不支持 gemini 原生 preset（视觉调用未接入原生 SDK）；"
+            "请为 VLM 单独配置一个 openai_compat 类型的 preset"
+        )
+
     api_key = preset.get("api_key", "sk-placeholder")
     base_url = preset.get("base_url")
     model = preset.get("model", "gemini-2.5-flash")

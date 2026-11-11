@@ -108,7 +108,7 @@ class SpeakSilenceTests(unittest.IsolatedAsyncioTestCase):
         config = SimpleNamespace(
             get_ase_config=lambda: {},
             get_vlm_config=lambda: {},
-            get_active_llm_preset=lambda: {"api_key": "test", "model": "test-model"},
+            get_active_llm_preset=lambda: {"api_key": "test", "model": "test-model", "base_url": "http://fixture.invalid"},
         )
         self.engine = AseEngine(SimpleNamespace(state=SimpleNamespace(config=config, last_user_message_time=0.0)))
         self.session = SimpleNamespace(

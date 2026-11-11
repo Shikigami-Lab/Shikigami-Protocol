@@ -819,7 +819,8 @@ class AseEngine:
             pass
 
         preset = config.get_active_llm_preset()
-        if not preset.get("api_key") and not preset.get("base_url"):
+        from src.llm.registry import preset_config_missing
+        if preset_config_missing(preset):
             logger.warning("[ASE] LLM not configured, skipping speak")
             return
 

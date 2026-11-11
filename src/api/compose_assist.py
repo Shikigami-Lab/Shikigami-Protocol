@@ -9,7 +9,7 @@ from src.config.effective_config import get_effective_max_history_turns
 from src.config.profile_loader import ProfileLoader
 from src.core.session import Session
 from src.core.broadcast import broadcast
-from src.llm.registry import get_provider
+from src.llm.registry import get_provider, preset_config_missing
 from src.prompt.pipeline import build_messages
 
 router = APIRouter(prefix="/api/chat", tags=["chat-writing"])
@@ -104,7 +104,7 @@ async def compose_assist(request: Request, body: ComposeAssistRequest):
     """Use the active model to draft a user reply or continue the character."""
     config = request.app.state.config
     preset = config.get_active_llm_preset()
-    if not preset or not preset.get("base_url") or not preset.get("model"):
+    if not preset or preset_config_missing(preset):
         raise HTTPException(status_code=503, detail="Configure a chat model before using writing assistance")
 
     target = None

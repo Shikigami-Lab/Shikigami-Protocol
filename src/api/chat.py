@@ -14,7 +14,7 @@ from src.agent.chat_routing import route_chat_reply
 from src.config.effective_config import get_effective_max_history_turns
 from src.core.broadcast import broadcast
 from src.prompt.pipeline import build_messages
-from src.llm.registry import get_provider
+from src.llm.registry import get_provider, preset_config_missing
 from src.utils.debug_logger import (
     log_chat_request,
     log_llm_call,
@@ -89,7 +89,6 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             user_msg = body.message.strip()
             use_agent = bool(agent_runtime and agent_runtime.tools_allowed(session.profile_id) and not user_msg.startswith('/') and not body.conversation_only)
             preset = config.get_active_llm_preset()
-            from src.llm.registry import preset_config_missing
             missing = preset_config_missing(preset)
             if missing and not user_msg.startswith('/'):
                 need = ' and '.join(missing)
@@ -496,7 +495,7 @@ async def system_trigger_endpoint(session_id: str, body: SystemTriggerRequest,
             return
 
         preset = config.get_active_llm_preset()
-        if not preset.get("api_key") and not preset.get("base_url"):
+        if preset_config_missing(preset):
             yield f"data: {json.dumps({'error': 'LLM not configured', 'done': True})}\n\n"
             return
 

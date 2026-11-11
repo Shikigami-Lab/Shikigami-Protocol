@@ -46,7 +46,8 @@ async def _on_expire(app, timer_info: dict):
             logger.warning("[timer_expire] result recording failed id=%s: %s", timer_id, exc)
 
     preset = config.get_active_llm_preset()
-    if not preset.get("api_key") and not preset.get("base_url"):
+    from src.llm.registry import preset_config_missing
+    if preset_config_missing(preset):
         logger.warning("[timer_expire] LLM 未配置，跳过 label=%s", label)
         return
 

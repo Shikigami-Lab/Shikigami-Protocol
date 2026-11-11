@@ -8,7 +8,7 @@ import time
 from src.agent.business_tools import read_task_message
 from src.agent.projection import safe_text
 from src.core.broadcast import broadcast
-from src.llm.registry import get_provider
+from src.llm.registry import get_provider, preset_config_missing
 from src.prompt.macros import build_macro_table, expand_macros
 from src.tools.todo.store import TodoStore
 from src.utils.persona_context import persona_prompt_parts, resolve_user_name
@@ -57,7 +57,7 @@ async def run_daily_report(runtime, profile_id, instructions, still_current):
 
     revision = runtime.store.revision(profile_id)
     preset = state.config.get_active_llm_preset()
-    if not preset or not preset.get("base_url") or not preset.get("model"):
+    if not preset or preset_config_missing(preset):
         raise RuntimeError("The chat model is not configured")
     profile = runtime.profile_loader(profile_id) or {}
     persona = expand_macros("\n\n".join(persona_prompt_parts(profile)), build_macro_table(

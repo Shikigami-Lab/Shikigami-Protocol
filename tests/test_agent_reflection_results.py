@@ -37,7 +37,7 @@ class ReflectionResultTests(unittest.IsolatedAsyncioTestCase):
         config = SimpleNamespace(
             secondary_models={}, user_name="User", user_persona={},
             get_reflection_config=lambda: {}, get_ase_config=lambda: {},
-            get_active_llm_preset=lambda: {"base_url": "https://example.invalid"},
+            get_active_llm_preset=lambda: {"base_url": "https://example.invalid", "model": "fake"},
         )
         self.app = SimpleNamespace(state=SimpleNamespace(config=config, agent_runtime=self.runtime))
         self.engine = ReflectionEngine(self.app)
@@ -367,7 +367,7 @@ class TimerExpiryResultTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_record_failure_does_not_duplicate_or_prevent_existing_reminder(self):
         self.runtime.record_timer_expiry.side_effect = RuntimeError("store unavailable")
-        self.config.get_active_llm_preset = lambda: {"base_url": "https://example.invalid"}
+        self.config.get_active_llm_preset = lambda: {"base_url": "https://example.invalid", "model": "fake"}
         async def stream(*args, **kwargs):
             yield "Tea is ready."
         provider = SimpleNamespace(stream_chat=mock.Mock(side_effect=stream))

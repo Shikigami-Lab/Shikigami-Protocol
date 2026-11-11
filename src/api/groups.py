@@ -25,7 +25,7 @@ from src.config.effective_config import get_effective_max_history_turns
 from src.config.profile_loader import ProfileLoader
 from src.core.broadcast import broadcast
 from src.core.session import Session
-from src.llm.registry import get_provider
+from src.llm.registry import get_provider, preset_config_missing
 from src.prompt.pipeline import build_messages
 from src.utils.debug_logger import (
     log_chat_request,
@@ -284,10 +284,11 @@ async def group_chat(group_id: str, request: Request, body: GroupChatRequest):
         getattr(config, "user_name", "用户") if config else "用户"
     )
     preset = config.get_active_llm_preset() if config else {}
-    if not preset.get("api_key") and not preset.get("base_url"):
+    missing = preset_config_missing(preset or {})
+    if missing:
         raise HTTPException(
             status_code=503,
-            detail="LLM not configured. Set api_key and base_url in config.",
+            detail=f"LLM not configured. Set {' and '.join(missing)} in config.",
         )
 
     # 用户消息写入群 store 并广播
