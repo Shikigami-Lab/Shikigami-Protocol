@@ -1536,7 +1536,7 @@
 
                 <div class="form-field">
                   <label class="form-label" for="llm-base-url">Base URL</label>
-                  <input class="form-input" id="llm-base-url" v-model="presetForm.base_url" @input="clearLLMModels" :placeholder="t('llmBaseUrlPlaceholderZh')" />
+                  <input class="form-input" id="llm-base-url" v-model="presetForm.base_url" @input="clearLLMModels" :placeholder="presetForm.type === 'gemini' ? t('llmBaseUrlPlaceholderGemini') : t('llmBaseUrlPlaceholderZh')" />
                 </div>
 
                 <div class="form-field">
