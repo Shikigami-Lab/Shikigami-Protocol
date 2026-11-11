@@ -102,3 +102,23 @@ def get_provider_for_role(
     if fallback:
         return get_provider(fallback)
     return None
+
+
+def preset_config_missing(preset: Dict[str, Any]) -> list:
+    """返回 preset 缺失的必要配置项；空列表 = 已配置可调用。
+
+    必要项按 provider 类型区分：
+    - openai_compat 系：base_url + model（api_key 对本地后端可空）
+    - gemini 原生：api_key + model（base_url 可选，留空走 Google 默认端点）
+    """
+    ptype = (preset.get("type") or "openai_compat").strip()
+    missing = []
+    if not (preset.get("model") or "").strip():
+        missing.append("model")
+    if ptype == "gemini":
+        if not (preset.get("api_key") or "").strip():
+            missing.append("api_key")
+    else:
+        if not (preset.get("base_url") or "").strip():
+            missing.append("base_url")
+    return missing

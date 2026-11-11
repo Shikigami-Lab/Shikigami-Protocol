@@ -258,5 +258,28 @@ class TestRegistry(unittest.TestCase):
         self.assertIsInstance(provider, OpenAICompatProvider)
 
 
+class TestPresetConfigMissing(unittest.TestCase):
+    def test_gemini_needs_key_and_model_not_base_url(self):
+        self.assertEqual(registry.preset_config_missing({
+            "type": "gemini", "api_key": "k", "model": "m", "base_url": "",
+        }), [])
+        self.assertEqual(registry.preset_config_missing({
+            "type": "gemini", "api_key": "", "model": "m",
+        }), ["api_key"])
+        self.assertEqual(registry.preset_config_missing({
+            "type": "gemini", "api_key": "k", "model": "",
+        }), ["model"])
+
+    def test_compat_needs_base_url_and_model(self):
+        self.assertEqual(registry.preset_config_missing({
+            "type": "openai_compat", "base_url": "http://x", "model": "m",
+        }), [])
+        self.assertEqual(registry.preset_config_missing({
+            "type": "openai_compat", "base_url": "", "model": "m", "api_key": "k",
+        }), ["base_url"])
+        # 未写 type 默认 openai_compat
+        self.assertEqual(registry.preset_config_missing({"model": "m"}), ["base_url"])
+
+
 if __name__ == "__main__":
     unittest.main()

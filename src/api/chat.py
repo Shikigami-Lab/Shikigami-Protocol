@@ -85,13 +85,15 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             stream_counts[session_id] = stream_counts.get(session_id, 0) + 1
             counted_stream = True
 
-            # openai_compat 必需 base_url + model；api_key 对本地模型(Ollama/LM Studio)可空，
-            # 故不能用 api_key 判断「已配置」。
+            # 必要配置按 provider 类型区分（openai_compat 要 base_url；gemini 原生要 api_key）。
             user_msg = body.message.strip()
             use_agent = bool(agent_runtime and agent_runtime.tools_allowed(session.profile_id) and not user_msg.startswith('/') and not body.conversation_only)
             preset = config.get_active_llm_preset()
-            if (not preset.get("base_url") or not preset.get("model")) and not user_msg.startswith('/'):
-                yield f"data: {json.dumps({'error': 'LLM not configured. Set base_url and model for the active preset (Settings → Models).', 'done': True})}\n\n"
+            from src.llm.registry import preset_config_missing
+            missing = preset_config_missing(preset)
+            if missing and not user_msg.startswith('/'):
+                need = ' and '.join(missing)
+                yield f"data: {json.dumps({'error': f'LLM not configured. Set {need} for the active preset (Settings → Models).', 'done': True})}\n\n"
                 return
 
             store = session.conversation_store
