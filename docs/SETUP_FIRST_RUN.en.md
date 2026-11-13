@@ -39,12 +39,14 @@ bash launch.sh
 ```bash
 git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
-cp .env.example .env        # add your API keys
+cp -n .env.example .env
+cp -n config/app.yaml.example config/app.yaml
+# Edit llm_presets/default_llm in config/app.yaml and keys in .env on the host
 docker compose up -d
 # open http://localhost:7788 in a browser
 ```
 
-The block above uses macOS/Linux shell syntax. In PowerShell use `Copy-Item .env.example .env`, or `copy .env.example .env` in CMD (new installs only).
+The block above uses macOS/Linux shell syntax and preserves existing configuration. In PowerShell use `Copy-Item .env.example .env` and `Copy-Item config/app.yaml.example config/app.yaml`, or CMD `copy` equivalents, **only for files that do not yet exist**. Configure presets and keys on the host as described under **Configuring API keys**; after changes run `docker compose restart shikigami`.
 
 `data/`, `profiles/`, `models/`, `Voices/`, and `config/` are mounted as volumes; `.env` is read-only, so edit keys on the host. Before recreating an older container, migrate any container-only `/app/data` as described under [Upgrading](#upgrading-from-v0110). GPU optional: uncomment `deploy.resources` in `docker-compose.yml` (requires nvidia-container-toolkit).
 
@@ -74,7 +76,7 @@ Check which Python the init script selects. If it chooses a different version, u
 
 ### Node.js 18+ (Electron desktop only)
 
-If you only need **browser mode** (`python server.py` + browser at `http://localhost:7788`), skip this.
+For **browser mode**, skip Node. From the project root run `.\.venv\Scripts\python.exe server.py` on Windows or `.venv/bin/python server.py` on macOS/Linux, then open `http://localhost:7788`.
 
 **Windows**: [nodejs.org](https://nodejs.org/) LTS, or [nvm-windows](https://github.com/coreybutler/nvm-windows) → `nvm install lts` → `nvm use lts`
 **macOS / Linux**: `brew install node` or `nvm install --lts`
@@ -92,7 +94,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 copy .env.example .env
 copy config\app.yaml.example config\app.yaml
-.venv\Scripts\python server.py
+.venv\Scripts\python.exe server.py
 ```
 
 **macOS / Linux**
@@ -111,7 +113,9 @@ Copy templates only on a **new install**; preserve existing configuration during
 
 ## Configuring API keys
 
-**Recommended**: open **Settings → Models**, choose or create a preset, fill in its provider, model ID, base URL and API key, save and test the connection, then select it for chat. Local models need a running endpoint and its actual installed model ID. In Docker, edit keys in the read-only-mounted `.env` on the host; a failed UI save does not mean the key was persisted.
+**Source installs**: open **Settings → Models**, choose or create a preset, fill in its provider, model ID, base URL and API key, save and test the connection, then select it for chat. Local models need a running endpoint and its actual installed model ID.
+
+**Docker**: configure `llm_presets` and `default_llm` in the host `config/app.yaml`, and the matching keys in the host `.env` (e.g. preset `Gemini` → `GEMINI_API_KEY`). Copy `config/app.yaml.example` only if `config/app.yaml` is missing; preserve existing configuration. Creating or saving a UI preset also writes `.env`, and its read-only mount can fail the whole save. Use host files for preset changes, then run `docker compose restart shikigami`.
 
 Alternatively, edit `.env` in the project root before launching (useful for Docker / headless deployments):
 
@@ -209,12 +213,21 @@ If you get **`EPERM: operation not permitted`**: close any process locking `node
 
 ### Browser mode only (skip Electron)
 
-You can skip Node.js entirely:
+You can skip Node.js entirely. After init, run from the project root using its virtual environment:
+
+**Windows (PowerShell)**
+
+```powershell
+.\.venv\Scripts\python.exe server.py
+```
+
+**macOS / Linux**
 
 ```bash
-python server.py
-# open http://localhost:7788
+.venv/bin/python server.py
 ```
+
+Then open `http://localhost:7788`. Bare `python server.py` is appropriate only after activating this project's virtual environment.
 
 ---
 

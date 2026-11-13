@@ -13,9 +13,9 @@
 | Step | What to do | Where |
 |:---:|:---|:---|
 | **1** | Configure at least **one chat model** (cloud API key or local base URL) | Settings → **Models** |
-| **2** | Have at least **one persona card** (use the AI Wizard to generate one from a description) | Settings → **Profiles** |
+| **2** | Open a persona card (built-in or made with the AI Wizard), check **Load to chat**, then select that character in the left sidebar | Settings → **Profiles**, then the chat sidebar |
 
-Steps **1 + 2** are all you need to start chatting in the main window.
+Steps **1 + 2** are all you need to start chatting in the main window. Selecting a card in Settings only opens it for editing; **Load to chat** adds it to the chat list. For Docker, configure presets and keys in host files as described in [first-run setup](./SETUP_FIRST_RUN.en.md#configuring-api-keys), because UI preset saves also write the read-only-mounted `.env`.
 
 > Environment not set up yet? See [SETUP_FIRST_RUN.en.md](./SETUP_FIRST_RUN.en.md).
 > Can't reach Gemini / OpenAI from your network? See the **Proxy** section below.

@@ -150,12 +150,14 @@ bash launch.sh
 ```bash
 git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
-cp .env.example .env   # add your API keys
+cp -n .env.example .env
+cp -n config/app.yaml.example config/app.yaml
+# Edit llm_presets/default_llm in config/app.yaml and keys in .env on the host
 docker compose up -d
 # open http://localhost:7788
 ```
 
-This block uses macOS/Linux shell syntax; in PowerShell use `Copy-Item .env.example .env`, or `copy .env.example .env` in CMD (new installs only).
+This block uses macOS/Linux shell syntax and preserves existing configuration. In PowerShell use `Copy-Item .env.example .env` and `Copy-Item config/app.yaml.example config/app.yaml`, or CMD `copy` equivalents, **only for files that do not yet exist**.
 
 `data/`, `profiles/`, `models/`, `Voices/`, `config/` are mounted as volumes. `.env` is mounted read-only: edit its keys on the host. This starts the **main application and Web UI**; the supplied image has no Docker CLI and Compose does not mount a Docker socket, so it does **not** enable Harness. Use the host source setup for Harness; see [first-run setup](docs/SETUP_FIRST_RUN.en.md). Uncomment `deploy.resources` in `docker-compose.yml` for GPU support (requires nvidia-container-toolkit).
 
@@ -163,11 +165,13 @@ This block uses macOS/Linux shell syntax; in PowerShell use `Copy-Item .env.exam
 
 ### API keys
 
-Open **Settings → Models**, save a preset with its provider, model ID, API key and base URL (for a local model, use its running OpenAI-compatible endpoint), then select it for chat. Or edit `llm_presets` / `default_llm` in `config/app.yaml` and the matching key in `.env`, e.g. `GEMINI_API_KEY`. Docker uses a read-only `.env`; edit keys on the host. Basic chat requires neither Docker nor Harness when running from source.
+For source installs, open **Settings → Models**, save a preset with its provider, model ID, API key and base URL (for a local model, use its running OpenAI-compatible endpoint), then select it for chat. Or edit `llm_presets` / `default_llm` in `config/app.yaml` and the matching key in `.env`, e.g. preset `Gemini` → `GEMINI_API_KEY`. Basic chat requires neither Docker nor Harness when running from source.
+
+**Docker:** configure both `llm_presets` / `default_llm` in the host `config/app.yaml` and keys in the host `.env`. Copy `config/app.yaml.example` only if `config/app.yaml` is missing. Creating or saving a preset in the UI also writes `.env`; its read-only mount can fail the whole save. Use host files for preset changes, then run `docker compose restart shikigami`.
 
 ### Pick a persona
 
-**Settings → Profiles** — choose `Luna` or `Mochi` to start.
+In **Settings → Profiles**, open `Luna` or `Mochi` and check **Load to chat**, then select that character in the left sidebar to chat. Selecting a card in Settings only opens it for editing.
 
 ### Enable tools (optional)
 
@@ -182,7 +186,7 @@ Stop the app and tool tasks, and back up the matching old source plus `.env`, al
 > For complex issues see the [full setup guide](docs/SETUP_FIRST_RUN.en.md).
 
 - **Blank page or can't connect on :7788** — the backend may still be starting; check the terminal output and refresh once the service is ready. If it still fails, look for the specific error.
-- **Invalid API key / no response** — the variable name in `.env` must match the preset name in `config/app.yaml` (e.g. preset `Gemini-2.5` → variable `GEMINI_2_5_API_KEY`).
+- **Invalid API key / no response** — the variable name in `.env` must match the preset name in `config/app.yaml` (e.g. preset `Gemini` → variable `GEMINI_API_KEY`).
 - **Memory not extracting** — enable memory in **Settings → Memory settings**, check the selected character's fact-extraction model and extraction frequency there, and test that model's saved preset under **Models**. Extraction runs after the configured number of conversation turns; ChromaDB is not required. Optional vector retrieval improves semantic lookup separately: install `chromadb` via **Settings → First steps**, configure embeddings, then enable vectors in Memory settings.
 - **No TTS audio** — `edge_tts` (default) requires an internet connection; local engines (KokoroTTS / GPT-SoVITS) need separate installation and configuration via First steps.
 - **Electron crashes or won't start on Windows** — run `init.bat` first. If it reports an invalid or outdated `.venv`, close the app, back up or rename that environment (e.g. `.venv-old`), then rerun `init.bat` to create a new one; keep the old environment for rollback.

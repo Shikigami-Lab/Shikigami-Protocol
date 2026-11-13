@@ -150,12 +150,14 @@ bash launch.sh
 ```bash
 git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
-cp .env.example .env   # 填入 API Key
+cp -n .env.example .env
+cp -n config/app.yaml.example config/app.yaml
+# 在宿主机编辑 config/app.yaml 的 llm_presets/default_llm 与 .env 密钥
 docker compose up -d
 # 访问 http://localhost:7788
 ```
 
-上方使用 macOS/Linux shell 语法；PowerShell 改用 `Copy-Item .env.example .env`，CMD 用 `copy .env.example .env`（仅首次安装时复制）。
+上方使用 macOS/Linux shell 语法，并保留已有配置。PowerShell 改用 `Copy-Item .env.example .env` 和 `Copy-Item config/app.yaml.example config/app.yaml`，CMD 使用对应 `copy` 命令，**仅复制尚不存在的目标文件**。
 
 `data/`、`profiles/`、`models/`、`Voices/`、`config/` 已挂载为 volume。`.env` 为只读挂载，密钥需在宿主机编辑。此方式启动的是**主应用与 Web UI**；现有镜像未含 Docker CLI，Compose 也未挂载 Docker 套接字，不能据此直接启用 Harness。使用 Harness 请按[首次运行文档](docs/SETUP_FIRST_RUN.zh.md)在宿主机运行源码。GPU 可选：取消注释 `docker-compose.yml` 中 `deploy.resources`。
 
@@ -170,11 +172,13 @@ GEMINI_API_KEY=你的密钥
 # 或本地 Ollama：OLLAMA_LOCAL_API_KEY=ollama
 ```
 
-在 **设置 → 模型** 中保存预设的提供方、模型 ID、API Key 和 Base URL（本地模型填写已运行的 OpenAI 兼容接口），再选择用于聊天的预设。手动配置时，对应修改 `config/app.yaml` 的 `llm_presets` / `default_llm` 与 `.env` 的密钥。Docker 中 `.env` 为只读挂载，密钥在宿主机编辑。源码基础聊天无需 Docker 或 Harness。
+源码运行时，在 **设置 → 模型** 中保存预设的提供方、模型 ID、API Key 和 Base URL（本地模型填写已运行的 OpenAI 兼容接口），再选择用于聊天的预设。手动配置时，对应修改 `config/app.yaml` 的 `llm_presets` / `default_llm` 与 `.env` 的密钥，如 `Gemini` → `GEMINI_API_KEY`。源码基础聊天无需 Docker 或 Harness。
+
+**Docker**：在宿主机 `config/app.yaml` 配置 `llm_presets` / `default_llm`，并在宿主机 `.env` 填密钥；仅当 `app.yaml` 不存在时从 `config/app.yaml.example` 复制。UI 创建或保存预设也会联动写入 `.env`，只读挂载可能使整次保存失败。请通过宿主文件修改预设，保存后执行 `docker compose restart shikigami`。
 
 ### 选择角色开始对话
 
-启动后进入 **设置 → 人格**，选择 `月白 Luna` 或 `Mochi`。
+在**设置 → 人格**打开 `月白 Luna` 或 `Mochi`，勾选**加载到聊天**，再到左侧栏选择该角色开始对话。设置中仅选中卡片只是打开编辑。
 
 ### 启用工具（可选）
 
@@ -189,7 +193,7 @@ AI 工具、各项可选能力与自省发起任务均**默认关闭**。Harness
 > 遇到复杂问题建议直接查阅 [完整安装文档](docs/SETUP_FIRST_RUN.zh.md)。
 
 - **启动后浏览器显示空白或无法连接**：后端可能尚未启动完成，查看终端输出，待服务就绪后刷新页面。若仍失败，查看具体报错信息。
-- **API Key 无效 / 无法对话**：`.env` 中的变量名须与 `config/app.yaml` 里 `llm_presets` 的预设名对应（如预设名为 `Gemini-2.5`，则变量名为 `GEMINI_2_5_API_KEY`）。
+- **API Key 无效 / 无法对话**：`.env` 中的变量名须与 `config/app.yaml` 里 `llm_presets` 的预设名对应（如预设名为 `Gemini`，则变量名为 `GEMINI_API_KEY`）。
 - **记忆未提取**：先在**设置 → 记忆设置**启用记忆，核对所选人格的事实提取模型与提取轮次，再到**模型**测试该预设的连接。事实提取在达到配置轮次后执行，不需要 ChromaDB。向量仅单独改善语义检索：按需在**设置 → 新手引导**安装 `chromadb`、配置嵌入，再在记忆设置启用向量。
 - **TTS 没声音**：默认使用 `edge_tts`，需要网络连接；本地 TTS 引擎（KokoroTTS / GPT-SoVITS）需在新手引导中单独安装配置。
 - **Windows Electron 闪退 / 启动失败**：先运行 `init.bat`；若提示 `.venv` 无效或过旧，退出应用后先备份或重命名旧环境（如 `.venv-old`），再运行 `init.bat` 新建环境，保留旧环境以便回退。

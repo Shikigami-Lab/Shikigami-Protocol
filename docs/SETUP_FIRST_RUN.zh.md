@@ -39,12 +39,14 @@ bash launch.sh
 ```bash
 git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
-cp .env.example .env        # 填写 API Key
+cp -n .env.example .env
+cp -n config/app.yaml.example config/app.yaml
+# 在宿主机编辑 config/app.yaml 的 llm_presets/default_llm 与 .env 密钥
 docker compose up -d
 # 浏览器打开 http://localhost:7788
 ```
 
-上方为 macOS/Linux shell 语法；PowerShell 使用 `Copy-Item .env.example .env`，CMD 使用 `copy .env.example .env`（仅首次安装时复制）。
+上方为 macOS/Linux shell 语法，并保留已有配置。PowerShell 使用 `Copy-Item .env.example .env` 和 `Copy-Item config/app.yaml.example config/app.yaml`，CMD 使用对应 `copy` 命令，**仅复制尚不存在的目标文件**。按下方「配置 API Key」在宿主机配置预设与密钥，修改后执行 `docker compose restart shikigami`。
 
 `data/`、`profiles/`、`models/`、`Voices/`、`config/` 已挂载为 volume；`.env` 为只读挂载，API Key 需在宿主机编辑。旧容器若仍有只存在 `/app/data` 中的数据，须按[升级步骤](#upgrade-v0110)先迁出再重建。GPU 可选：取消注释 `docker-compose.yml` 中的 `deploy.resources`（需 nvidia-container-toolkit）。
 
@@ -74,7 +76,7 @@ docker compose up -d
 
 ### Node.js 18+（仅 Electron 桌面版需要）
 
-若只用**浏览器模式**（`python server.py` + 浏览器访问 `http://localhost:7788`），可跳过此项。
+若只用**浏览器模式**，可跳过 Node。在项目根目录，Windows 执行 `.\.venv\Scripts\python.exe server.py`，macOS/Linux 执行 `.venv/bin/python server.py`，再访问 `http://localhost:7788`。
 
 **Windows**：[nodejs.org](https://nodejs.org/) LTS，或 [nvm-windows](https://github.com/coreybutler/nvm-windows) → `nvm install lts` → `nvm use lts`
 **macOS / Linux**：`brew install node` 或 `nvm install --lts`
@@ -92,7 +94,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 copy .env.example .env
 copy config\app.yaml.example config\app.yaml
-.venv\Scripts\python server.py
+.venv\Scripts\python.exe server.py
 ```
 
 **macOS / Linux**
@@ -111,7 +113,9 @@ cp config/app.yaml.example config/app.yaml
 
 ## 配置 API Key
 
-**推荐**：打开**设置 → 模型**，选择或新建预设，填写提供方、模型 ID、Base URL 和 API Key，保存并测试连接，再选择用于聊天的预设。本地模型需先运行接口，并填写实际已安装的模型名。Docker 的 `.env` 为只读挂载，需在宿主机编辑；界面提示密钥保存失败时不代表已写入。
+**源码运行**：打开**设置 → 模型**，选择或新建预设，填写提供方、模型 ID、Base URL 和 API Key，保存并测试连接，再选择用于聊天的预设。本地模型需先运行接口，并填写实际已安装的模型名。
+
+**Docker**：在宿主机 `config/app.yaml` 配置 `llm_presets` / `default_llm`，并在宿主机 `.env` 填对应密钥（如 `Gemini` → `GEMINI_API_KEY`）。仅当 `app.yaml` 不存在时从 `config/app.yaml.example` 复制，保留已有配置。UI 创建或保存预设也会联动写入 `.env`，只读挂载可能使整次保存失败。请通过宿主文件修改预设，保存后执行 `docker compose restart shikigami`。
 
 也可在启动前编辑项目根目录的 `.env`（适合 Docker / 无界面部署）：
 
@@ -213,12 +217,21 @@ npm install
 
 ### 只需后端 / 不用 Electron
 
-可以完全跳过 Node.js：
+可以完全跳过 Node.js。完成 init 后，在项目根目录使用项目虚拟环境：
+
+**Windows（PowerShell）**
+
+```powershell
+.\.venv\Scripts\python.exe server.py
+```
+
+**macOS / Linux**
 
 ```bash
-python server.py
-# 然后浏览器访问 http://localhost:7788
+.venv/bin/python server.py
 ```
+
+然后访问 `http://localhost:7788`。只有已激活本项目虚拟环境时，才使用裸 `python server.py`。
 
 ---
 
