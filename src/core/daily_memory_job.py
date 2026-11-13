@@ -96,8 +96,18 @@ def _load_daily_progress(storage_root: str, day: str) -> dict:
     try:
         with open(os.path.join(storage_root, _DAILY_PROGRESS_FILE), encoding="utf-8") as f:
             state = json.load(f)
-        if isinstance(state, dict) and state.get("day") == day and isinstance(state.get("jobs"), dict):
-            return state
+        if isinstance(state, dict) and isinstance(state.get("day"), str) and isinstance(state.get("jobs"), dict):
+            pending = [state["jobs"].get(name, {}) for name in ("summary", "portrait", "index")]
+            retryable = any(item.get("status") != "completed"
+                            and item.get("attempts", 0) < _DAILY_MAX_ATTEMPTS for item in pending)
+            marker_pending = (all(item.get("status") == "completed" for item in pending)
+                              and _load_last_daily_run(storage_root) != state["day"])
+            # Midnight changes the scheduler's date, not the identity of work
+            # still awaiting a retry or its final completion-marker write.
+            if state["day"] == day or (state["day"] < day and (retryable or marker_pending)):
+                if "target_date" not in state:
+                    state["target_date"] = (date.fromisoformat(state["day"]) - timedelta(days=1)).isoformat()
+                return state
     except (OSError, ValueError, TypeError):
         pass
     return {"day": day, "jobs": {}}
@@ -105,7 +115,7 @@ def _load_daily_progress(storage_root: str, day: str) -> dict:
 
 def _daily_retry_due(storage_root: str, now: datetime) -> bool:
     state = _load_daily_progress(storage_root, now.date().isoformat())
-    if not state["jobs"] or _load_last_daily_run(storage_root) == now.date().isoformat():
+    if not state["jobs"] or _load_last_daily_run(storage_root) == state["day"]:
         return False
     pending = [state["jobs"].get(name, {}) for name in ("summary", "portrait", "index")]
     if all(item.get("status") == "completed" for item in pending):
@@ -450,14 +460,16 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
         return
 
     today_str = date.today().strftime("%Y-%m-%d")
-    if _load_last_daily_run(session.storage_root) == today_str:
+    progress = _load_daily_progress(session.storage_root, today_str)
+    run_day = progress["day"]
+    if _load_last_daily_run(session.storage_root) == run_day:
         logger.debug("[daily_memory_job] profile %s 今天已跑过每日任务，跳过", profile_id)
         return
 
-    progress = _load_daily_progress(session.storage_root, today_str)
+    target_date = progress.setdefault("target_date", yesterday)
     errors = []
     jobs = (
-        ("summary", lambda: run_day_summary_for_profile(profile_id, yesterday, app)),
+        ("summary", lambda: run_day_summary_for_profile(profile_id, target_date, app)),
         ("portrait", lambda: run_portrait_refresh_for_profile(profile_id, app)),
         ("index", lambda: run_fact_index_maintenance(profile_id, app)),
     )
@@ -478,7 +490,7 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
         }
         _atomic_daily_state(session.storage_root, _DAILY_PROGRESS_FILE, progress)
     if all(progress["jobs"].get(name, {}).get("status") == "completed" for name, _ in jobs):
-        _save_last_daily_run(session.storage_root, today_str)
+        _save_last_daily_run(session.storage_root, run_day)
     if errors:
         raise errors[0]
 

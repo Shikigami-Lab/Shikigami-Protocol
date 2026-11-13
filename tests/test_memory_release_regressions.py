@@ -1,7 +1,7 @@
 """Offline release regressions using temporary stores and synthetic model replies."""
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
@@ -400,3 +400,60 @@ class DailyRetryTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.summary.await_count, 2)
         self.assertEqual(self.portrait.await_count, 1)
         self.assertEqual(job._load_last_daily_run(self.root), job.date.today().isoformat())
+
+    async def test_midnight_scheduler_retry_keeps_original_target_and_completion_day(self):
+        self.summary.side_effect = [False, True, True]
+        self.portrait.return_value = True
+        before = datetime(2026, 11, 12, 23, 58)
+        after = datetime(2026, 11, 13, 0, 3)
+        with patch.object(job, "date", wraps=date) as calendar, \
+             patch.object(job, "datetime", wraps=datetime) as clock:
+            calendar.today.return_value = before.date()
+            clock.now.return_value = before
+            await job.run_daily_for_profile(maintenance.PROFILE, "2026-11-11", self.app)
+            self.assertFalse(job._daily_retry_due(self.root, after - timedelta(seconds=1)))
+            self.assertTrue(job._daily_retry_due(self.root, after))
+            calendar.today.return_value = after.date()
+            clock.now.return_value = after
+            with patch.object(job, "_catch_up_missed_runs", AsyncMock()), \
+                 patch.object(job.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)):
+                with self.assertRaises(asyncio.CancelledError):
+                    await job._run_daily_tasks_loop(self.app)
+            self.assertEqual([call.args[1] for call in self.summary.await_args_list],
+                             ["2026-11-11", "2026-11-11"])
+            self.assertEqual(self.portrait.await_count, 1)
+            self.assertEqual(self.manager.maintain_fact_index.await_count, 1)
+            self.assertEqual(job._load_last_daily_run(self.root), "2026-11-12")
+            # Today's distinct work remains eligible after yesterday's retry completes.
+            clock.now.return_value = after.replace(minute=5)
+            await job.run_daily_for_profile(maintenance.PROFILE, "2026-11-12", self.app)
+            self.assertEqual([call.args[1] for call in self.summary.await_args_list],
+                             ["2026-11-11", "2026-11-11", "2026-11-12"])
+            self.assertEqual(self.portrait.await_count, 2)
+            self.assertEqual(job._load_last_daily_run(self.root), "2026-11-13")
+
+    async def test_legacy_midnight_retry_preserves_attempt_limit_and_sibling_markers(self):
+        after = datetime(2026, 11, 13, 0, 3)
+        # Existing 9284059 progress has no explicit target_date field.
+        progress = {"day": "2026-11-12", "jobs": {
+            "summary": {"status": "failed", "attempts": 2, "retry_at": after.timestamp()},
+            "portrait": {"status": "completed", "attempts": 1, "retry_at": 0},
+            "index": {"status": "completed", "attempts": 1, "retry_at": 0},
+        }}
+        path = Path(self.root) / "daily_job_progress.json"
+        path.write_text(json.dumps(progress), encoding="utf-8")
+        self.summary.return_value = False
+        with patch.object(job, "date", wraps=date) as calendar, \
+             patch.object(job, "datetime", wraps=datetime) as clock:
+            calendar.today.return_value = after.date()
+            clock.now.return_value = after
+            self.assertTrue(job._daily_retry_due(self.root, after))
+            await job.run_daily_for_profile(maintenance.PROFILE, "2026-11-12", self.app)
+            self.summary.assert_awaited_once_with(maintenance.PROFILE, "2026-11-11", self.app)
+            self.portrait.assert_not_awaited()
+            self.manager.maintain_fact_index.assert_not_awaited()
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["jobs"]["summary"]["attempts"], 3)
+            self.assertEqual(saved["jobs"]["portrait"], progress["jobs"]["portrait"])
+            self.assertIsNone(job._load_last_daily_run(self.root))
+            self.assertFalse(job._daily_retry_due(self.root, after + timedelta(minutes=5)))
