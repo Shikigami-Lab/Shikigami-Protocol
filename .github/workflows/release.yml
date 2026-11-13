@@ -21,8 +21,11 @@ jobs:
   source-package:
     uses: ./.github/workflows/source-package.yml
 
+  harness-smoke:
+    uses: ./.github/workflows/harness-platforms.yml
+
   release:
-    needs: [unit-tests, docker-smoke, source-package]
+    needs: [unit-tests, docker-smoke, source-package, harness-smoke]
     if: ${{ success() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
@@ -32,7 +35,7 @@ jobs:
       - name: Download tested Linux source package
         uses: actions/download-artifact@v4
         with:
-          name: source-package-Linux-${{ github.sha }}
+          name: source-package-Linux-X64-${{ github.sha }}
           path: tested-source
 
       - name: Create GitHub Release

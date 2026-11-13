@@ -1,0 +1,52 @@
+name: Harness Platform Acceptance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build the native tool runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/harness-acceptance"
+          docker build --tag shikigami-harness:platform-test integrations/deepseek-harness 2>&1 | tee "$RUNNER_TEMP/harness-acceptance/build.log"
+
+      - name: Exercise the real Harness with offline model and tool fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect --format '{{.Architecture}}' shikigami-harness:platform-test | tee "$RUNNER_TEMP/harness-acceptance/architecture.log"
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 256 --memory 1g --cpus 2 \
+            --tmpfs /tmp:rw,exec,nosuid,nodev \
+            --tmpfs /workspace:rw,nosuid,nodev,uid=1000,gid=1000 \
+            --tmpfs /home/tester:rw,exec,nosuid,nodev,uid=1000,gid=1000 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/integrations/deepseek-harness,target=/opt/contract,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/src/agent,target=/opt/app/src/agent,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/src/llm/message_normalization.py,target=/opt/app/src/llm/message_normalization.py,readonly" \
+            shikigami-harness:platform-test python /opt/contract/tests/smoke.py 2>&1 | tee "$RUNNER_TEMP/harness-acceptance/protocol.log"
+
+      - name: Preserve architecture and protocol evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-${{ runner.arch }}-${{ github.sha }}
+          path: ${{ runner.temp }}/harness-acceptance/*.log
+          if-no-files-found: error
+          retention-days: 14
