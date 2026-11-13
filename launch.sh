@@ -48,21 +48,15 @@ else
     exit 1
 fi
 
-SRV_PORT=7788
-
-# Open browser after server starts (~3s)
-(
-    sleep 3
-    URL="http://127.0.0.1:${SRV_PORT}"
-    if command -v open &>/dev/null; then          # macOS
-        open "$URL"
-    elif command -v xdg-open &>/dev/null; then    # Linux
-        xdg-open "$URL"
-    fi
-) &
+if ! "$PYTHON" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+    echo "  Error: Python 3.10+ required. Run bash init.sh first."
+    exit 1
+fi
 
 echo "  Python: $PYTHON"
-echo "  Server starting at http://127.0.0.1:${SRV_PORT}"
+# Validate the same config as the backend; never interpolate host into a shell.
+"$PYTHON" scripts/launch_browser.py
+"$PYTHON" scripts/launch_browser.py --open &
 echo "  Press Ctrl+C to stop."
 echo ""
 

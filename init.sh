@@ -18,8 +18,7 @@ echo ""
 PYTHON=""
 for candidate in python3.12 python3.13 python3.11 python3.10 python3 python; do
     if command -v "$candidate" &>/dev/null; then
-        ver=$("$candidate" -c "import sys; print(sys.version_info[:2])" 2>/dev/null || true)
-        if [[ -n "$ver" ]]; then
+        if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
             PYTHON=$(command -v "$candidate")
             PYVER=$("$candidate" --version 2>&1)
             break
@@ -28,8 +27,8 @@ for candidate in python3.12 python3.13 python3.11 python3.10 python3 python; do
 done
 
 if [[ -z "$PYTHON" ]]; then
-    echo "  ERROR: Python not found."
-    echo "  Install Python 3.12+: https://www.python.org/downloads/"
+    echo "  ERROR: Python 3.10+ not found."
+    echo "  Install Python 3.12 (recommended): https://www.python.org/downloads/"
     exit 1
 fi
 
@@ -40,18 +39,18 @@ echo ""
 # ── 2. Create / validate .venv ────────────────────────────────────────────────
 NEED_VENV=1
 if [[ -f ".venv/bin/python" ]]; then
-    if ".venv/bin/python" --version &>/dev/null; then
+    if ".venv/bin/python" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" &>/dev/null; then
         NEED_VENV=0
     fi
 fi
 
 if [[ "$NEED_VENV" -eq 1 ]]; then
-    if [[ -d ".venv" ]]; then
-        echo "  [2/4] Existing .venv invalid or from another system, recreating..."
-        rm -rf .venv
-    else
-        echo "  [2/4] Creating .venv ..."
+    if [[ -e ".venv" || -L ".venv" ]]; then
+        echo "  ERROR: Existing .venv is invalid or uses Python older than 3.10."
+        echo "  Move it aside, then run bash init.sh again. Nothing was deleted."
+        exit 1
     fi
+    echo "  [2/4] Creating .venv ..."
     "$PYTHON" -m venv .venv
     echo "         Done."
 else
@@ -62,7 +61,7 @@ echo ""
 # ── 3. Install Python deps ────────────────────────────────────────────────────
 echo "  [3/4] pip install -r requirements.txt ..."
 echo ""
-.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements.txt
 echo "         Done."
 echo ""
 
@@ -75,7 +74,10 @@ if [[ -f "package.json" ]]; then
     if [[ "$NEED_NPM" -eq 1 ]]; then
         if command -v node &>/dev/null; then
             echo "  [4/4] npm install ..."
-            npm install
+            if ! npm install; then
+                echo "  ERROR: npm install failed. Retry bash init.sh to finish desktop setup."
+                exit 1
+            fi
             echo ""
         else
             echo "  [4/4] Node.js not found, skipping npm install."

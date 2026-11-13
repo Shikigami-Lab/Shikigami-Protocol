@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal DisableDelayedExpansion
 set PYTHONUTF8=1
 title Shikigami Protocol - First-time setup
-cd /d "%~dp0"
+cd /d "%~dp0" || goto setup_failed
 
 echo.
 echo   +--------------------------------------------+
@@ -17,29 +17,29 @@ rem     Prefer 3.12/3.13: ML packages (tokenizers, torch) lack 3.14 wheels
 set PYTHON=
 where py >nul 2>&1
 if %errorlevel% equ 0 (
-    for /f "delims=" %%e in ('py -3.12 -c "import sys; print(sys.executable)" 2^>nul') do set PYTHON=%%e
+    for /f "delims=" %%e in ('py -3.12 -c "import sys; sys.exit(1) if sys.version_info < (3, 10) else None; print(sys.executable)" 2^>nul') do set "PYTHON=%%e"
     if not defined PYTHON (
-        for /f "delims=" %%e in ('py -3.13 -c "import sys; print(sys.executable)" 2^>nul') do set PYTHON=%%e
+        for /f "delims=" %%e in ('py -3.13 -c "import sys; sys.exit(1) if sys.version_info < (3, 10) else None; print(sys.executable)" 2^>nul') do set "PYTHON=%%e"
     )
     if not defined PYTHON (
-        for /f "delims=" %%e in ('py -3 -c "import sys; print(sys.executable)" 2^>nul') do set PYTHON=%%e
+        for /f "delims=" %%e in ('py -3 -c "import sys; sys.exit(1) if sys.version_info < (3, 10) else None; print(sys.executable)" 2^>nul') do set "PYTHON=%%e"
     )
 )
 if not defined PYTHON (
     where python >nul 2>&1
-    if %errorlevel% equ 0 (
-        for /f "delims=" %%e in ('python -c "import sys; print(sys.executable)" 2^>nul') do set PYTHON=%%e
+    if not errorlevel 1 (
+        for /f "delims=" %%e in ('python -c "import sys; sys.exit(1) if sys.version_info < (3, 10) else None; print(sys.executable)" 2^>nul') do set "PYTHON=%%e"
     )
 )
 rem Fallback: common Windows paths when Python not on PATH
 if not defined PYTHON (
-    for %%v in (312 311 310 313 39) do (
-        if not defined PYTHON if exist "%LocalAppData%\Programs\Python\Python%%v\python.exe" set PYTHON=%LocalAppData%\Programs\Python\Python%%v\python.exe
-        if not defined PYTHON if exist "%ProgramFiles%\Python%%v\python.exe" set PYTHON=%ProgramFiles%\Python%%v\python.exe
+    for %%v in (312 313 311 310) do (
+        if not defined PYTHON if exist "%LocalAppData%\Programs\Python\Python%%v\python.exe" set "PYTHON=%LocalAppData%\Programs\Python\Python%%v\python.exe"
+        if not defined PYTHON if exist "%ProgramFiles%\Python%%v\python.exe" set "PYTHON=%ProgramFiles%\Python%%v\python.exe"
     )
 )
 if not defined PYTHON (
-    echo   ERROR: Python not found.
+    echo   ERROR: Python 3.10+ not found.
     echo.
     echo   Possible reasons:
     echo   - Python not installed. Download: https://www.python.org/downloads/
@@ -47,32 +47,37 @@ if not defined PYTHON (
     echo   - PATH not updated in this window. Close and open a NEW CMD, then run init.bat again.
     echo.
     pause
-    exit /b 1
+    goto setup_failed
 )
 
-for /f "delims=" %%v in ('"%PYTHON%" --version 2^>^&1') do set PYVER=%%v
+"%PYTHON%" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo   ERROR: Python 3.10+ required.
+    goto setup_failed
+)
+for /f "delims=" %%v in ('call "%PYTHON%" --version 2^>^&1') do set "PYVER=%%v"
 echo   [1/4] Using Python: %PYVER%
-echo          %PYTHON%
+echo          "%PYTHON%"
 echo.
 
-rem --- 2. Create or recreate .venv ---
+rem --- 2. Create or validate .venv without deleting user environments ---
 set NEED_VENV=1
 if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" --version >nul 2>&1
+    ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
     if not errorlevel 1 set NEED_VENV=0
 )
 if %NEED_VENV% equ 1 (
     if exist ".venv" (
-        echo   [2/4] Existing .venv invalid or from another PC, recreating...
-        rd /s /q .venv
-    ) else (
-        echo   [2/4] Creating .venv ...
+        echo   ERROR: Existing .venv is invalid or uses Python older than 3.10.
+        echo   Move it aside, then run init.bat again. Nothing was deleted.
+        goto setup_failed
     )
+    echo   [2/4] Creating .venv ...
     "%PYTHON%" -m venv .venv
     if errorlevel 1 (
         echo   ERROR: Failed to create venv.
         pause
-        exit /b 1
+        goto setup_failed
     )
     echo         Done.
 ) else (
@@ -83,11 +88,11 @@ echo.
 rem --- 3. Install Python deps ---
 echo   [3/4] pip install -r requirements.txt ...
 echo.
-call .venv\Scripts\pip install -r "requirements.txt"
+".venv\Scripts\python.exe" -m pip install -r "requirements.txt"
 if errorlevel 1 (
     echo   ERROR: pip install failed. Check network or retry later.
     pause
-    exit /b 1
+    goto setup_failed
 )
 echo         Done.
 echo.
@@ -105,6 +110,10 @@ if %_NEED_NPM% equ 1 (
         if not defined ELECTRON_MIRROR set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
         echo   [4/4] npm install ...
         call npm install
+        if errorlevel 1 (
+            echo   ERROR: npm install failed. Retry init.bat to finish desktop setup.
+            goto setup_failed
+        )
         echo.
     ) else (
         echo   [4/4] Node.js not found, skipping npm install.
@@ -157,3 +166,7 @@ echo   +--------------------------------------+
 echo.
 echo   Press any key to close this window...
 pause >nul
+exit /b 0
+
+:setup_failed
+exit /b 1

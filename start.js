@@ -14,18 +14,23 @@
 process.env.NODE_ENV = 'development';
 
 const { spawn } = require('child_process');
-const path = require('path');
 
-const electronBin = path.join(
-  __dirname,
-  'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'electron.cmd' : 'electron'
-);
+try {
+  // electron exports its real executable path; Windows .cmd shims cannot
+  // be spawned directly by Node without a shell.
+  const electronBin = require('electron');
+  const child = spawn(electronBin, ['.'], {
+    cwd: __dirname,
+    stdio: 'inherit',
+    env: { ...process.env, NODE_ENV: 'development' },
+  });
 
-const child = spawn(electronBin, ['.'], {
-  stdio: 'inherit',
-  env: { ...process.env, NODE_ENV: 'development' },
-});
-
-child.on('exit', (code) => process.exit(code ?? 0));
+  child.on('error', (error) => {
+    console.error('Unable to start Electron. Run npm install and retry:', error.message);
+    process.exit(1);
+  });
+  child.on('exit', (code) => process.exit(code ?? 0));
+} catch (error) {
+  console.error('Unable to load Electron. Run npm install and retry:', error.message);
+  process.exit(1);
+}
