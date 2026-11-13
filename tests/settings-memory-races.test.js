@@ -120,7 +120,7 @@ test('failed history paging retries the same offset and keeps the applied search
 });
 
 test('incomplete compression reports that reset can continue without refreshing the context marker', async () => {
-  const { model, toasts } = harness(async () => response({ ok: false, reason: 'compression_incomplete' }));
+  const { model, toasts } = harness(async () => ({ ...response({ ok: false, reason: 'compression_incomplete' }, false), status: 409 }));
   model.t = key => ({
     memResetFailed: 'Reset failed. {error}',
     memReset_compression_incomplete: 'Some dialogue remains. Retry the reset to continue.',

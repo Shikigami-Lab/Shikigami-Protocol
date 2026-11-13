@@ -3079,9 +3079,8 @@ const SettingsMixin = {
     async _doClearShortMem(profileId) {
       try {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionHistoryRecent(profileId), { method: 'DELETE' });
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        if (!data.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
           const reasons = ['memory_manager_unavailable', 'compression_incomplete', 'compression_failed'];
           const message = reasons.includes(data.reason) ? this.t('memReset_' + data.reason) :
             (data.detail || data.error || this.t('toastSaveFailed'));

@@ -145,6 +145,9 @@ def get_merged_recent_messages(
         context_start_ts = store.get_context_start_ts(n_turns)
     except Exception:
         context_start_ts = 0.0
+    reset_cutoff = getattr(store, "context_since_ts", 0.0)
+    if isinstance(reset_cutoff, (int, float)):
+        context_start_ts = max(context_start_ts, reset_cutoff)
 
     combined: List[Dict[str, Any]] = []
     single_msgs = store.get_recent_with_ts(n_turns)
