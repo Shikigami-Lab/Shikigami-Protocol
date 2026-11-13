@@ -70,6 +70,7 @@ scripts/*
 !scripts/check_runtime_deps.py
 !scripts/build_binary.py
 !scripts/setup_wizard_helper.py
+!scripts/leak_check.py
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log

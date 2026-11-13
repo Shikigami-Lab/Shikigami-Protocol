@@ -8,6 +8,8 @@ services:
       - "7788:7788"
     volumes:
       # Persistent user data — survive container rebuilds
+      # Existing containers: copy /app/data into ./data before the first recreate.
+      - ./data:/app/data
       - ./profiles:/app/profiles
       - ./models:/app/models
       - ./Voices:/app/Voices
