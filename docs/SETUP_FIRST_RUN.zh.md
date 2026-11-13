@@ -9,13 +9,15 @@
 
 ## 快速路径
 
-**v0.12.0 Public Beta 正在 `dev` 准备，尚未正式发布。** 下方命令明确选择 `dev`；默认 `main` 与旧 [Release 压缩包](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 不包含这些更新。源码可运行 Electron 或浏览器模式，Docker 用于主应用 Web UI。目前没有 v0.12.0 预编译桌面安装包。本文说明运行要求，不代表所有平台、CPU 架构及可选组件均已验收。
+**v0.12.0 Public Beta**。推荐从 [v0.12.0 Release](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/tag/v0.12.0) 下载已验收的 **`source.zip`** 附件，解压后在解压目录执行安装命令。**`manifest.json`** 可选，仅用于校验下载完整性，记录版本、提交与 SHA-256 校验信息。下方克隆命令使用 `main`。源码可运行 Electron 或浏览器模式，Docker 用于主应用 Web UI；本次为源码发行，不提供预编译桌面安装包。
+
+Windows x64、Linux x64、macOS Apple Silicon / Intel 已通过干净安装、真实后端启动、重启、合成旧数据保留及 Electron 设置与聊天验收；Docker 与 Harness 的 x64 / ARM64 验收通过。聊天验收使用本机模拟模型；GPU、麦克风、在线音色列表及各云模型提供方未逐一验收。
 
 ### 源码运行
 
 #### Windows（PowerShell）
 ```powershell
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 .\init.bat
 .\launch.bat
@@ -28,7 +30,7 @@ cd Shikigami-Protocol
 ### macOS / Linux
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 bash init.sh
 bash launch.sh
@@ -37,7 +39,7 @@ bash launch.sh
 ### Docker（服务器 / NAS / 无 Electron）
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp -n .env.example .env
 cp -n config/app.yaml.example config/app.yaml

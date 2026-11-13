@@ -9,13 +9,15 @@ This doc covers: **Python / Node installation, `init.bat` / `init.sh`, Docker de
 
 ## Quick paths
 
-**v0.12.0 Public Beta is being prepared on `dev`, not yet released.** The commands below select `dev`; default `main` and older [Release archives](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) do not contain these updates. Use source for Electron or browser mode, or Docker for the main Web UI. No v0.12.0 pre-built desktop installer is available. These are setup requirements, not a guarantee that every platform, CPU architecture or optional component has passed acceptance.
+**v0.12.0 Public Beta**. Download the tested **`source.zip`** attachment from the [v0.12.0 Release](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/tag/v0.12.0), then extract the ZIP and run the setup commands from that directory. **`manifest.json`** is optional, for checking download integrity; it records the version, commit and SHA-256 checksums. The clone commands below use `main`. Use source for Electron or browser mode, or Docker for the main Web UI; this is a source release without pre-built desktop installers.
+
+Clean installs, real backend startup, restarts, synthetic older-data preservation, and Electron settings/chat passed on Windows x64, Linux x64 and macOS Apple Silicon / Intel. Docker and Harness passed on x64 / ARM64. Chat acceptance used a local simulated model; GPU, microphone, online voice lists and individual cloud providers were not each validated.
 
 ### Run from source
 
 #### Windows (PowerShell)
 ```powershell
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 .\init.bat
 .\launch.bat
@@ -28,7 +30,7 @@ cd Shikigami-Protocol
 ### macOS / Linux
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 bash init.sh
 bash launch.sh
@@ -37,7 +39,7 @@ bash launch.sh
 ### Docker (server / NAS / no Electron)
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp -n .env.example .env
 cp -n config/app.yaml.example config/app.yaml

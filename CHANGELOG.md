@@ -8,7 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Target: **v0.12.0 Public Beta** (not yet released; available for source testing on `dev`).
+## [0.12.0] — 2026-11-13
+
+**Public Beta**
 
 ### Added
 
@@ -28,17 +30,13 @@ Target: **v0.12.0 Public Beta** (not yet released; available for source testing 
 
 ### Fixed
 
-- [Tools] Match Harness container and temporary-directory UID/GID to the host application's user on macOS/Linux, avoiding workspace write failures for host IDs such as 501 or 1001. Cross-platform CI verification is pending.
+- [Tools] Match Harness container and temporary-directory UID/GID to the host application's user on macOS/Linux, avoiding workspace write failures for host IDs such as 501 or 1001.
 - [Tools] Add a bounded Yandex fallback when DuckDuckGo and Yahoo are unavailable, and report task timeout and model-request-limit failures separately.
 - [Memory] Preserve original message dates for fact extraction and portrait refreshes. Writers request fixed event dates and defer unresolved relative dates; chat and reflection distinguish memory update times from event dates without rewriting existing records.
 - [Tools] Complete the MCP SDK settings model before first use so its lifespan type resolves without a Pydantic warning.
 - [History] Original-chat search can locate the earliest saved chat day and read it in chronological pages. Results include local dates, paging bounds and an explicit continuation offset.
 - [Windows] A peer reset during asyncio transport shutdown (WinError 10054) no longer interrupts socket release or floods the server log with cleanup tracebacks. Other transport and application errors remain visible.
 - [Memory] Fixed propagation of shown fact IDs from prompt assembly to the single-chat handler. `build_messages` uses a new extras dict, so writes to `ctx.extras` were not returned through the caller's input dict; the explicit `out_extras` output now carries `shown_fact_ids` for recording in `used_fact_ids_by_date`. `daily_reinforcement_enabled` remains `false` by default. Weight decay is unaffected.
-
-### Planned
-
-### Known Issues
 
 ---
 

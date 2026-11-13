@@ -22,7 +22,7 @@
 
 </div>
 
-> ⚠️ **项目状态**：`dev` 正在准备 **v0.12.0 Public Beta，尚未正式发布**。本文介绍该开发版本；已发布版本见 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)。仍可能存在未知 Bug。欢迎在 [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) 中交流反馈。
+> ⚠️ **项目状态**：**v0.12.0 Public Beta**，下载见 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/tag/v0.12.0)。仍可能存在未知 Bug。欢迎在 [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) 中交流反馈。
 
 Shikigami Protocol 是陪你工作、学习的桌面伙伴，想带来像 Lofi Girl 一样的在场感，也能和你聊天、积累共同经历的记忆。后台服务运行且启用自省与主动发言后，角色会结合语境与内部状态，在满足触发条件时主动开口；你也可以和它聊图片、用语音交流，或在对话里查资料、记待办、设提醒。完全开源，AGPL-3.0 — **聊天记录、记忆提取与状态机数据保存在你的设备上**；**大模型推理与向量嵌入**可选用云端 API、完全本地（如 Ollama）或混合部署，由你在 `config/app.yaml` 与引导页里决定。
 
@@ -116,16 +116,16 @@ Shikigami 押的是**状态机、自省、主动性、记忆管线**的一体化
 - Node.js 18+（仅 Electron 桌面版需要）
 - 一个 LLM API：Gemini / OpenAI / Ollama / 任意 OpenAI 兼容接口
 
-**使用已发布版：下载对应 Release 压缩包**
+**推荐：下载 v0.12.0 源码包**
 
-前往 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)，选择已发布版本的 **Source code (zip)**，按包内说明安装。当前最新发布包尚不包含 v0.12.0。
+前往 [v0.12.0 Release](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/tag/v0.12.0)，下载已验收的 **`source.zip`** 附件。**`manifest.json`** 可选，仅用于校验下载完整性。解压后，在解压目录执行下方对应系统的启动命令。
 
-**体验即将发布的 v0.12.0：克隆 `dev`**
+**或克隆 `main`**
 
-Git 可选：也可在 GitHub 切换到 `dev` 分支，选择 **Code → Download ZIP**，解压后在解压目录执行下方对应系统的启动命令。
+下方命令使用 `main`；`dev` 用于持续开发。
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 ```
 
@@ -148,7 +148,7 @@ bash launch.sh
 ### 方式二：Docker（服务器 / NAS）
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp -n .env.example .env
 cp -n config/app.yaml.example config/app.yaml

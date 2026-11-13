@@ -22,7 +22,7 @@
 
 </div>
 
-> ⚠️ **Project Status**: Preparing **v0.12.0 Public Beta** on `dev` (not yet released). This README describes that development version; [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) lists published versions. Unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
+> ⚠️ **Project Status**: **v0.12.0 Public Beta**. Download it from [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/tag/v0.12.0). Unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
 
 Shikigami Protocol is a desktop companion for work and study, aiming for the feeling of having Lofi Girl alongside you — with someone you can talk to and build shared memories with. With the backend running and reflection and proactive speech enabled, the character uses context and internal state to start conversations when its trigger conditions are met; you can also discuss images, talk by voice, or look things up, keep todos, and set reminders within the conversation. Open-source, AGPL-3.0 — **conversation logs, memory, and engine state stay on your disk**; **LLM inference and embeddings** can be cloud APIs, fully local (e.g. Ollama), or a mix — your stack, your choice.
 
@@ -116,16 +116,16 @@ Shikigami bets on **state machines, reflection, proactivity, and an integrated m
 - Node.js 18+ (Electron desktop only)
 - An LLM API — Gemini / OpenAI / Ollama / any OpenAI-compatible endpoint
 
-**For a published version: download its release archive**
+**Recommended: download the v0.12.0 source package**
 
-Go to [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases), choose a published version and download **Source code (zip)**. Follow the instructions included in that archive; the latest published archive does not yet contain v0.12.0.
+Go to [v0.12.0 Release](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/tag/v0.12.0) and download the tested **`source.zip`** attachment. **`manifest.json`** is optional, for checking download integrity. Extract the ZIP and run the platform commands below from the extracted directory.
 
-**To try the upcoming v0.12.0: clone `dev`**
+**Or clone `main`**
 
-Git is optional: on GitHub select the `dev` branch, choose **Code → Download ZIP**, extract it, and run the platform commands below from the extracted directory.
+The commands below use `main`; `dev` is for ongoing development.
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 ```
 
@@ -148,7 +148,7 @@ bash launch.sh
 ### Option 2: Docker (server / NAS)
 
 ```bash
-git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch main https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp -n .env.example .env
 cp -n config/app.yaml.example config/app.yaml
