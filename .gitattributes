@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Source archives and checkouts must keep each platform's launchers executable.
+*.sh text eol=lf
+*.bat text eol=crlf
