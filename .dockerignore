@@ -77,6 +77,7 @@
 !src/agent/capabilities.py
 !src/agent/chat_routing.py
 !src/agent/context.py
+!src/agent/container_identity.py
 !src/agent/daily_report_delivery.py
 !src/agent/daily_reports.py
 !src/agent/link_store.py

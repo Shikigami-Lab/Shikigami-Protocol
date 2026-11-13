@@ -16,6 +16,7 @@ import uuid
 import httpx
 
 from src.agent.context import build_turn_context
+from src.agent.container_identity import container_identity
 from src.agent.link_store import LinkStore
 from src.agent.model_gateway import ModelGateway, ModelRequestLimitReached, model_route
 from src.agent.settings import normalize_settings
@@ -380,19 +381,21 @@ class AgentRuntime:
 
     def _command(self, run):
         bundle = self.bundle_root
+        uid, gid = container_identity()
         home = self.data_root / "harness" / run.id
         home.mkdir(parents=True, exist_ok=True)
         marker = self.data_root / 'cleanup' / (run.id + '.json')
         marker.parent.mkdir(exist_ok=True)
         marker.write_text(json.dumps({'profile_id': run.profile_id}), encoding='utf-8')
         workspace = (["--mount", f"type=bind,source={self.workspaces.directory(run.profile_id)},target=/workspace"]
-                     if run.access.get('workspace_enabled') else ["--tmpfs", "/workspace:rw,nosuid,nodev,uid=1000,gid=1000"])
+                     if run.access.get('workspace_enabled') else ["--tmpfs", f"/workspace:rw,nosuid,nodev,uid={uid},gid={gid}"])
         return ["docker", "run", "--rm", "-i", "--name", "shikigami-agent-" + run.id,
             "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--user", f"{uid}:{gid}", "--env", "HOME=/home/tester",
             "--pids-limit", "256", "--memory", "1g", "--cpus", "2",
             '--ulimit', 'fsize=10485760:10485760',
             "--tmpfs", "/tmp:rw,exec,nosuid,nodev", *workspace,
-            "--tmpfs", "/home/tester:rw,exec,nosuid,nodev,uid=1000,gid=1000",
+            "--tmpfs", f"/home/tester:rw,exec,nosuid,nodev,uid={uid},gid={gid}",
             "--mount", f"type=bind,source={bundle},target=/opt/agent,readonly",
             "--mount", f"type=bind,source={home},target=/harness",
             HARNESS_IMAGE, "python", "/opt/agent/worker.py"]

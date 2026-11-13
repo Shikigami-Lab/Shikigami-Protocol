@@ -55,3 +55,18 @@ class RuntimeWorkspaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any('source=' + str(self.runtime.root/'profiles') + ',' in m for m in mounts))
         self.assertFalse(any('todos.json' in m or 'workspace_index.json' in m for m in mounts))
         self.assertEqual(command[command.index('--network')+1], 'none')
+
+    async def test_container_matches_posix_owner_without_opening_workspace_permissions(self):
+        with patch('os.getuid', return_value=501, create=True), patch('os.getgid', return_value=20, create=True):
+            command = self.runtime._command(self.run)
+        self.assertIn('--user', command)
+        self.assertEqual(command[command.index('--user') + 1], '501:20')
+        self.assertIn('HOME=/home/tester', command)
+        self.assertIn('/home/tester:rw,exec,nosuid,nodev,uid=501,gid=20', command)
+        self.assertIn('--read-only', command)
+        self.assertEqual(command[command.index('--cap-drop') + 1], 'ALL')
+        self.assertEqual(command[command.index('--security-opt') + 1], 'no-new-privileges')
+        self.run.access['workspace_enabled'] = False
+        with patch('os.getuid', return_value=1001, create=True), patch('os.getgid', return_value=1001, create=True):
+            command = self.runtime._command(self.run)
+        self.assertIn('/workspace:rw,nosuid,nodev,uid=1001,gid=1001', command)

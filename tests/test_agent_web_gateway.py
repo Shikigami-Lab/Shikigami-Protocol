@@ -89,7 +89,9 @@ class WebGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.fetch(), RESULT)
         create = self.commands[0][0]
         self.assertEqual(create[:2], ["docker", "create"])
-        for flag, value in (("--network", "default"), ("--user", "1000:1000"),
+        from src.agent.container_identity import container_identity
+        uid, gid = container_identity()
+        for flag, value in (("--network", "default"), ("--user", f"{uid}:{gid}"),
                             ("--cap-drop", "ALL"), ("--security-opt", "no-new-privileges"),
                             ("--memory", "512m"), ("--cpus", "1"), ("--pids-limit", "128")):
             self.assertEqual(create[create.index(flag) + 1], value)

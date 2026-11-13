@@ -194,16 +194,20 @@ def _hidden():
 
 
 def _create_command(name, bundle_root, image, pinned_hosts=()):
+    from src.agent.container_identity import container_identity
+
+    uid, gid = container_identity()
     bundle = Path(bundle_root).resolve()
     # Docker --mount is comma-delimited; never reinterpret a path as options.
     if "," in str(bundle) or not bundle.is_dir():
         raise ValueError("Invalid native web integration bundle")
     return ["docker", "create", "--pull=never", "-i", "--name", name,
-            "--network", "default", "--read-only", "--user", "1000:1000",
+            "--network", "default", "--read-only", "--user", f"{uid}:{gid}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--memory", "512m", "--memory-swap", "512m", "--cpus", "1", "--pids-limit", "128",
             "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=256m",
-            "--tmpfs", "/home/tester:rw,nosuid,nodev,uid=1000,gid=1000,size=64m",
+            "--tmpfs", f"/home/tester:rw,nosuid,nodev,uid={uid},gid={gid},size=64m",
+            "--env", "HOME=/home/tester",
             "--workdir", "/tmp", "--env", "DSH_TELEMETRY_DISABLED=1",
             "--mount", f"type=bind,source={bundle},target=/opt/agent,readonly",
             *[arg for hostname, address in pinned_hosts for arg in ('--add-host', f'{hostname}:{address}')],

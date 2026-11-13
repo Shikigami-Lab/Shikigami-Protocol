@@ -32,15 +32,20 @@ jobs:
         run: |
           set -euo pipefail
           docker image inspect --format '{{.Architecture}}' shikigami-harness:platform-test | tee "$RUNNER_TEMP/harness-acceptance/architecture.log"
-          docker run --rm --network none --read-only --cap-drop ALL \
+          uid=$(id -u)
+          gid=$(id -g)
+          mkdir -m 700 "$RUNNER_TEMP/harness-acceptance/workspace" "$RUNNER_TEMP/harness-acceptance/home"
+          docker run --rm --network none --read-only --user "$uid:$gid" --cap-drop ALL \
             --security-opt no-new-privileges --pids-limit 256 --memory 1g --cpus 2 \
             --tmpfs /tmp:rw,exec,nosuid,nodev \
-            --tmpfs /workspace:rw,nosuid,nodev,uid=1000,gid=1000 \
-            --tmpfs /home/tester:rw,exec,nosuid,nodev,uid=1000,gid=1000 \
+            --tmpfs "/home/tester:rw,exec,nosuid,nodev,uid=$uid,gid=$gid" \
+            --env HOME=/home/tester \
+            --mount "type=bind,source=$RUNNER_TEMP/harness-acceptance/workspace,target=/workspace" \
+            --mount "type=bind,source=$RUNNER_TEMP/harness-acceptance/home,target=/harness" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/integrations/deepseek-harness,target=/opt/contract,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/src/agent,target=/opt/app/src/agent,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/src/llm/message_normalization.py,target=/opt/app/src/llm/message_normalization.py,readonly" \
-            shikigami-harness:platform-test python /opt/contract/tests/smoke.py 2>&1 | tee "$RUNNER_TEMP/harness-acceptance/protocol.log"
+            shikigami-harness:platform-test python -c 'from pathlib import Path; import runpy; Path("/workspace/owner-probe").write_text("synthetic"); Path("/harness/owner-probe").write_text("synthetic"); runpy.run_path("/opt/contract/tests/smoke.py", run_name="__main__")' 2>&1 | tee "$RUNNER_TEMP/harness-acceptance/protocol.log"
 
       - name: Preserve architecture and protocol evidence
         if: ${{ always() }}
