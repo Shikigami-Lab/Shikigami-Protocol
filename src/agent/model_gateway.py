@@ -1,20 +1,32 @@
 """Bound model egress. Credentials stay in the host process, never the worker."""
 import json
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from src.llm.gemini_native import _normalize_native_base_url
+from src.llm.openai_compat import _normalize_base_url
+
 
 def model_route(preset):
-    base = str(preset.get("base_url") or "").strip().rstrip("/")
+    native_google = (preset.get("type") or "openai_compat").strip() == "gemini"
+    raw_base = str(preset.get("base_url") or "").strip()
+    base = (_normalize_native_base_url(raw_base) or "https://generativelanguage.googleapis.com"
+            if native_google else _normalize_base_url(raw_base))
     model = str(preset.get("model") or "").strip()
     parsed = urlsplit(base)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or not model:
         raise ValueError("Configure a model and an HTTP(S) endpoint in Models settings")
-    if parsed.hostname == "generativelanguage.googleapis.com":
-        return {"provider": "google", "model": model.removeprefix("models/"), "native_google": True,
-                "target": "https://generativelanguage.googleapis.com/v1beta/models/" + model.removeprefix("models/") + ":streamGenerateContent?alt=sse"}
     path = parsed.path.rstrip("/")
+    if native_google:
+        model = model.removeprefix("models/")
+        if not model or any(char in model for char in ("/", "\\", "?", "#")):
+            raise ValueError("Configure a Gemini model ID in Models settings")
+        query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != "alt"]
+        query.append(("alt", "sse"))
+        return {"provider": "google", "model": model, "native_google": True,
+                "target": urlunsplit((parsed.scheme, parsed.netloc,
+                    path + "/v1beta/models/" + model + ":streamGenerateContent", urlencode(query), ""))}
     if path.lower().endswith("/chat/completions"):
         path = path[:-len("/chat/completions")]
     return {"provider": "shikigami-model", "model": model, "native_google": False,
@@ -60,9 +72,14 @@ class ModelGateway:
         if self.route["native_google"]:
             headers["x-goog-api-key"] = self._key
             generation = payload.setdefault("generationConfig", {})
-            generation["maxOutputTokens"] = min(int(generation.get("maxOutputTokens") or 4096), self._max_tokens)
+            requested = generation.get("maxOutputTokens")
+            generation["maxOutputTokens"] = (min(requested, self._max_tokens)
+                if type(requested) is int and requested > 0 else self._max_tokens)
             for name in ("temperature", "topP", "topK"):
                 generation.pop(name, None)
+            for setting, name in (("temperature", "temperature"), ("top_p", "topP")):
+                if setting in self._params:
+                    generation[name] = self._params[setting]
             thinking = generation.get("thinkingConfig")
             if isinstance(thinking, dict):
                 thinking.pop("thinkingBudget", None)

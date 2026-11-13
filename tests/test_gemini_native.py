@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """GeminiNativeProvider 离线测试：注入假 google-genai SDK，不打真实 API。"""
 import asyncio
+import json
 import sys
 import types as pytypes
 import unittest
 from unittest import mock
+
+import httpx
 
 from src.llm import registry
 from src.llm.gemini_native import GeminiNativeProvider, _split_system
@@ -221,6 +224,47 @@ class TestGeminiNativeProvider(unittest.TestCase):
         _, _, _, config = provider._client.calls[0]
         self.assertEqual(config.kwargs["max_output_tokens"], 1024)
 
+    def test_call_token_limit_overrides_preset_in_chat_and_stream(self):
+        for defaults in ({}, {"max_tokens": 8192}):
+            for call in ({"max_tokens": 256}, {"max_output_tokens": 128}):
+                with self.subTest(defaults=defaults, call=call), _patch_import():
+                    provider = GeminiNativeProvider(api_key="k", model="m", **defaults)
+                    _run(provider.chat([{"role": "user", "content": "hi"}], **call))
+
+                    async def collect():
+                        return [t async for t in provider.stream_chat(
+                            [{"role": "user", "content": "hi"}], **call)]
+                    _run(collect())
+                    for _, _, _, config in provider._client.calls:
+                        self.assertEqual(config.kwargs["max_output_tokens"], next(iter(call.values())))
+                        self.assertNotIn("max_tokens", config.kwargs)
+
+    def test_disabled_sampling_is_omitted_in_chat_and_stream(self):
+        for disabled in (["temperature"], ["top_p"], ["temperature", "top_p"]):
+            with self.subTest(disabled=disabled), _patch_import():
+                provider = registry.get_provider({
+                    "type": "gemini", "api_key": "k", "model": "m",
+                    "temperature": .2, "top_p": .6, "unsupported_params": disabled,
+                })
+                _run(provider.chat([{"role": "user", "content": "hi"}], temperature=.3, top_p=.7))
+
+                async def collect():
+                    return [t async for t in provider.stream_chat(
+                        [{"role": "user", "content": "hi"}], temperature=.3, top_p=.7)]
+                _run(collect())
+                for _, _, _, config in provider._client.calls:
+                    for key, value in {"temperature": .3, "top_p": .7}.items():
+                        if key in disabled:
+                            self.assertNotIn(key, config.kwargs)
+                        else:
+                            self.assertEqual(config.kwargs[key], value)
+
+    def test_custom_compatibility_gateway_requires_explicit_migration(self):
+        for url in ("https://gateway.fixture/v1beta/openai/",
+                    "https://gateway.fixture/openai/chat/completions"):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "openai_compat"):
+                registry.get_provider({"type": "gemini", "api_key": "k", "model": "m", "base_url": url})
+
     def test_missing_package_error_is_actionable(self):
         provider = GeminiNativeProvider(api_key="k", model="m")
         with mock.patch(
@@ -256,6 +300,53 @@ class TestRegistry(unittest.TestCase):
             "safety_settings": [{"category": "C", "threshold": "T"}],
         })
         self.assertIsInstance(provider, OpenAICompatProvider)
+
+
+class TestGeminiSDKWire(unittest.IsolatedAsyncioTestCase):
+    async def test_installed_sdk_serializes_native_chat_and_stream_through_fake_http(self):
+        try:
+            from google import genai
+        except ImportError:
+            self.skipTest("Optional google-genai SDK is not installed")
+        real_client = genai.Client
+        for base in ("", "https://native.fixture/proxy", "https://generativelanguage.googleapis.com/v1beta/openai/"):
+            sent = []
+
+            def respond(request):
+                sent.append(request)
+                data = {"candidates": [{"content": {"role": "model", "parts": [{"text": "fixture"}]},
+                                        "finishReason": "STOP"}]}
+                if ":streamGenerateContent" in request.url.path:
+                    return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                                          content="data: " + json.dumps(data) + "\n\n")
+                return httpx.Response(200, json=data)
+
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                def make_client(**kwargs):
+                    kwargs["http_options"].httpx_async_client = client
+                    return real_client(vertexai=False, **kwargs)
+
+                provider = GeminiNativeProvider(api_key="synthetic-key", base_url=base, model="gemini-2.5-flash",
+                                                max_tokens=8192, temperature=.2, unsupported_params=["top_p"])
+                try:
+                    with self.subTest(base=base), mock.patch.object(genai, "Client", side_effect=make_client):
+                        self.assertEqual(await provider.chat([{"role": "user", "content": "hi"}], max_tokens=256), "fixture")
+                        self.assertEqual("".join([t async for t in provider.stream_chat(
+                            [{"role": "user", "content": "hi"}], max_tokens=128)]), "fixture")
+                    self.assertEqual(len(sent), 2)
+                    expected_base = "https://native.fixture/proxy" if "native.fixture" in base else "https://generativelanguage.googleapis.com"
+                    for request, method, limit in zip(sent, ("generateContent", "streamGenerateContent"), (256, 128)):
+                        # SDK releases use v1 or v1beta by default; both are native.
+                        self.assertIn(str(request.url).split("?")[0], [
+                            expected_base + "/" + version + "/models/gemini-2.5-flash:" + method
+                            for version in ("v1", "v1beta")])
+                        self.assertEqual(request.headers["x-goog-api-key"], "synthetic-key")
+                        self.assertEqual(json.loads(request.content)["generationConfig"],
+                                         {"temperature": .2, "maxOutputTokens": limit})
+                finally:
+                    if provider._client is not None:
+                        await provider._client.aio.aclose()
+                        provider._client.close()
 
 
 class TestPresetConfigMissing(unittest.TestCase):

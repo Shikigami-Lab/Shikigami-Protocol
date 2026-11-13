@@ -49,7 +49,30 @@ def _is_openai_compat_url(url: str) -> bool:
         path = urlsplit(url).path.rstrip("/").lower()
     except ValueError:
         return False
-    return path.endswith("/openai")
+    return path.endswith(("/openai", "/openai/chat/completions"))
+
+
+def _normalize_native_base_url(base_url: str) -> Optional[str]:
+    """Keep native proxies; only the official compatibility endpoint can default to Google."""
+    raw_base = (base_url or "").strip()
+    if not raw_base:
+        return None
+    parsed = urlsplit(raw_base)
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username or parsed.password):
+        raise ValueError("Configure an HTTP(S) native Gemini endpoint without URL credentials in Models settings")
+    if _is_openai_compat_url(raw_base):
+        if (parsed.scheme == "https" and parsed.hostname == "generativelanguage.googleapis.com"
+                and parsed.port in (None, 443) and not parsed.query and not parsed.fragment
+                and parsed.path.rstrip("/").lower() in (
+                    "/v1beta/openai", "/v1beta/openai/chat/completions")):
+            return None
+        raise ValueError(
+            "Gemini base_url is an OpenAI compatibility endpoint. In Models settings, "
+            "set type to openai_compat to keep this gateway, or replace base_url with "
+            "its native Gemini endpoint. The destination has not been changed."
+        )
+    return raw_base
 
 
 def _split_system(messages: List[Dict[str, str]]):
@@ -79,17 +102,8 @@ class GeminiNativeProvider(LLMProvider):
     def __init__(self, api_key: str = "", base_url: str = "", model: str = "", **kwargs):
         self.model = model or "gemini-2.5-flash"
         self.api_key = api_key or ""
-        # base_url 可选：留空走 Google 默认端点；填写则走原生协议的代理/网关。
-        # 兼容端点地址（…/v1beta/openai）是旧 preset 的常见残留，原生协议打过去只会 404，
-        # 这里识别后忽略，避免迁移用户踩坑。
-        raw_base = (base_url or "").strip()
-        if raw_base and _is_openai_compat_url(raw_base):
-            logger.warning(
-                "[gemini_native] base_url 指向 OpenAI 兼容端点（%s），原生 provider 忽略该值，"
-                "改用 Google 默认端点", raw_base,
-            )
-            raw_base = ""
-        self._base_url = raw_base or None
+        self._base_url = _normalize_native_base_url(base_url)
+        self._unsupported = set(kwargs.get("unsupported_params") or [])
         timeout = kwargs.get("timeout")
         self._timeout = float(timeout) if timeout is not None else 60.0
         self._gen_kwargs: Dict = {
@@ -120,7 +134,9 @@ class GeminiNativeProvider(LLMProvider):
         cfg: Dict = {}
         for src_key in ("temperature", "top_p", "max_output_tokens"):
             v = merged_kwargs.get(src_key)
-            if v is not None:
+            if src_key == "max_output_tokens" and merged_kwargs.get("max_tokens") is not None:
+                v = int(merged_kwargs["max_tokens"])
+            if v is not None and src_key not in self._unsupported:
                 cfg[src_key] = v
         if system_instruction:
             cfg["system_instruction"] = system_instruction
