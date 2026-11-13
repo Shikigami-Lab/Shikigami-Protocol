@@ -4,9 +4,11 @@ Windows exercises CMD; POSIX exercises Bash (including macOS system Bash).
 Only minimal config modules are copied. All install commands and browser openers
 are intercepted, and server.py is a harmless exit-code/working-directory probe.
 """
+import json
 import os
 from pathlib import Path
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -68,11 +70,14 @@ class LaunchScriptsTests(unittest.TestCase):
             "if os.environ.get('OLD_PYTHON'):\n"
             "    sys.version_info = tuple(int(x) for x in os.environ['OLD_PYTHON'].split('.'))\n",
             encoding="utf-8")
-        venv.EnvBuilder(with_pip=False, system_site_packages=True).create(self.root / ".venv")
+        venv.EnvBuilder(with_pip=False).create(self.root / ".venv")
         self.python = self.root / (".venv/Scripts/python.exe" if WINDOWS else ".venv/bin/python")
         self.env = os.environ.copy()
+        # Nested venvs do not inherit the invoking venv's site-packages. Share
+        # that dependency path explicitly, keeping our safety hooks first.
         self.env.update(PATH=str(self.bin) + os.pathsep + self.env["PATH"],
-                        PYTHONPATH=str(self.bin), LAUNCH_TEST_LOG=str(self.log),
+                        PYTHONPATH=os.pathsep.join([str(self.bin), *site.getsitepackages()]),
+                        LAUNCH_TEST_LOG=str(self.log),
                         PYTHONUTF8="1")
         self.command("node", "echo 0.12.0", "echo 0.12.0")
         self.command("npm", 'echo npm >> "%LAUNCH_TEST_LOG%"\nexit /b %NPM_EXIT%',
@@ -121,6 +126,17 @@ class LaunchScriptsTests(unittest.TestCase):
         path = self.root / ("node_modules/.bin/electron.cmd" if WINDOWS else "node_modules/.bin/electron")
         path.parent.mkdir(parents=True)
         path.write_text("", encoding="utf-8")
+
+    def test_fixture_uses_parent_config_dependencies(self):
+        import dotenv
+        import yaml
+
+        result = subprocess.run(
+            [str(self.python), "-c", "import json, yaml, dotenv; print(json.dumps([yaml.__file__, dotenv.__file__]))"],
+            env=self.env, capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([Path(path).resolve() for path in json.loads(result.stdout)],
+                         [Path(module.__file__).resolve() for module in (yaml, dotenv)])
 
     def test_browser_uses_configured_port_and_preserves_server_exit(self):
         (self.root / "config/app.yaml").write_text("port: '8912' # custom\n", encoding="utf-8")
