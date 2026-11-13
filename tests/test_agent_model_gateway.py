@@ -37,6 +37,16 @@ class ModelRouteTests(unittest.TestCase):
                 self.assertEqual(route, {"provider": "google", "model": MODEL, "native_google": True,
                                          "target": target + NATIVE_PATH + "?alt=sse"})
 
+    def test_versioned_native_base_preserves_the_api_version_once(self):
+        for base, expected in (
+            ("https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta"),
+            ("https://native.fixture/prefix/v1beta/", "https://native.fixture/prefix/v1beta"),
+            ("https://native.fixture/prefix/v1", "https://native.fixture/prefix/v1"),
+        ):
+            with self.subTest(base=base):
+                route = model_route({**NATIVE, "base_url": base})
+                self.assertEqual(route["target"], expected + "/models/" + MODEL + ":streamGenerateContent?alt=sse")
+
     def test_compatibility_type_stays_compatible_even_on_google_host(self):
         for ptype in (None, "openai_compat", "openai", "deepseek", "ollama", "lmstudio"):
             for base, target in (

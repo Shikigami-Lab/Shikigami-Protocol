@@ -24,9 +24,10 @@ def model_route(preset):
             raise ValueError("Configure a Gemini model ID in Models settings")
         query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k != "alt"]
         query.append(("alt", "sse"))
+        api_path = path if path.endswith(("/v1", "/v1alpha", "/v1beta")) else path + "/v1beta"
         return {"provider": "google", "model": model, "native_google": True,
                 "target": urlunsplit((parsed.scheme, parsed.netloc,
-                    path + "/v1beta/models/" + model + ":streamGenerateContent", urlencode(query), ""))}
+                    api_path + "/models/" + model + ":streamGenerateContent", urlencode(query), ""))}
     if path.lower().endswith("/chat/completions"):
         path = path[:-len("/chat/completions")]
     return {"provider": "shikigami-model", "model": model, "native_google": False,
