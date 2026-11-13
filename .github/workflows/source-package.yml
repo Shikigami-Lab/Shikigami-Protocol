@@ -12,9 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout source and archive provenance
         uses: actions/checkout@v4
@@ -27,18 +27,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build and accept source in a clean environment
-        run: python .github/scripts/run_package_acceptance.py
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build and accept source and desktop in a clean environment
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a python .github/scripts/run_package_acceptance.py
+          else
+            python .github/scripts/run_package_acceptance.py
+          fi
 
       - name: Upload tested source and acceptance diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: source-package-${{ runner.os }}-${{ github.sha }}
+          name: source-package-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
           path: |
             ${{ runner.temp }}/source-package/source.zip
             ${{ runner.temp }}/source-package/manifest.json
             ${{ runner.temp }}/source-package-acceptance/acceptance.json
             ${{ runner.temp }}/source-package-acceptance/**/*.log
+            ${{ runner.temp }}/source-package-acceptance/desktop/*.json
+            ${{ runner.temp }}/source-package-acceptance/desktop/*.png
           if-no-files-found: error
           retention-days: 14

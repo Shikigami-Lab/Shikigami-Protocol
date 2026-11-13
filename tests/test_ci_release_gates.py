@@ -44,7 +44,9 @@ class ReleaseGateTests(unittest.TestCase):
         callees = {jobs[job].get("uses") for job in needed}
         self.assertEqual(callees, {"./.github/workflows/ci.yml",
                                    "./.github/workflows/docker-test.yml",
+                                   "./.github/workflows/harness-platforms.yml",
                                    "./.github/workflows/source-package.yml"})
+        self.assertIn("harness-smoke", needed)
         for job in needed:
             self.assertNotEqual(jobs[job].get("continue-on-error"), "true")
             self.assertNotIn("if", jobs[job], "required gates must not be conditionally skipped")
@@ -61,7 +63,7 @@ class ReleaseGateTests(unittest.TestCase):
 
     def test_dev_cannot_publish_a_release(self):
         jobs = workflow("release.yml")["jobs"]
-        self.assertEqual(set(jobs), {"unit-tests", "docker-smoke", "source-package", "release"})
+        self.assertEqual(set(jobs), {"unit-tests", "docker-smoke", "harness-smoke", "source-package", "release"})
         release = jobs["release"]
         self.assertEqual(release["if"],
                          "${{ success() && startsWith(github.ref, 'refs/tags/v') }}")
@@ -74,7 +76,7 @@ class ReleaseGateTests(unittest.TestCase):
         steps = workflow("release.yml")["jobs"]["release"]["steps"]
         download = next(step for step in steps
                         if step.get("uses", "").startswith("actions/download-artifact@"))
-        self.assertEqual(download["with"]["name"], "source-package-Linux-${{ github.sha }}")
+        self.assertEqual(download["with"]["name"], "source-package-Linux-X64-${{ github.sha }}")
         self.assertNotIn("run-id", download["with"])
         self.assertNotIn("github-token", download["with"])
         self.assertNotIn("repository", download["with"])
@@ -87,14 +89,14 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(release["with"]["fail_on_unmatched_files"], "true")
         self.assertFalse(any("source_package.py" in step.get("run", "") for step in steps))
 
-    def test_package_gate_is_reusable_with_both_operating_systems(self):
+    def test_package_gate_is_reusable_with_windows_linux_and_both_mac_architectures(self):
         package = workflow("source-package.yml")
         self.assertIn("workflow_call", package["on"])
         self.assertIn("workflow_dispatch", package["on"])
         self.assertEqual(package["permissions"], {"contents": "read"})
         job = package["jobs"]["source-package"]
         self.assertEqual(job["strategy"]["matrix"]["os"],
-                         ["ubuntu-latest", "windows-latest"])
+                         ["ubuntu-latest", "windows-latest", "macos-latest", "macos-15-intel"])
         self.assertEqual(job["runs-on"], "${{ matrix.os }}")
         self.assertEqual(job["strategy"]["fail-fast"], "false")
         steps = job["steps"]
@@ -106,7 +108,13 @@ class ReleaseGateTests(unittest.TestCase):
         runner = next(step for step in steps if "run_package_acceptance.py" in step.get("run", ""))
         self.assertLess(steps.index(checkout), steps.index(setup))
         self.assertLess(steps.index(setup), steps.index(runner))
-        self.assertEqual(runner["run"], "python .github/scripts/run_package_acceptance.py")
+        self.assertIn("python .github/scripts/run_package_acceptance.py", runner["run"])
+        self.assertIn('runner.os', runner["run"])
+        self.assertIn('xvfb-run -a', runner["run"])
+        node = next(step for step in steps if "actions/setup-node@" in step.get("uses", ""))
+        self.assertEqual(node["with"]["node-version"], "22")
+        self.assertLess(steps.index(node), steps.index(runner))
+        self.assertNotIn("--no-sandbox", str(steps))
 
     def test_package_artifact_has_sha_identity_and_preserves_failure_diagnostics(self):
         job = workflow("source-package.yml")["jobs"]["source-package"]
@@ -114,12 +122,14 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(len(uploads), 1)
         upload = uploads[0]
         self.assertEqual(upload["if"], "${{ always() }}")
-        self.assertEqual(upload["with"]["name"], "source-package-${{ runner.os }}-${{ github.sha }}")
+        self.assertEqual(upload["with"]["name"], "source-package-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}")
         self.assertEqual(set(upload["with"]["path"].splitlines()), {
             "${{ runner.temp }}/source-package/source.zip",
             "${{ runner.temp }}/source-package/manifest.json",
             "${{ runner.temp }}/source-package-acceptance/acceptance.json",
             "${{ runner.temp }}/source-package-acceptance/**/*.log",
+            "${{ runner.temp }}/source-package-acceptance/desktop/*.json",
+            "${{ runner.temp }}/source-package-acceptance/desktop/*.png",
         })
         self.assertEqual(upload["with"]["if-no-files-found"], "error")
         self.assertNotIn("overwrite", upload["with"])
