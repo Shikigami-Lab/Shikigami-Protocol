@@ -215,6 +215,19 @@ npm install
 
 ---
 
+### Ubuntu：Electron 提示 `chrome-sandbox` 所有者 / 4755 错误
+
+仅当 Electron 启动明确提示 `chrome-sandbox` 需由 root 所有且权限为 `4755` 时，在**受信任的项目根目录**对 npm 安装的官方 Electron helper 执行：
+
+```bash
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+```
+
+然后按原启动脚本重试，保持 Electron 沙箱开启。此 helper 用于 Electron 桌面窗口；下方的后端 + 浏览器模式不需要它。
+
+---
+
 ### 只需后端 / 不用 Electron
 
 可以完全跳过 Node.js。完成 init 后，在项目根目录使用项目虚拟环境：

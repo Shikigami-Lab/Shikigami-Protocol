@@ -211,6 +211,19 @@ If you get **`EPERM: operation not permitted`**: close any process locking `node
 
 ---
 
+### Ubuntu: Electron reports a `chrome-sandbox` owner / 4755 error
+
+Only if Electron startup reports that `chrome-sandbox` must be owned by root with mode `4755`, run these commands from a **trusted project root**, for the official Electron helper installed by npm:
+
+```bash
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+```
+
+Retry the normal launch script with Electron's sandbox enabled. This helper is for the Electron desktop window; backend + browser mode below does not use it.
+
+---
+
 ### Browser mode only (skip Electron)
 
 You can skip Node.js entirely. After init, run from the project root using its virtual environment:

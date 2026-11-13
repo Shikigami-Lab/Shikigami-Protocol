@@ -28,6 +28,7 @@ Target: **v0.12.0 Public Beta** (not yet released; available for source testing 
 
 ### Fixed
 
+- [Tools] Match Harness container and temporary-directory UID/GID to the host application's user on macOS/Linux, avoiding workspace write failures for host IDs such as 501 or 1001. Cross-platform CI verification is pending.
 - [Tools] Add a bounded Yandex fallback when DuckDuckGo and Yahoo are unavailable, and report task timeout and model-request-limit failures separately.
 - [Memory] Preserve original message dates for fact extraction and portrait refreshes. Writers request fixed event dates and defer unresolved relative dates; chat and reflection distinguish memory update times from event dates without rewriting existing records.
 - [Tools] Complete the MCP SDK settings model before first use so its lifespan type resolves without a Pydantic warning.
