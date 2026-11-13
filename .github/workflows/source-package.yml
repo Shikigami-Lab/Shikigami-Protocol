@@ -1,0 +1,44 @@
+name: Source Package Acceptance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source and archive provenance
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and accept source in a clean environment
+        run: python .github/scripts/run_package_acceptance.py
+
+      - name: Upload tested source and acceptance diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-package-${{ runner.os }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/source-package/source.zip
+            ${{ runner.temp }}/source-package/manifest.json
+            ${{ runner.temp }}/source-package-acceptance/acceptance.json
+            ${{ runner.temp }}/source-package-acceptance/**/*.log
+          if-no-files-found: error
+          retention-days: 14

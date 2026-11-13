@@ -2,6 +2,8 @@ name: CD Release
 
 on:
   push:
+    branches:
+      - "dev"
     tags:
       - "v*"
   workflow_dispatch:
@@ -16,17 +18,31 @@ jobs:
   docker-smoke:
     uses: ./.github/workflows/docker-test.yml
 
+  source-package:
+    uses: ./.github/workflows/source-package.yml
+
   release:
-    needs: [unit-tests, docker-smoke]
+    needs: [unit-tests, docker-smoke, source-package]
     if: ${{ success() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # Download defaults to this workflow run; never rebuild the tested archive.
+      - name: Download tested Linux source package
+        uses: actions/download-artifact@v4
+        with:
+          name: source-package-Linux-${{ github.sha }}
+          path: tested-source
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          files: |
+            tested-source/source-package/source.zip
+            tested-source/source-package/manifest.json
+          fail_on_unmatched_files: true
           token: ${{ secrets.GITHUB_TOKEN }}
