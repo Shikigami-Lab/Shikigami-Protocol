@@ -42,10 +42,9 @@ class ConversationStore:
     max_turns=0  → never trim (permanent memory, use for profile-level store).
     max_turns>0  → keep at most max_turns*2 messages (session-level store).
 
-    get_recent() returns the last n_turns rounds, filtered by context_since_ts:
-      - Messages with timestamp < context_since_ts are excluded from LLM context
-        but remain in the DB so they still appear in the chat UI.
-    reset_context() sets context_since_ts = now (non-destructive short-mem clear).
+    Prompt readers respect the captured ID boundary (or legacy since_ts marker).
+    Reset messages remain in raw/UI history and in durable extraction readers.
+    reset_context() hides the captured prefix without hiding concurrent appends.
     clear() wipes everything including the reset marker.
 
     Auto-migrates from chat_records.json on first open (renames to .json.bak).
@@ -57,6 +56,7 @@ class ConversationStore:
         self._ctx_path = os.path.join(storage_root, "context_reset.json")
         self.max_turns = max_turns
         self._context_since_ts: float = 0.0
+        self._context_after_id: Optional[int] = None
         os.makedirs(storage_root, exist_ok=True)
         self._conn = self._init_db()
         self._load_ctx_ts()
@@ -83,6 +83,8 @@ class ConversationStore:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON messages(timestamp)")
+        conn.execute("CREATE TABLE IF NOT EXISTS memory_source_state (revision INTEGER NOT NULL)")
+        conn.execute("INSERT INTO memory_source_state SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM memory_source_state)")
         conn.commit()
 
         # Additive migration, serialized across connections; old rows are completed.
@@ -143,16 +145,35 @@ class ConversationStore:
             with open(self._ctx_path, "r", encoding="utf-8") as f:
                 data = _json.load(f)
             self._context_since_ts = float(data.get("since_ts", 0.0))
+            self._context_after_id = data.get("after_id")
         except Exception:
             self._context_since_ts = 0.0
+            self._context_after_id = None
 
-    def _save_ctx_ts(self):
+    def _save_ctx_ts(self, since_ts, after_id):
+        tmp = self._ctx_path + ".tmp"
         try:
             import json as _json
-            with open(self._ctx_path, "w", encoding="utf-8") as f:
-                _json.dump({"since_ts": self._context_since_ts}, f)
+            with open(tmp, "w", encoding="utf-8") as f:
+                _json.dump({"since_ts": since_ts, "after_id": after_id}, f)
+            os.replace(tmp, self._ctx_path)
         except Exception as e:
             logger.warning("[ConversationStore] save context_ts failed: %s", e)
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+    @property
+    def source_revision(self) -> int:
+        """Durable invalidation token; appends do not invalidate a captured prefix."""
+        return self._conn.execute("SELECT revision FROM memory_source_state").fetchone()[0]
+
+    def _invalidate_rolling(self):
+        from src.memory.rolling_store import RollingSummaryStore
+        RollingSummaryStore(self.storage_root).clear()
+
+    def _bump_source_revision(self):
+        self._conn.execute("UPDATE memory_source_state SET revision=revision+1")
 
     # ── Write operations ─────────────────────────────────────────────────────
 
@@ -188,16 +209,22 @@ class ConversationStore:
             if updated.rowcount != 1:
                 raise ValueError("Task request message is no longer available")
 
-    def reset_context(self):
-        """Mark current time as the context start point (non-destructive)."""
-        self._context_since_ts = time.time()
-        self._save_ctx_ts()
+    def reset_context(self, up_to_id: Optional[int] = None, *, since_ts: Optional[float] = None):
+        """Hide only the captured prefix; keep raw speech and durable extraction."""
+        after_id = self.memory_tail_id() if up_to_id is None else up_to_id
+        stamp = time.time() if since_ts is None else since_ts
+        self._save_ctx_ts(stamp, after_id)
+        self._context_since_ts = stamp
+        self._context_after_id = after_id
 
     def clear(self):
         """Wipe all messages and remove the context-reset marker."""
+        self._invalidate_rolling()
         with self._conn:
             self._conn.execute("DELETE FROM messages")
+            self._bump_source_revision()
         self._context_since_ts = 0.0
+        self._context_after_id = None
         if os.path.exists(self._ctx_path):
             try:
                 os.remove(self._ctx_path)
@@ -213,12 +240,14 @@ class ConversationStore:
             _validate_provenance(run_id, status)
             rows.append((getattr(m, "id", None), m.role, m.content, m.timestamp,
                          getattr(m, "sender", "") or "", run_id, status))
+        self._invalidate_rolling()
         with self._conn:
             self._conn.execute("DELETE FROM messages")
             self._conn.executemany(
                 "INSERT INTO messages (id, role, content, timestamp, sender, agent_run_id, generation_status) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)", rows
             )
+            self._bump_source_revision()
 
     def delete_from_index(self, idx: int) -> bool:
         """Delete the idx-th message in time order (0-based, same order as get_all) and everything after it."""
@@ -230,6 +259,9 @@ class ConversationStore:
                     SELECT id FROM messages ORDER BY timestamp, id LIMIT -1 OFFSET ?
                 )
             """, (idx,))
+            if cur.rowcount:
+                self._invalidate_rolling()
+                self._bump_source_revision()
         return cur.rowcount > 0
 
     def delete_at_index(self, idx: int) -> bool:
@@ -242,6 +274,9 @@ class ConversationStore:
                     SELECT id FROM messages ORDER BY timestamp, id LIMIT 1 OFFSET ?
                 )
             """, (idx,))
+            if cur.rowcount:
+                self._invalidate_rolling()
+                self._bump_source_revision()
         return cur.rowcount > 0
 
     # ── Read operations ──────────────────────────────────────────────────────
@@ -249,8 +284,8 @@ class ConversationStore:
     def get_recent(self, n_turns: int = 20) -> List[Dict]:
         """Return recent speech with IDs and structured generation metadata.
 
-        Excludes messages with timestamp < context_since_ts so that a short-term
-        memory reset is respected without deleting visible chat history.
+        Respects the ID reset boundary, falling back to the legacy timestamp
+        marker, without deleting visible chat history or durable evidence.
         Includes incomplete AI replies unchanged for compatibility. Memory and
         summary consumers must inspect generation_status before flattening
         content; history prompts render it separately as trusted context.
@@ -259,10 +294,10 @@ class ConversationStore:
         rows = self._conn.execute("""
             SELECT role, content, sender, id, agent_run_id, generation_status FROM messages
             WHERE role IN ('user', 'assistant')
-              AND (? = 0 OR timestamp >= ?)
+              AND ((? IS NOT NULL AND id > ?) OR (? IS NULL AND (? = 0 OR timestamp >= ?)))
             ORDER BY timestamp DESC, id DESC
             LIMIT ?
-        """, (since, since, n_turns * 2)).fetchall()
+        """, (self._context_after_id, self._context_after_id, self._context_after_id, since, since, n_turns * 2)).fetchall()
         rows.reverse()
         return [{"role": r[0], "content": r[1], "sender": r[2] or "",
                  "id": r[3], "agent_run_id": r[4], "generation_status": r[5]} for r in rows]
@@ -271,27 +306,48 @@ class ConversationStore:
         row = self._conn.execute("SELECT MAX(id) FROM messages").fetchone()
         return int(row[0] or 0)
 
-    def memory_messages_after(self, after_id: int, limit: int) -> List[Dict]:
+    def rolling_batch_after(self, after_id: int, up_to_id: int, limit: int = 256) -> List[Dict]:
+        """Bounded rolling input, respecting the prompt reset rather than durable cursors."""
         rows = self._conn.execute(
             "SELECT id, role, content, sender, timestamp, generation_status FROM messages "
-            "WHERE id > ? AND timestamp >= ? ORDER BY id LIMIT ?",
-            (after_id, self.context_since_ts, limit),
+            "WHERE id > ? AND id <= ? AND "
+            "((? IS NOT NULL AND id > ?) OR (? IS NULL AND (? = 0 OR timestamp >= ?))) ORDER BY id LIMIT ?",
+            (after_id, up_to_id, self._context_after_id, self._context_after_id,
+             self._context_after_id, self.context_since_ts, self.context_since_ts, limit),
+        ).fetchall()
+        return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
+                for row in rows]
+
+    def rolling_user_count(self, after_id: int, up_to_id: int, cap: int) -> int:
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE role='user' AND id > ? AND id <= ? "
+            "AND ((? IS NOT NULL AND id > ?) OR (? IS NULL AND (? = 0 OR timestamp >= ?))) LIMIT ?)",
+            (after_id, up_to_id, self._context_after_id, self._context_after_id,
+             self._context_after_id, self.context_since_ts, self.context_since_ts, cap),
+        ).fetchone()[0]
+
+    def memory_messages_after(self, after_id: int, limit: int) -> List[Dict]:
+        """Durable extraction input; prompt resets do not discard pending facts."""
+        rows = self._conn.execute(
+            "SELECT id, role, content, sender, timestamp, generation_status FROM messages "
+            "WHERE id > ? ORDER BY id LIMIT ?",
+            (after_id, limit),
         ).fetchall()
         return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
                 for row in rows]
 
     def memory_turn_batch_after(self, after_id: int, max_user_turns: int) -> List[Dict]:
-        """Read complete user turns so extraction cadence can keep up with chat."""
+        """Read durable user turns independently of the prompt-context cutoff."""
         boundary = self._conn.execute(
-            "SELECT id FROM messages WHERE id > ? AND timestamp >= ? AND role='user' "
+            "SELECT id FROM messages WHERE id > ? AND role='user' "
             "ORDER BY id LIMIT 1 OFFSET ?",
-            (after_id, self.context_since_ts, max_user_turns),
+            (after_id, max_user_turns),
         ).fetchone()
         upper = boundary[0] - 1 if boundary else self.memory_tail_id()
         rows = self._conn.execute(
             "SELECT id, role, content, sender, timestamp, generation_status FROM messages "
-            "WHERE id > ? AND id <= ? AND timestamp >= ? ORDER BY id",
-            (after_id, upper, self.context_since_ts),
+            "WHERE id > ? AND id <= ? ORDER BY id",
+            (after_id, upper),
         ).fetchall()
         return [dict(zip(("id", "role", "content", "sender", "timestamp", "generation_status"), row))
                 for row in rows]
@@ -308,8 +364,8 @@ class ConversationStore:
 
     def has_memory_evidence(self, message: Dict) -> bool:
         row = self._conn.execute(
-            "SELECT role, content, sender, timestamp, generation_status FROM messages WHERE id=? AND timestamp >= ?",
-            (message["id"], self.context_since_ts),
+            "SELECT role, content, sender, timestamp, generation_status FROM messages WHERE id=?",
+            (message["id"],),
         ).fetchone()
         expected = (*[message[key] for key in ("role", "content", "sender", "timestamp")],
                     message.get("generation_status", "completed"))
@@ -321,10 +377,10 @@ class ConversationStore:
         rows = self._conn.execute("""
             SELECT role, content, sender, timestamp, id, agent_run_id, generation_status FROM messages
             WHERE role IN ('user', 'assistant')
-              AND (? = 0 OR timestamp >= ?)
+              AND ((? IS NOT NULL AND id > ?) OR (? IS NULL AND (? = 0 OR timestamp >= ?)))
             ORDER BY timestamp DESC, id DESC
             LIMIT ?
-        """, (since, since, n_turns * 2)).fetchall()
+        """, (self._context_after_id, self._context_after_id, self._context_after_id, since, since, n_turns * 2)).fetchall()
         rows.reverse()
         return [
             {"role": r[0], "content": r[1], "sender": r[2] or "", "timestamp": r[3],
@@ -484,6 +540,9 @@ class ConversationStore:
         """Delete a single message by its SQLite row id. Returns True if deleted."""
         with self._conn:
             cur = self._conn.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+            if cur.rowcount:
+                self._invalidate_rolling()
+                self._bump_source_revision()
         return cur.rowcount > 0
 
     def count_messages(self, q: str = "") -> int:
@@ -594,11 +653,11 @@ class ConversationStore:
             SELECT MIN(timestamp) FROM (
                 SELECT timestamp FROM messages
                 WHERE role IN ('user', 'assistant')
-                  AND (? = 0 OR timestamp >= ?)
+                  AND ((? IS NOT NULL AND id > ?) OR (? IS NULL AND (? = 0 OR timestamp >= ?)))
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
             )
-        """, (since, since, n_turns * 2)).fetchone()
+        """, (self._context_after_id, self._context_after_id, self._context_after_id, since, since, n_turns * 2)).fetchone()
         return row[0] if row and row[0] is not None else 0.0
 
     @property

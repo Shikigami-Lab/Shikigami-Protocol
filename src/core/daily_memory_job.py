@@ -18,6 +18,9 @@ from src.memory.merged_history import memory_extraction_sources, memory_group_so
 logger = logging.getLogger(__name__)
 
 _LAST_DAILY_RUN_FILE = "last_daily_run.json"
+_DAILY_PROGRESS_FILE = "daily_job_progress.json"
+_DAILY_MAX_ATTEMPTS = 3
+_DAILY_RETRY_SECONDS = 300
 _LAST_CURATION_CHECK = "last_scheduled_check_date"
 
 
@@ -45,7 +48,7 @@ def _has_conversation_on_date(store, date_str: str) -> bool:
         all_msgs = store.get_all()
     except Exception as e:
         logger.warning("[daily_memory_job] 读取对话失败: %s", e)
-        return False
+        raise
     return any(
         _msg_date(m) == date_str and _msg_role(m) in ("user", "assistant")
         for m in all_msgs
@@ -72,19 +75,47 @@ def _load_last_daily_run(storage_root: str) -> Optional[str]:
         return None
 
 
-def _save_last_daily_run(storage_root: str, date_str: str) -> None:
-    """写入本次每日任务运行日期。"""
-    path = os.path.join(storage_root, _LAST_DAILY_RUN_FILE)
+def _atomic_daily_state(storage_root: str, filename: str, data: dict) -> None:
+    path = os.path.join(storage_root, filename)
+    tmp = path + ".tmp"
+    os.makedirs(storage_root, exist_ok=True)
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"last_daily_run_date": date_str}, f, ensure_ascii=False)
-    except Exception as e:
-        logger.warning("[daily_memory_job] 写入 last_daily_run 失败: %s", e)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
-async def run_day_summary_for_profile(profile_id: str, date_str: str, app) -> bool:
-    """对指定人格运行指定日期的日摘要（已有摘要则跳过，无对话时生成安静日记）。返回是否执行了摘要。"""
+def _save_last_daily_run(storage_root: str, date_str: str) -> None:
+    _atomic_daily_state(storage_root, _LAST_DAILY_RUN_FILE, {"last_daily_run_date": date_str})
+
+
+def _load_daily_progress(storage_root: str, day: str) -> dict:
+    try:
+        with open(os.path.join(storage_root, _DAILY_PROGRESS_FILE), encoding="utf-8") as f:
+            state = json.load(f)
+        if isinstance(state, dict) and state.get("day") == day and isinstance(state.get("jobs"), dict):
+            return state
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"day": day, "jobs": {}}
+
+
+def _daily_retry_due(storage_root: str, now: datetime) -> bool:
+    state = _load_daily_progress(storage_root, now.date().isoformat())
+    if not state["jobs"] or _load_last_daily_run(storage_root) == now.date().isoformat():
+        return False
+    pending = [state["jobs"].get(name, {}) for name in ("summary", "portrait", "index")]
+    if all(item.get("status") == "completed" for item in pending):
+        return True  # The final completion-marker write can also fail.
+    return any(item.get("status") != "completed" and item.get("attempts", 0) < _DAILY_MAX_ATTEMPTS
+               and item.get("retry_at", 0) <= now.timestamp() for item in pending)
+
+
+async def run_day_summary_for_profile(profile_id: str, date_str: str, app) -> Optional[bool]:
+    """Generate the diary: True completed, None deliberately skipped, False failed."""
     sm = getattr(app.state, "session_manager", None)
     if not sm:
         return False
@@ -98,19 +129,22 @@ async def run_day_summary_for_profile(profile_id: str, date_str: str, app) -> bo
         return False
 
     mgr = _get_manager_for_session(session, app)
-    if not mgr or not mgr._cfg.get("enabled") or not mgr._cfg.get("day_summary_enabled"):
+    if not mgr:
         return False
+    if (not mgr._cfg.get("enabled") or not mgr._cfg.get("day_summary_enabled")
+            or mgr._cfg.get("extraction_llm_preset") == "__none__"):
+        return None
     if mgr.day_store.has_summary_for(date_str):
-        return False
+        return None
 
     store = session.conversation_store
-    has_conv = _has_conversation_on_date(store, date_str)
     from src.config.profile_loader import ProfileLoader
     try:
         profile = ProfileLoader().load(profile_id)
     except Exception:
         profile = {}
     try:
+        has_conv = _has_conversation_on_date(store, date_str)
         result = await mgr.generate_day_summary(date_str, store, profile, app, quiet=not has_conv)
         if result:
             logger.info("[daily_memory_job] 日摘要完成 profile=%s date=%s quiet=%s", profile_id, date_str, not has_conv)
@@ -205,11 +239,11 @@ async def run_fact_index_maintenance(
     return counts
 
 
-async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool = False) -> None:
-    """日批中调用 user_portrait 刷新（受 user_portrait_config 控制，完全独立于 memory 总开关）。"""
+async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool = False) -> Optional[bool]:
+    """Independent portrait refresh: True completed, None skipped, False failed."""
     sm = getattr(app.state, "session_manager", None)
     if not sm:
-        return
+        return False
     session = None
     for s in sm.list_sessions():
         if s.profile_id == profile_id:
@@ -217,27 +251,49 @@ async def run_portrait_refresh_for_profile(profile_id: str, app, *, force: bool 
             break
     if not session:
         logger.debug("[daily_memory_job] portrait: profile %s 未加载，跳过", profile_id)
-        return
+        return False
 
     from src.config.profile_loader import ProfileLoader
     try:
         card = ProfileLoader().load(profile_id)
     except Exception:
-        return
+        return False
     cfg = card.get("user_portrait_config") or {}
     if not cfg.get("enabled", True):
-        return
+        return None
     if not force and not cfg.get("auto_refresh_in_daily_job", True):
-        return
+        return None
 
+    from src.core import user_portrait as portrait
     from src.core.user_portrait import trigger_portrait_refresh
+    # The legacy refresh API returns None for both skips and failures. Check its
+    # non-model gates first so a failed request is never recorded as completed.
+    current = card.get("user_portrait") or {}
+    if not force and portrait._is_in_cooldown(current, float(cfg.get("min_hours_between_refresh", 6))):
+        return None
+    conversation = portrait._get_recent_conversation_text(
+        session.storage_root, int(cfg.get("max_input_conv_turns", 60)), portrait._human_label(app))
+    summaries = portrait._get_recent_day_summaries_text(session.storage_root, 7) if cfg.get("use_day_summary_as_input", True) else ""
+    facts = portrait._get_facts_text(session.storage_root, 30) if cfg.get("use_facts_as_input", True) else ""
+    content = (current.get("content") or "").strip()
+    if not conversation and not summaries and not facts and not content:
+        return None
+    recent = current.get("recent_context") or {}
+    recent = (recent.get("content") or "").strip() if isinstance(recent, dict) else str(recent).strip()
+    signature = portrait._compute_input_signature(
+        content, recent, json.dumps(current.get("contextual_details") or [], ensure_ascii=False),
+        portrait._resolve_user_intro(card, app)[1], conversation, summaries, facts)
+    if not force and signature == current.get("last_input_signature"):
+        return None
     try:
-        await trigger_portrait_refresh(
+        result = await trigger_portrait_refresh(
             profile_id, session.storage_root, app,
             force=force, triggered_by="manual" if force else "daily",
         )
+        return bool(result)
     except Exception as e:
         logger.exception("[daily_memory_job] portrait 刷新失败 profile=%s: %s", profile_id, e)
+        return False
 
 
 def _curation_is_due(state, cfg, now: datetime) -> bool:
@@ -398,13 +454,33 @@ async def run_daily_for_profile(profile_id: str, yesterday: str, app) -> None:
         logger.debug("[daily_memory_job] profile %s 今天已跑过每日任务，跳过", profile_id)
         return
 
-    try:
-        await run_day_summary_for_profile(profile_id, yesterday, app)
-        await run_portrait_refresh_for_profile(profile_id, app)
+    progress = _load_daily_progress(session.storage_root, today_str)
+    errors = []
+    jobs = (
+        ("summary", lambda: run_day_summary_for_profile(profile_id, yesterday, app)),
+        ("portrait", lambda: run_portrait_refresh_for_profile(profile_id, app)),
+        ("index", lambda: run_fact_index_maintenance(profile_id, app)),
+    )
+    for name, run in jobs:
+        previous = progress["jobs"].get(name, {})
+        if previous.get("status") == "completed" or previous.get("attempts", 0) >= _DAILY_MAX_ATTEMPTS:
+            continue
+        attempts = previous.get("attempts", 0) + 1
+        try:
+            result = await run()
+            completed = result is not False  # None is a deliberate disabled/no-work skip.
+        except Exception as e:
+            errors.append(e)
+            completed = False
+        progress["jobs"][name] = {
+            "status": "completed" if completed else "failed", "attempts": attempts,
+            "retry_at": datetime.now().timestamp() + _DAILY_RETRY_SECONDS if not completed else 0,
+        }
+        _atomic_daily_state(session.storage_root, _DAILY_PROGRESS_FILE, progress)
+    if all(progress["jobs"].get(name, {}).get("status") == "completed" for name, _ in jobs):
         _save_last_daily_run(session.storage_root, today_str)
-    finally:
-        # Index cleanup can retry on startup without repeating completed model jobs.
-        await run_fact_index_maintenance(profile_id, app)
+    if errors:
+        raise errors[0]
 
 
 async def _catch_up_missed_runs(app) -> None:
@@ -426,41 +502,32 @@ async def _catch_up_missed_runs(app) -> None:
 
 
 async def _run_daily_tasks_loop(app) -> None:
-    """Run startup catch-up and the existing diary, portrait and index schedule."""
+    """Daily work plus three bounded attempts per job with a five-minute retry delay."""
     try:
         await _catch_up_missed_runs(app)
     except Exception as e:
-        logger.exception("[daily_memory_job] 启动补跑异常: %s", e)
+        logger.exception("[daily_memory_job] Startup catch-up failed: %s", e)
     while True:
         try:
-            hour = 0
-            minute = 5
-            config = getattr(app.state, "config", None)
-            if config:
-                mem = getattr(config, "get_memory_config", lambda: {})()
-                hour = int(mem.get("daily_run_at_hour", 0))
-                minute = int(mem.get("daily_run_at_minute", 5))
             now = datetime.now()
-            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if next_run <= now:
-                next_run += timedelta(days=1)
-            wait_secs = (next_run - now).total_seconds()
-            logger.info("[daily_memory_job] 下次运行: %s (%.0f 秒后)", next_run.isoformat(), wait_secs)
-            await asyncio.sleep(wait_secs)
-
-            yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+            config = getattr(app.state, "config", None)
+            mem = getattr(config, "get_memory_config", lambda: {})() if config else {}
+            deadline = now.replace(hour=int(mem.get("daily_run_at_hour", 0)),
+                                   minute=int(mem.get("daily_run_at_minute", 5)), second=0, microsecond=0)
             sm = getattr(app.state, "session_manager", None)
-            if not sm:
-                await asyncio.sleep(60)
-                continue
-            for s in sm.list_sessions():
-                try:
-                    await run_daily_for_profile(s.profile_id, yesterday, app)
-                except Exception as e:
-                    logger.exception("[daily_memory_job] profile %s 失败: %s", s.profile_id, e)
-        except Exception as e:
-            logger.exception("[daily_memory_job] 循环异常: %s", e)
-            await asyncio.sleep(60)
+            for session in sm.list_sessions() if sm else []:
+                state = _load_daily_progress(session.storage_root, now.date().isoformat())
+                if (_daily_retry_due(session.storage_root, now)
+                        or (now >= deadline and not state["jobs"]
+                            and _load_last_daily_run(session.storage_root) != now.date().isoformat())):
+                    try:
+                        await run_daily_for_profile(session.profile_id,
+                                                    (now.date() - timedelta(days=1)).isoformat(), app)
+                    except Exception:
+                        logger.exception("[daily_memory_job] Profile task failed: %s", session.profile_id)
+        except Exception:
+            logger.exception("[daily_memory_job] Schedule check failed")
+        await asyncio.sleep(60)
 
 
 async def _run_curation_schedule_loop(app) -> None:

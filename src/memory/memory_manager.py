@@ -27,7 +27,7 @@ from src.utils.memory_time import write_time_context
 from src.memory.long_term_store import LongTermFact, LongTermStore
 from src.memory.day_store import DaySummaryStore
 from src.memory.rolling_store import RollingSummaryStore
-from src.memory.extraction_batches import is_memory_turn as _is_memory_turn, plan_batch
+from src.memory.extraction_batches import is_memory_turn as _is_memory_turn, message_hash, plan_batch
 from src.memory.merged_history import memory_group_sources_allowed
 from src.memory.vector_store import VectorMemoryStore
 from src.memory.bm25_retriever import BM25Retriever
@@ -48,6 +48,7 @@ from src.utils.persona_context import persona_prompt_parts
 logger = logging.getLogger(__name__)
 
 _PROFILES_DIR = os.path.join(get_project_root(), "profiles")
+_ROLLING_MAX_BATCHES = 4
 _FACT_INDEX_LOCKS = WeakValueDictionary()
 
 
@@ -662,6 +663,12 @@ class MemoryManager:
                                            message_count=len(day_msgs),
                                            keep_days=keep_days,
                                            experience_ids=sorted(experience_links_by_day(self.facts.get_all()).get(date_str, ())))
+                # The legacy diary store logs write errors instead of raising.
+                # Verify its commit before daily scheduling can mark this job done.
+                persisted = DaySummaryStore(self._storage_root)
+                if persisted.get_all() != self.day_store.get_all():
+                    self.day_store = persisted
+                    raise OSError("Day summary was not persisted")
                 logger.info("[MemoryManager] 日摘要已生成 date=%s len=%d profile=%s",
                             date_str, len(summary), self._profile_id)
                 log_summary_generate(self._profile_id, date_str, len(day_msgs), summary)
@@ -688,98 +695,137 @@ class MemoryManager:
         except Exception:
             return True
 
+    def rolling_data_for(self, store):
+        """Legacy summaries are valid until the first destructive source revision."""
+        data = self.rolling.get()
+        if data and data.get("source_revision", 0) != store.source_revision:
+            self.rolling.clear()
+            return None
+        return data
+
+    def rolling_covers(self, store, up_to_id: int) -> bool:
+        data = self.rolling_data_for(store)
+        covered = int((data or {}).get("covered_up_to_id", 0))
+        return not store.rolling_batch_after(covered, up_to_id, 1)
+
+    def rolling_compaction_enabled(self) -> bool:
+        """The reset path must share all deliberate rolling/no-model gates."""
+        return bool(self._cfg.get("enabled") and self._cfg.get("rolling_summary_enabled")
+                    and self._cfg.get("extraction_llm_preset", "") != "__none__"
+                    and self._rolling_segment_enabled())
+
     async def maybe_update_rolling_summary(self, store, profile: Dict, app,
-                                           force_all: bool = False) -> bool:
-        """会话内滚动摘要：每当窗口外积压满 interval 个用户轮次，就把窗口外的旧对话
-        压缩进滚动摘要。摘要与日期无关，只记录生成时间；不跨天重置、不交接日摘要。
-        force_all=True（重置短期上下文前调用）：压缩 covered 之后的全部对话，
-        不受窗口与积压间隔限制。返回是否产生了新摘要。"""
-        if not self._cfg.get("enabled") or not self._cfg.get("rolling_summary_enabled"):
-            return False
-        if not self._rolling_segment_enabled():
+                                           force_all: bool = False, *, up_to_id: Optional[int] = None) -> bool:
+        """Summarize bounded spans, committing only input actually sent to the model.
+
+        Ordinary calls do one request; force_all covers at most four batches of
+        a captured prefix. Incomplete coverage returns False without hiding raw
+        speech. Both paths resume spans/backlogs without recharging turn quota.
+        """
+        if not self.rolling_compaction_enabled():
             return False
         preset_name = self._cfg.get("extraction_llm_preset", "")
-        if preset_name == "__none__":
-            return False
 
         async with self._rolling_lock:
-            data = self.rolling.get()
+            revision = store.source_revision
+            data = self.rolling_data_for(store)
             covered = int((data or {}).get("covered_up_to_id", 0))
             keep_turns = max(10, min(200, int(self._cfg.get("rolling_summary_keep_turns", 60))))
             interval = max(5, min(200, int(self._cfg.get("rolling_summary_interval_turns", 60))))
             max_chars = max(200, min(4000, int(self._cfg.get("rolling_summary_max_chars", 800))))
-
-            if force_all:
-                # 重置前压缩：covered 之后的全部记忆轮都进摘要
-                batch = store.memory_turn_batch_after(covered, 100000)
-                pending = [m for m in batch if m["id"] > 0]
-            else:
-                # 窗口边界：最近 keep_turns 轮保持原文，更早的才允许压缩
+            max_input = max(2000, min(100000, int(self._cfg.get("day_summary_max_conv_chars", 12000))))
+            target = store.memory_tail_id() if up_to_id is None else up_to_id
+            if not force_all:
                 window = store.get_recent_with_ts(keep_turns)
-                boundary = window[0]["id"] if window else 0
-                batch = store.memory_turn_batch_after(covered, interval * 2)
-                pending = [m for m in batch if 0 < m["id"] < boundary]
-                if sum(1 for m in pending if m.get("role") == "user") < interval:
+                target = min(target, window[0]["id"] - 1 if window else 0)
+                backlog = int((data or {}).get("backlog_up_to_id", 0))
+                if backlog <= covered and store.rolling_user_count(covered, target, interval) < interval:
                     return False
-            if force_all and not any(m.get("role") == "user" for m in pending):
-                return False
-
             persona_name = profile.get("display_name") or profile.get("name", "AI")
-            conv_text = "\n".join(
-                f'{("用户" if m["role"] == "user" else m.get("sender") or persona_name)}: {m.get("content", "")}'
-                for m in pending if _is_memory_turn(m)
-            )
-            if not conv_text.strip():
-                return False
-            max_conv_chars = max(2000, min(100000, int(self._cfg.get("day_summary_max_conv_chars", 12000))))
-            if len(conv_text) > max_conv_chars:
-                conv_text = conv_text[:max_conv_chars] + "\n...（内容过长，已截断）"
-
-            prev_summary = ((data or {}).get("summary") or "").strip()
-            task_prompt = get_prompt("memory.rolling_summary_task")
-            rolling_input = Template(get_prompt("memory.rolling_summary_input")).safe_substitute(
-                prev_summary=prev_summary or "（无）",
-                conv_text=conv_text,
-                max_chars=max_chars,
-            )
-
-            try:
-                from src.llm.registry import get_provider
-                preset = app.state.config.get_llm_preset(preset_name) if preset_name else app.state.config.get_active_llm_preset()
-                llm = get_provider(preset)
-                model = preset.get("model", "unknown") if preset else "unknown"
-                messages = [
-                    {"role": "system", "content": task_prompt},
-                    {"role": "user", "content": rolling_input},
-                ]
-                log_secondary_llm_call(
-                    role="memory_rolling", messages=messages, model=model,
-                    gen_kwargs={}, session_id=self._profile_id,
-                )
-                _t0 = time.time()
-                summary = ""
-                async for token in llm.stream_chat(messages):
-                    if token.startswith("[LLM Error:") or len(summary) > max_chars * 2:
-                        raise ValueError("Invalid rolling summary model response")
-                    summary += token
-                log_secondary_llm_response(
-                    role="memory_rolling", response=summary, model=model,
-                    session_id=self._profile_id, duration_ms=int((time.time() - _t0) * 1000),
-                )
-                summary = summary.strip()
-                if not summary:
+            updated = False
+            for _ in range(_ROLLING_MAX_BATCHES if force_all else 1):
+                batch = store.rolling_batch_after(covered, target)
+                if not batch:
+                    return updated
+                parts, originals = [], []
+                next_covered = covered
+                offset = (data or {}).get("pending_message") or {}
+                next_offset = None
+                remaining = max_input
+                for row in batch:
+                    content = row.get("content", "")
+                    if not _is_memory_turn(row) or not content:
+                        next_covered = row["id"]
+                        continue
+                    label = ("用户" if row["role"] == "user" else row.get("sender") or persona_name)[:200] + ": "
+                    room = remaining - len(label) - (1 if parts else 0)
+                    if room <= 0:
+                        break
+                    digest = message_hash(content)
+                    start = offset.get("offset", 0) if (offset.get("id") == row["id"]
+                            and offset.get("content_hash") == digest) else 0
+                    end = min(len(content), start + room)
+                    parts.append(label + content[start:end])
+                    originals.append(row)
+                    remaining -= len(parts[-1]) + (1 if len(parts) > 1 else 0)
+                    if end < len(content):
+                        next_offset = {"id": row["id"], "offset": end, "content_hash": digest}
+                        break
+                    next_covered = row["id"]
+                conv_text = "\n".join(parts)
+                try:
+                    summary = ((data or {}).get("summary") or "").strip()
+                    if conv_text:
+                        rolling_input = Template(get_prompt("memory.rolling_summary_input")).safe_substitute(
+                            prev_summary=summary or "（无）", conv_text=conv_text, max_chars=max_chars,
+                        )
+                        from src.llm.registry import get_provider
+                        preset = (app.state.config.get_llm_preset(preset_name) if preset_name
+                                  else app.state.config.get_active_llm_preset())
+                        llm = get_provider(preset)
+                        model = preset.get("model", "unknown") if preset else "unknown"
+                        messages = [
+                            {"role": "system", "content": get_prompt("memory.rolling_summary_task")},
+                            {"role": "user", "content": rolling_input},
+                        ]
+                        log_secondary_llm_call(role="memory_rolling", messages=messages, model=model,
+                                               gen_kwargs={}, session_id=self._profile_id)
+                        started = time.time()
+                        summary = ""
+                        async for token in llm.stream_chat(messages):
+                            if token.startswith("[LLM Error:") or len(summary) > max_chars * 2:
+                                raise ValueError("Invalid rolling summary model response")
+                            summary += token
+                        log_secondary_llm_response(
+                            role="memory_rolling", response=summary, model=model, session_id=self._profile_id,
+                            duration_ms=int((time.time() - started) * 1000),
+                        )
+                        summary = summary.strip()
+                        if not summary:
+                            return False
+                        if len(summary) > max_chars * 1.2:
+                            summary = summary[:max_chars] + "…"
+                    # Appends are safe. Deletion/replacement, including via another DB
+                    # connection, invalidates both the old digest and this model result.
+                    if store.source_revision != revision or not all(store.has_memory_evidence(r) for r in originals):
+                        self.rolling_data_for(store)
+                        return False
+                    self.rolling.update(summary, next_covered, pending_message=next_offset,
+                                        backlog_up_to_id=target, source_revision=revision)
+                    data = self.rolling.get()
+                    covered = next_covered
+                    updated = updated or bool(conv_text)
+                    if not force_all:
+                        return updated
+                except Exception as e:
+                    logger.error("[MemoryManager] 滚动摘要生成失败: %s", e)
+                    log_error("memory", str(e), {"profile_id": self._profile_id, "op": "rolling_summary"},
+                              traceback_str=traceback.format_exc())
                     return False
-                if len(summary) > max_chars * 1.2:
-                    summary = summary[:max_chars] + "…"
-                self.rolling.update(summary, pending[-1]["id"])
-                logger.info("[MemoryManager] 滚动摘要已更新 profile=%s covered=%d len=%d",
-                            self._profile_id, pending[-1]["id"], len(summary))
-                return True
-            except Exception as e:
-                logger.error("[MemoryManager] 滚动摘要生成失败: %s", e)
-                log_error("memory", str(e), {"profile_id": self._profile_id, "op": "rolling_summary"},
-                          traceback_str=traceback.format_exc())
-                return False
+
+            # Keep partial summaries, but never report a fully covered reset
+            # when the request/scan budget left source messages pending.
+            return updated if not store.rolling_batch_after(covered, target, 1) else False
 
     async def reembed_fact(self, fact_id: str, emotion_context: Optional[Dict] = None) -> bool:
         """Refresh a fact's unique vector, or drop it when the fact is no longer recallable."""

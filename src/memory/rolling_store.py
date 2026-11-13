@@ -23,23 +23,27 @@ class RollingSummaryStore:
 
     def get(self) -> Optional[Dict]:
         """返回当前记录 {summary, covered_up_to_id, updated_at}；无则 None。"""
+        # Another store instance may have invalidated this file after raw deletion.
+        self._load()
         return dict(self._data) if self._data else None
 
-    def update(self, summary: str, covered_up_to_id: int):
+    def update(self, summary: str, covered_up_to_id: int, **progress):
         """写入/覆盖滚动摘要，记录生成时间。"""
-        self._data = {
+        data = {
+            **progress,
             "summary": summary.strip(),
             "covered_up_to_id": int(covered_up_to_id),
             "updated_at": time.time(),
         }
-        self._save()
+        self._save(data)
+        self._data = data
 
     def clear(self) -> bool:
         """清空摘要（如有）。返回是否有内容被清掉。"""
-        if self._data is None:
+        if self.get() is None:
             return False
+        self._save(None)
         self._data = None
-        self._save()
         return True
 
     # ── Internal ──────────────────────────────────────────────────────────────
@@ -51,7 +55,7 @@ class RollingSummaryStore:
         try:
             with open(self._path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
-            if isinstance(data, dict) and data.get("summary"):
+            if isinstance(data, dict) and (data.get("summary") or data.get("covered_up_to_id")):
                 data.pop("date", None)  # 旧格式带 date 字段，忽略
                 self._data = data
             else:
@@ -60,16 +64,18 @@ class RollingSummaryStore:
             logger.error("[RollingSummaryStore] 加载失败 %s: %s", self._path, e)
             self._data = None
 
-    def _save(self):
+    def _save(self, data):
         tmp = self._path + ".tmp"
         try:
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
-            if self._data is None:
+            if data is None:
                 if os.path.exists(self._path):
                     os.remove(self._path)
                 return
             with open(tmp, "w", encoding="utf-8") as fp:
-                json.dump(self._data, fp, ensure_ascii=False, indent=2)
+                json.dump(data, fp, ensure_ascii=False, indent=2)
+                fp.flush()
+                os.fsync(fp.fileno())
             os.replace(tmp, self._path)
         except Exception as e:
             logger.error("[RollingSummaryStore] 保存失败: %s", e)
@@ -78,3 +84,4 @@ class RollingSummaryStore:
                     os.remove(tmp)
                 except OSError:
                     pass
+            raise

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.core.broadcast import broadcast
@@ -96,7 +97,7 @@ async def clear_session_history(
     """Clear the conversation history for a profile-session.
 
     type=None (default) — wipe everything.
-    type=recent         — delete only the last 40 messages (clear short-term context).
+    type=recent         — reset the captured prompt prefix, retaining raw history.
     """
     sm = request.app.state.session_manager
     session = sm.get_by_id(session_id)
@@ -104,10 +105,10 @@ async def clear_session_history(
         raise HTTPException(status_code=404, detail="Session not found")
     store = session.conversation_store
     if type == "recent":
-        # Compact-then-reset: 若滚动摘要开启，先把即将移出上下文的对话压缩进
-        # 滚动摘要（force_all，不受窗口/间隔限制），再重置短期上下文。
-        # 消息仍留在文件里（UI 可见），get_recent() 只是不再把它们放进 LLM 上下文。
-        # 同时重置该人格参与的所有群的短期上下文，与单聊+群聊合并语义一致。
+        # Capture before yielding: later speech remains visible and pending.
+        boundary = store.memory_tail_id()
+        reset_ts = time.time()
+        revision = store.source_revision
         compacted = False
         profile = None
         try:
@@ -119,24 +120,26 @@ async def clear_session_history(
         try:
             from src.api.memory import get_or_create_manager
             mgr = get_or_create_manager(request, session.profile_id)
-        except Exception:
-            mgr = None
-        if mgr and mgr._cfg.get("enabled") and mgr._cfg.get("rolling_summary_enabled"):
+        except Exception as e:
+            # Unknown configuration must not turn compression failure into data hiding.
+            logger.warning("[sessions] Cannot prepare context reset: %s", e)
+            return JSONResponse(status_code=503, content={"ok": False, "compacted": False,
+                "reason": "memory_manager_unavailable", "detail": "Could not prepare reset. Context was kept."})
+        if mgr and mgr.rolling_compaction_enabled():
             try:
                 compacted = await mgr.maybe_update_rolling_summary(
-                    store, profile or {}, request.app, force_all=True)
+                    store, profile or {}, request.app, force_all=True, up_to_id=boundary)
+                if store.source_revision != revision or not mgr.rolling_covers(store, boundary):
+                    return JSONResponse(status_code=409, content={"ok": False, "compacted": False,
+                        "reason": "compression_incomplete",
+                        "detail": "Compression is incomplete. Context was kept; retry to continue."})
             except Exception as e:
-                logger.warning("[sessions] 重置前压缩失败（继续重置）: %s", e)
-        store.reset_context()
-        gm = getattr(request.app.state, "group_manager", None)
-        if gm and getattr(session, "profile_id", None):
-            for gid in gm.get_group_ids_for_profile(session.profile_id):
-                gstore = gm.get_conversation_store(gid)
-                if gstore:
-                    try:
-                        gstore.reset_context()
-                    except Exception:
-                        pass
+                logger.warning("[sessions] Context reset compression failed: %s", e)
+                return JSONResponse(status_code=502, content={"ok": False, "compacted": False,
+                    "reason": "compression_failed", "detail": "Compression failed. Context was kept."})
+        store.reset_context(up_to_id=boundary, since_ts=reset_ts)
+        # Shared group stores have their own reset action; changing them here
+        # would also reset the prompt context of unrelated group members.
     else:
         store.clear()
         await _prune_proactive_message(session, store)

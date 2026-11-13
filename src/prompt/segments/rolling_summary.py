@@ -34,7 +34,8 @@ class RollingSummarySegment(PromptSegment):
         if not mgr or not mgr._cfg.get("rolling_summary_enabled"):
             return SegmentResult(fired=False)
 
-        data = mgr.rolling.get()
+        store = getattr(ctx.session, "conversation_store", None)
+        data = mgr.rolling_data_for(store) if store is not None else mgr.rolling.get()
         if not data or not data.get("summary"):
             return SegmentResult(fired=False)
 
