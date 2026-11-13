@@ -119,6 +119,21 @@ test('failed history paging retries the same offset and keeps the applied search
   assert.deepEqual([...model.chatHistory], [1, 3]);
 });
 
+test('incomplete compression reports that reset can continue without refreshing the context marker', async () => {
+  const { model, toasts } = harness(async () => response({ ok: false, reason: 'compression_incomplete' }));
+  model.t = key => ({
+    memResetFailed: 'Reset failed. {error}',
+    memReset_compression_incomplete: 'Some dialogue remains. Retry the reset to continue.',
+  }[key] || key);
+  let refreshed = false;
+  model.refreshChatHistoryContext = async () => { refreshed = true; };
+  await model._doClearShortMem('a');
+  assert.equal(refreshed, false);
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0].type, 'error');
+  assert.match(toasts[0].message, /Retry the reset to continue/);
+});
+
 test('a successful short-context reset refreshes its marker without duplicating loaded pages', async () => {
   const calls = [];
   const { model } = harness(async (url, options) => {

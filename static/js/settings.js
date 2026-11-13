@@ -3081,11 +3081,16 @@ const SettingsMixin = {
         const res = await fetch(getBaseUrl() + API_PATHS.sessionHistoryRecent(profileId), { method: 'DELETE' });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
-        if (!data.ok) throw new Error(data.detail || data.error || this.t('toastSaveFailed'));
+        if (!data.ok) {
+          const reasons = ['memory_manager_unavailable', 'compression_incomplete', 'compression_failed'];
+          const message = reasons.includes(data.reason) ? this.t('memReset_' + data.reason) :
+            (data.detail || data.error || this.t('toastSaveFailed'));
+          throw new Error(message);
+        }
         this.showToast(this.t('toastShortMemCleared'), 'success');
         // Refresh the context marker without appending the current page again.
         await this.refreshChatHistoryContext(profileId);
-      } catch (e) { this.showToast(`重置失败: ${e.message}`, 'error'); }
+      } catch (e) { this.showToast(this.t('memResetFailed').replace('{error}', () => e.message), 'error'); }
     },
 
     async loadChatHistory(profileId, reset = true, search = this.chatHistorySearch || '') {
