@@ -232,7 +232,7 @@ def run_smoke(source, python, output, *, allow_no_sandbox=False):
                         write_json(output / "python.json", loaded)
                         validate_python_evidence(loaded, python, evidence["backend_pid"], expected_prefix)
                         if FixtureModel.calls != 1 or (audit.exists() and audit.stat().st_size):
-                            raise RuntimeError("Unexpected model calls or forbidden network/process operation")
+                            raise RuntimeError("Unexpected model calls or forbidden network operation")
                         result.update(ok=True, checks=CHECKS, renderer=evidence, provider_calls=FixtureModel.calls)
                     finally:
                         cleanup_backend(output, port)

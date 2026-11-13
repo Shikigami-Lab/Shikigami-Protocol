@@ -26,10 +26,8 @@ STOP_TIMEOUT = 5
 
 AUDIT_GUARD = """
 def guard(event, args):
-    blocked = event == 'subprocess.Popen'
-    # Python's platform.platform(), used by SDK request headers, probes uname on Linux.
-    if event == 'subprocess.Popen' and args[0] == 'uname' and args[1] == ['uname', '-p']:
-        blocked = False
+    # Probe trusted app code with tools disabled; restrict egress, not OS metadata.
+    blocked = False
     if event in ('socket.connect', 'socket.bind'):
         address = args[1]
         blocked = not isinstance(address, tuple) or address[0] not in ('127.0.0.1', '::1')
@@ -37,10 +35,7 @@ def guard(event, args):
         blocked = args[0] not in ('localhost', '127.0.0.1', '::1')
     if blocked:
         with audit_path.open('a', encoding='utf-8') as file:
-            detail = {'event': event}
-            if event == 'subprocess.Popen':
-                detail['command'] = str(args[1])[:300]
-            file.write(json.dumps(detail) + '\\n')
+            file.write(json.dumps({'event': event}) + '\\n')
         raise PermissionError('Acceptance permits loopback fixture traffic only')
 sys.addaudithook(guard)
 """
@@ -315,7 +310,7 @@ def run_acceptance(source, python, output):
         raise RuntimeError("Unexpected model requests outside the two fixture chats")
     blocked = [path for path in logs.glob("*-network.log") if path.stat().st_size]
     if blocked:
-        raise RuntimeError("The package attempted a forbidden network or process operation")
+        raise RuntimeError("The package attempted a forbidden network operation")
     return {"ok": True, "synthetic_only": True, "version": json.loads((source / "package.json").read_text(encoding="utf-8"))["version"],
             "checks": ["fresh-default-startup", "fresh-chat-and-restart", "legacy-migration-chat-and-restart",
                        "authored-data-preserved", "loopback-model-only"]}

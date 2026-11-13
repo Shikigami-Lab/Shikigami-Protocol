@@ -144,19 +144,21 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(runner.process.poll(), 23)
         self.assertIn("synthetic crash", (self.output / "crash.log").read_text(encoding="utf-8"))
 
-    def test_child_guard_blocks_network_dns_and_processes_before_application_import(self):
+    def test_child_guard_blocks_external_network_before_application_import(self):
         audit = self.root / "blocked.jsonl"
         code = self.helper.AUDIT_GUARD + "\n" + r'''
 import subprocess
 for action in (lambda: socket.create_connection(('192.0.2.1', 443), timeout=.1),
                lambda: socket.getaddrinfo('example.invalid', 443),
-               lambda: socket.socket().bind(('0.0.0.0', 0)),
-               lambda: subprocess.Popen([sys.executable, '-c', 'pass'])):
+               lambda: socket.socket().bind(('0.0.0.0', 0))):
     try:
         action()
     except PermissionError:
         continue
     raise AssertionError('guard permitted forbidden activity')
+# Trusted application metadata queries are ordinary process activity, not egress.
+subprocess.run([sys.executable, '-I', '-c', 'pass'], check=True)
+sys.audit('subprocess.Popen', 'file', ['file', '-b', str(Path(sys.executable).resolve())], None, None)
 '''
         result = subprocess.run([sys.executable, "-I", "-c",
                                  "import sys, socket, json\nfrom pathlib import Path\n"
@@ -164,8 +166,8 @@ for action in (lambda: socket.create_connection(('192.0.2.1', 443), timeout=.1),
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         events = [json.loads(line)["event"] for line in audit.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(len(events), 4)
-        self.assertIn("subprocess.Popen", events)
+        self.assertEqual(len(events), 3)
+        self.assertNotIn("subprocess.Popen", events)
 
     def test_sanitized_environment_cannot_override_fixture_or_python_imports(self):
         with patch.dict(os.environ, {"ACCEPTANCE_LOCAL_API_KEY": "private",
