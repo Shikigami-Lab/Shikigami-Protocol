@@ -4,7 +4,7 @@
 > 人物卡 JSON 字段见 [profile_prompts.zh.md](./profile_prompts.zh.md)。
 > **English:** [GETTING_STARTED.en.md](./GETTING_STARTED.en.md)
 
-**请先按 [SETUP_FIRST_RUN.zh.md](./SETUP_FIRST_RUN.zh.md) 完成源码运行环境（Python / Node 等），再按下方两步配置。**
+**请先按 [SETUP_FIRST_RUN.zh.md](./SETUP_FIRST_RUN.zh.md) 启动源码桌面/浏览器模式或 Docker 主应用，再按下方两步配置。**
 
 ---
 
@@ -19,6 +19,16 @@
 
 > 还没装好环境？先读 [SETUP_FIRST_RUN.zh.md](./SETUP_FIRST_RUN.zh.md)。
 > 所在网络无法直连 Gemini / OpenAI？先看下方「代理」一节。
+
+---
+
+## AI 工具与工作区（可选）
+
+基础聊天无需 Harness。执行任务前先按[Harness 安装说明](./SETUP_FIRST_RUN.zh.md#harness-setup)准备 Linux 容器 Docker 引擎并单独构建镜像。AI 工具、各项能力与自省发起任务均**默认关闭**。
+
+1. **设置 → 模型 → 工具执行模型**：选择已保存预设，或跟随当前聊天模型；另行测试模型连接。
+2. **设置 → 工具**：打开 AI 工具和所需能力，代码执行需先开工作区权限。**人格 → 工具配置**可开启、关闭或继承，并单独控制计时器、待办权限。本地运行状态就绪不代表模型调用已成功。
+3. 先试一个小任务，如查找原始消息并写一份带引用的笔记（需历史检索与工作区权限）。聊天模型决定是否委派并完成最终回复，工具模型执行任务。聊天顶部的工作区按钮打开**文件 / 计划 / 任务**；停止保留已完成结果，继续会按已有记录启动新任务。
 
 ---
 
@@ -46,14 +56,16 @@
 
 | Tab | 用途 |
 |:---|:---|
-| **入门** | **分步引导 (推荐)**：清单自检、网络、记忆/TTS/STT；陪伴行为（情绪/好感度等）仅指路，细则见本文下一节。 |
+| **新手引导** | **分步引导 (推荐)**：清单自检、网络、记忆/TTS/STT；陪伴行为（情绪/好感度等）仅指路，细则见本文下一节。 |
 | **人格** | 角色卡列表、编辑、**AI 向导**生成卡、侧栏排序、记忆 / 引擎等人格级覆盖；**Prompt 编辑**子标签含人格演化 |
 | **模型** | LLM 预设管理、API Key、本地 OpenAI 兼容地址、辅助分析、自省、工具、视觉和向量嵌入模型 |
-| **记忆** | 事实、向量、摘要、聊天记录、维护记录，以及全局和按人格设置 |
-| **TTS** | 朗读引擎：Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
+| **记忆设置** | 全局与按人格的提取、检索、随记、整理配置及任务提示词 |
+| **语音** | 朗读引擎：Edge / GPT-SoVITS / Kokoro / Qwen3-TTS |
 | **行为** | 我的资料、自省、主动发言、主动话题、截图策略和角色状态 |
-| **工具** | 待办、计时器、天气和网页搜索等工具插件的开关与配置 |
+| **工具** | AI 工具默认开关、能力权限、运行状态和任务限制；原有待办、计时器、天气与搜索配置 |
 | **系统** | 主题、代理、HF 镜像、离线开关 |
+
+**侧栏记忆入口**用于浏览事实、向量、随记和聊天记录，与「记忆设置」分开；**聊天顶部工作区按钮**用于查看文件、计划和任务记录。
 
 人格卡里还可配置情绪/能量/好感文案、记忆策略、TTS 参考音等——字段说明见 [profile_prompts.zh.md](./profile_prompts.zh.md)。
 
@@ -84,13 +96,13 @@
 ### 自省（Reflection）
 
 - **作用**：后台周期性用单独 LLM 生成简短「内心状态」（如话题提示、风格提示），供主对话与 ASE 决策参考；**会持续消耗 token**。
-- **去哪调**：`设置 → 行为 / 自省` 或 **自省 / ASE** Tab 中总开关与间隔；`设置 → 模型 → 自省模型` 指定专用或沿用主模型；每人格的 `reflection_config.custom_prompt` 等在 **人格 → 自省配置** 中编辑。
+- **去哪调**：**设置 → 行为 → 自省**中调整全局开关与间隔；**设置 → 模型 → 自省模型**指定专用或沿用主模型；**人格 → 行为**中调整角色覆盖。
 - **建议**：先配好**便宜或本地**自省模型再开；间隔不宜过短（常见 60～300 秒量级，具体见界面说明）。详细段落与触发方式与「Prompt 增强段落」体系一致，保存时注意按界面提示分别保存。
 
 ### 主动发言（ASE）
 
 - 在满足沉默时长、紧迫度、冷却与每日上限等条件时，角色**主动发一条消息**，可以结合本地话题、天气和可选的 VLM 截屏上下文。
-- **去哪调**：`设置 → 行为` 或 **自省 / ASE** Tab 中 ASE 总开关与**模式**（低/中/高/游戏/专注等）；各模式对应检测间隔、最短沉默、紧迫度阈值、冷却与 24h 次数上限等在 `config/app.yaml` 的 `ase.modes` 中定义，部分可在 UI 覆盖。需要画面时配合 **VLM** 与「主动发言时截图」等选项。
+- **去哪调**：**设置 → 行为 → 主动发言**中调整 ASE 总开关、**模式**（低/中/高/游戏/专注等）、话题来源和截图策略；各模式对应检测间隔、最短沉默、紧迫度阈值、冷却与 24h 次数上限等在 `config/app.yaml` 的 `ase.modes` 中定义，部分可在 UI 覆盖。需要画面时配合 **VLM** 与「主动发言时截图」等选项。
 - **建议**：人设与情绪稳定后再开 ASE，避免「话风未定型就频繁打扰」。觉得太吵：先换**低**模式或提高紧迫度阈值、拉长最短间隔，而不是立刻全关（除非你明确不想要主动消息）。
 
 ### 人格演化（Persona Evolution）
@@ -111,13 +123,14 @@
 
 ### 记忆与向量检索
 
-- 使用 **Gemini 等云端嵌入**：在「模型」里配置 Key 即可，向量记忆走云端。
-- 无云端 Key、想用**本地向量检索**：在「入门」页用 HF 镜像 / ModelScope 下载 BGE-small 等到 `models/`，再到「记忆」将嵌入提供方改为本地并填写路径。
+- 向量检索**默认关闭**：先在**设置 → 新手引导**安装可选 `chromadb`，再到**记忆设置**启用；未开启时仍可关键词检索。
+- 使用 **Gemini 等云端嵌入**：在**设置 → 模型 → 向量嵌入模型**配置提供方、模型与 Key，再到「记忆设置」启用向量。
+- 无云端 Key、想用**本地向量检索**：在「新手引导」页用 HF 镜像 / ModelScope 下载 BGE-small 等到 `models/`，再到**模型 → 向量嵌入模型**将提供方改为本地并填写模型路径。
 - 设置了 `HF_HUB_OFFLINE=1` 时，在线下载会失败，需先关闭离线或自备模型。
 
 ### 语音输入（STT）
 
-在「入门」页的 STT 区选择引擎并下载模型：
+在「新手引导」页的 STT 区选择引擎并下载模型：
 - **SenseVoice**（ONNX）：多语言、速度较快，适合多数场景。
 - **Whisper / faster-whisper**：更重、更准，按需下载（可指定 `stt.model_path` 使用本地文件）。
 
@@ -125,25 +138,27 @@
 
 - **Edge TTS**：免装模型，需联网，100+ 音色。
 - **Kokoro**：本地 ONNX，~200ms 延迟，支持 zh / ja / en。
-- **GPT-SoVITS / Qwen3-TTS**：按「TTS」页说明安装依赖或下载权重。Qwen3-TTS 依赖 PyTorch，见下方。
+- **GPT-SoVITS / Qwen3-TTS**：按**设置 → 语音**说明安装依赖或下载权重。Qwen3-TTS 依赖 PyTorch，见下方。
 
 ### Qwen3-TTS 与 PyTorch（仅使用 Qwen3-TTS 时）
 
 `requirements-ai.txt` 中不含 GPU 版 PyTorch（避免强制下载 GB 级文件）。需单独安装：
 
-```bat
+```powershell
 # NVIDIA GPU（CUDA，版本按显卡驱动调整）
-.venv\Scripts\python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+.\.venv\Scripts\python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # 仅 CPU
-.venv\Scripts\python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
+
+macOS/Linux 将 `.\.venv\Scripts\python` 换为 `.venv/bin/python`，并按系统与硬件选择 PyTorch 构建。
 
 更多组合见 [PyTorch 官网](https://pytorch.org/)。若报错 `Torch not compiled with CUDA enabled`，说明安装的是 CPU 版，按上方换 cu 版或在 TTS 设置里改设备为 `cpu`。
 
 ### 屏幕 / 视觉（VLM）
 
-在「VLM」中配置多模态模型后，可在支持场景下使用截图理解能力（依赖所选 API 或本地多模态服务）。
+在**设置 → 模型**的视觉模型区域配置多模态模型，再到**行为 → 主动发言**调整截图策略，可在支持场景下使用截图理解能力（依赖所选 API 或本地多模态服务）。
 
 ### 天气感知
 
@@ -160,4 +175,4 @@
 | **profile_prompts** | 手写或精调 JSON 人物卡时查字段；也是 AI 向导的生成依据 |
 | **ARCHITECTURE_REFERENCE** | 贡献者 / 架构师查阅模块边界与最低文件要求 |
 
-在应用内 **设置 → 入门** 顶部可打开上述文档（随界面语言打开 `*.zh.md` / `*.en.md`）。
+在应用内 **设置 → 新手引导** 顶部可打开上述文档（随界面语言打开 `*.zh.md` / `*.en.md`）。

@@ -22,7 +22,7 @@
 
 </div>
 
-> ⚠️ **Project Status**: Public Beta (v0.11.0; see `package.json` and [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) for the exact version). Core architecture is stable and ready to use, but unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
+> ⚠️ **Project Status**: Preparing **v0.12.0 Public Beta** on `dev` (not yet released). This README describes that development version; [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) lists published versions. Unknown bugs may exist. Feedback welcome in [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions).
 
 Shikigami Protocol is a desktop companion for work and study, aiming for the feeling of having Lofi Girl alongside you — with someone you can talk to and build shared memories with. With the backend running and reflection and proactive speech enabled, the character uses context and internal state to start conversations when its trigger conditions are met; you can also discuss images, talk by voice, or look things up, keep todos, and set reminders within the conversation. Open-source, AGPL-3.0 — **conversation logs, memory, and engine state stay on your disk**; **LLM inference and embeddings** can be cloud APIs, fully local (e.g. Ollama), or a mix — your stack, your choice.
 
@@ -98,7 +98,7 @@ Shikigami bets on **state machines, reflection, proactivity, and an integrated m
 
 ## ❌ What this is not
 
-- **Tools handle specific tasks within the conversation.** Search, todos, and timer reminders are supported; desktop control, browser automation, and autonomous multi-step task execution are not currently included. See [Features](#features).
+- **Tools work within explicit permissions.** Optional Harness tasks can research, revisit original chats, and perform multiple file/code steps in a character workspace; reflection can also initiate tasks when enabled. Desktop control and browser automation are not included. See [Features](#features).
 - **Character companionship is the focus.** Emotion and affinity shape how each character responds, giving conversations during breaks from work or study their own personality; looking things up, keeping todos, and setting reminders are part of that companionship.
 - **Not a plug-and-play cloud app.** You supply the API keys or local model. Python environment or Docker required.
 
@@ -112,26 +112,28 @@ Shikigami bets on **state machines, reflection, proactivity, and an integrated m
 
 **Requirements**
 
-- Python 3.10+ (3.12 recommended)
+- **Python 3.12 recommended** (source-install test baseline; heavy optional AI packages are not guaranteed on 3.14/3.15)
 - Node.js 18+ (Electron desktop only)
 - An LLM API — Gemini / OpenAI / Ollama / any OpenAI-compatible endpoint
 
-**Recommended: download the latest release archive**
+**For a published version: download its release archive**
 
-Go to [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest), download **Source code (zip)**, extract it, then follow the steps below inside the extracted folder.
+Go to [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases), choose a published version and download **Source code (zip)**. Follow the instructions included in that archive; the latest published archive does not yet contain v0.12.0.
 
-**Or clone with git (tracks latest commits on main)**
+**To try the upcoming v0.12.0: clone `dev`**
+
+Git is optional: on GitHub select the `dev` branch, choose **Code → Download ZIP**, extract it, and run the platform commands below from the extracted directory.
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 ```
 
-**Windows**
+**Windows (PowerShell)**
 
-```bat
-init.bat
-launch.bat
+```powershell
+.\init.bat
+.\launch.bat
 ```
 
 **macOS / Linux**
@@ -146,24 +148,34 @@ bash launch.sh
 ### Option 2: Docker (server / NAS)
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp .env.example .env   # add your API keys
 docker compose up -d
 # open http://localhost:7788
 ```
 
-`profiles/`, `models/`, `Voices/`, `config/` are mounted as volumes. Uncomment `deploy.resources` in `docker-compose.yml` for GPU support (requires nvidia-container-toolkit).
+This block uses macOS/Linux shell syntax; in PowerShell use `Copy-Item .env.example .env`, or `copy .env.example .env` in CMD (new installs only).
+
+`data/`, `profiles/`, `models/`, `Voices/`, `config/` are mounted as volumes. `.env` is mounted read-only: edit its keys on the host. This starts the **main application and Web UI**; the supplied image has no Docker CLI and Compose does not mount a Docker socket, so it does **not** enable Harness. Use the host source setup for Harness; see [first-run setup](docs/SETUP_FIRST_RUN.en.md). Uncomment `deploy.resources` in `docker-compose.yml` for GPU support (requires nvidia-container-toolkit).
 
 ---
 
 ### API keys
 
-Edit `.env` with at least one LLM key, e.g. `GEMINI_API_KEY`. Match preset names in `config/app.yaml`, or configure via **Settings → LLM** in the UI (writes back to `.env` automatically).
+Open **Settings → Models**, save a preset with its provider, model ID, API key and base URL (for a local model, use its running OpenAI-compatible endpoint), then select it for chat. Or edit `llm_presets` / `default_llm` in `config/app.yaml` and the matching key in `.env`, e.g. `GEMINI_API_KEY`. Docker uses a read-only `.env`; edit keys on the host. Basic chat requires neither Docker nor Harness when running from source.
 
 ### Pick a persona
 
-**Settings → Personas** — choose `Luna` or `Mochi` to start.
+**Settings → Profiles** — choose `Luna` or `Mochi` to start.
+
+### Enable tools (optional)
+
+AI tools, optional capabilities and reflection-initiated tasks are **off by default**. Harness additionally requires a running **Linux-container Docker engine** and the image build in [first-run setup](docs/SETUP_FIRST_RUN.en.md). Choose **Settings → Models → Tool execution model**, then enable AI tools and the needed capabilities in **Settings → Tools**. **Profiles → Tools** can enable, disable or inherit each permission. Check the local runtime status and test the model connection separately before a small task.
+
+### Upgrading from v0.11.0
+
+Stop the app and tool tasks, and back up the matching old source plus `.env`, all of `config/`, `profiles/` (including workspaces), and `data/`. Preserve these when updating; reinstall dependencies and rebuild the Harness image if used. Older Docker containers may still hold `/app/data` internally: copy it out before recreating them. See [backup and upgrade steps](docs/SETUP_FIRST_RUN.en.md#upgrading-from-v0110).
 
 ### FAQ
 
@@ -171,10 +183,10 @@ Edit `.env` with at least one LLM key, e.g. `GEMINI_API_KEY`. Match preset names
 
 - **Blank page or can't connect on :7788** — the backend may still be starting; check the terminal output and refresh once the service is ready. If it still fails, look for the specific error.
 - **Invalid API key / no response** — the variable name in `.env` must match the preset name in `config/app.yaml` (e.g. preset `Gemini-2.5` → variable `GEMINI_2_5_API_KEY`).
-- **Memory not extracting** — confirm `memory.enabled: true` in `config/app.yaml`; built-in vector retrieval support is disabled by default. Install the optional `chromadb` dependency via **Settings → Onboarding**, then set `memory.vector_enabled: true` to enable it.
-- **No TTS audio** — `edge_tts` (default) requires an internet connection; local engines (KokoroTTS / GPT-SoVITS) need separate installation and configuration via Onboarding.
-- **Electron crashes or won't start on Windows** — make sure you've run `init.bat` first; if it persists, delete the `.venv` folder and run `init.bat` again.
-- **Server / NAS deployment** — use the Docker option; data directories are volume-mounted and will survive upgrades.
+- **Memory not extracting** — enable memory in **Settings → Memory settings**, check the selected character's fact-extraction model and extraction frequency there, and test that model's saved preset under **Models**. Extraction runs after the configured number of conversation turns; ChromaDB is not required. Optional vector retrieval improves semantic lookup separately: install `chromadb` via **Settings → First steps**, configure embeddings, then enable vectors in Memory settings.
+- **No TTS audio** — `edge_tts` (default) requires an internet connection; local engines (KokoroTTS / GPT-SoVITS) need separate installation and configuration via First steps.
+- **Electron crashes or won't start on Windows** — run `init.bat` first. If it reports an invalid or outdated `.venv`, close the app, back up or rename that environment (e.g. `.venv-old`), then rerun `init.bat` to create a new one; keep the old environment for rollback.
+- **Server / NAS deployment** — use the Docker option for the Web UI. Preserve the mounted data and configuration when upgrading; copy any legacy container-only `/app/data` out before recreating it.
 
 <a id="features"></a>
 
@@ -188,10 +200,11 @@ Edit `.env` with at least one LLM key, e.g. `GEMINI_API_KEY`. Match preset names
 
 - **Long-term Facts**: Periodic LLM extraction into persistent JSON with Jaccard deduplication.
 - **Vector Retrieval**: Optional ChromaDB semantic retrieval can be combined with BM25 keyword search to find extracted facts relevant to the current conversation.
-- **Midnight Reflection (00:05) — "AI Diary"**:
-  - **Personal Journals**: Summarizes daily interactions into an emotional diary.
-  - **Consolidation**: Automatically merges scattered fragments into stable user knowledge.
-  - **Active Forgetting**: Memory weights decay daily, changing which memories are retained over time.
+- **Sources and review**: Memories can link to original messages, keep revisions, and be reviewed, archived or restored; expired plans leave recall. Browse contents from the sidebar memory entry; tune extraction and review under **Settings → Memory settings**. Rolling summaries carry long conversations forward while fact extraction tracks its own progress.
+- **Daily summaries and memory review**:
+  - **Personal Journals**: When enabled, daily summaries use the character's persona and that day's conversation on the configured memory schedule (example: 00:05). This is separate from background reflection.
+  - **Optional Curation**: Preview proposed memory changes and review, archive or restore records; scheduled curation has its own switch and cadence. Daily summaries do not automatically merge all facts.
+  - **Expiration and Recall**: Expired plans leave recall; keyword and optional vector indexes follow memory changes. Archiving keeps records available for review rather than treating weight decay as deletion.
 
 ### ❤️ Emotion & Affinity (Bones)
 
@@ -238,6 +251,11 @@ Not a corporate bot. A life partner who actually cares.
 - **Seamless Knowledge**:
   - **Live Search**: Use `/search` to pull web data directly into the chat.
   - **Stay Focused**: Never tab out; information flows naturally into the chat.
+
+- **Character tasks and workspaces**: With Harness enabled, ask for sourced research, original-chat lookup, or file/code work. The chat model decides whether to delegate; the tool execution model handles the task, and the chat model writes the final reply from its results. The header workspace button opens **Files / Plans / Tasks** for previews, downloads and task records. **Stop** preserves completed effects; **Continue** starts a new run using prior records.
+- **Reminders and reports**: Dated reminders persist across restarts. Configure a per-character daily report in **Reminders → Daily report**; it runs at server-local time while the backend is running and the character is loaded.
+
+See [Harness setup and permission details](integrations/deepseek-harness/README.md).
 
 ### 🎙️ Voice (TTS & STT)
 

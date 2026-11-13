@@ -22,7 +22,7 @@
 
 </div>
 
-> ⚠️ **项目状态**：Public Beta（v0.11.0；具体版本见根目录 `package.json` 与 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)）。核心架构已稳定可用，仍可能存在未知 Bug。欢迎在 [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) 中交流反馈。
+> ⚠️ **项目状态**：`dev` 正在准备 **v0.12.0 Public Beta，尚未正式发布**。本文介绍该开发版本；已发布版本见 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)。仍可能存在未知 Bug。欢迎在 [Discussions](https://github.com/Shikigami-Lab/Shikigami-Protocol/discussions) 中交流反馈。
 
 Shikigami Protocol 是陪你工作、学习的桌面伙伴，想带来像 Lofi Girl 一样的在场感，也能和你聊天、积累共同经历的记忆。后台服务运行且启用自省与主动发言后，角色会结合语境与内部状态，在满足触发条件时主动开口；你也可以和它聊图片、用语音交流，或在对话里查资料、记待办、设提醒。完全开源，AGPL-3.0 — **聊天记录、记忆提取与状态机数据保存在你的设备上**；**大模型推理与向量嵌入**可选用云端 API、完全本地（如 Ollama）或混合部署，由你在 `config/app.yaml` 与引导页里决定。
 
@@ -98,7 +98,7 @@ Shikigami 押的是**状态机、自省、主动性、记忆管线**的一体化
 
 ## ❌ 这不是什么
 
-- **工具范围是对话中的具体小事**：支持搜索、待办与计时提醒；目前没有桌面控制、浏览器自动化或自主多步骤任务执行能力，详见 [功能详览](#cn-features)。
+- **工具在明确权限内行动**：可选 Harness 任务能查资料、回看原始聊天，在角色工作区中分步处理文件与代码；启用后也可由自省发起任务。目前不含桌面控制与浏览器自动化，详见 [功能详览](#cn-features)。
 - **角色陪伴是核心**：情绪与好感度会影响角色的表达，让工作、学习间隙的交流保留各自的性格；查资料、记事与提醒也融在这种陪伴里。
 - **不是开箱即用的云端 APP**：这是一个需要自备 API Key 或本地模型，以及基础 Python 环境或 Docker 的硬核框架。
 
@@ -112,26 +112,28 @@ Shikigami 押的是**状态机、自省、主动性、记忆管线**的一体化
 
 **环境要求**
 
-- Python 3.10+（推荐 3.12）
+- **推荐 Python 3.12**（源码安装测试基准；不保证 3.14/3.15 的重型可选 AI 依赖兼容）
 - Node.js 18+（仅 Electron 桌面版需要）
 - 一个 LLM API：Gemini / OpenAI / Ollama / 任意 OpenAI 兼容接口
 
-**推荐：下载最新 Release 压缩包**
+**使用已发布版：下载对应 Release 压缩包**
 
-前往 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases/latest)，下载 **Source code (zip)**，解压后在解压目录内执行下方命令。
+前往 [Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases)，选择已发布版本的 **Source code (zip)**，按包内说明安装。当前最新发布包尚不包含 v0.12.0。
 
-**或使用 git clone（跟踪 main 分支最新提交）**
+**体验即将发布的 v0.12.0：克隆 `dev`**
+
+Git 可选：也可在 GitHub 切换到 `dev` 分支，选择 **Code → Download ZIP**，解压后在解压目录执行下方对应系统的启动命令。
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 ```
 
-**Windows**
+**Windows（PowerShell）**
 
-```bat
-init.bat
-launch.bat
+```powershell
+.\init.bat
+.\launch.bat
 ```
 
 **macOS / Linux**
@@ -146,14 +148,16 @@ bash launch.sh
 ### 方式二：Docker（服务器 / NAS）
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp .env.example .env   # 填入 API Key
 docker compose up -d
 # 访问 http://localhost:7788
 ```
 
-`profiles/`、`models/`、`Voices/`、`config/` 已挂载为 volume。GPU 可选：取消注释 `docker-compose.yml` 中 `deploy.resources`。
+上方使用 macOS/Linux shell 语法；PowerShell 改用 `Copy-Item .env.example .env`，CMD 用 `copy .env.example .env`（仅首次安装时复制）。
+
+`data/`、`profiles/`、`models/`、`Voices/`、`config/` 已挂载为 volume。`.env` 为只读挂载，密钥需在宿主机编辑。此方式启动的是**主应用与 Web UI**；现有镜像未含 Docker CLI，Compose 也未挂载 Docker 套接字，不能据此直接启用 Harness。使用 Harness 请按[首次运行文档](docs/SETUP_FIRST_RUN.zh.md)在宿主机运行源码。GPU 可选：取消注释 `docker-compose.yml` 中 `deploy.resources`。
 
 ---
 
@@ -166,11 +170,19 @@ GEMINI_API_KEY=你的密钥
 # 或本地 Ollama：OLLAMA_LOCAL_API_KEY=ollama
 ```
 
-然后在 `config/app.yaml` 中设置 `default_llm`，或在 UI **设置 → LLM 预设** 中修改（会自动写回 `.env`）。
+在 **设置 → 模型** 中保存预设的提供方、模型 ID、API Key 和 Base URL（本地模型填写已运行的 OpenAI 兼容接口），再选择用于聊天的预设。手动配置时，对应修改 `config/app.yaml` 的 `llm_presets` / `default_llm` 与 `.env` 的密钥。Docker 中 `.env` 为只读挂载，密钥在宿主机编辑。源码基础聊天无需 Docker 或 Harness。
 
 ### 选择角色开始对话
 
 启动后进入 **设置 → 人格**，选择 `月白 Luna` 或 `Mochi`。
+
+### 启用工具（可选）
+
+AI 工具、各项可选能力与自省发起任务均**默认关闭**。Harness 额外需要运行中的 **Docker Linux 容器引擎**，并按[首次运行文档](docs/SETUP_FIRST_RUN.zh.md)构建镜像。在 **设置 → 模型 → 工具执行模型** 选好预设，再在 **设置 → 工具** 开启 AI 工具及所需能力；**人格 → 工具配置** 可逐项开启、关闭或继承。先检查本地运行状态，另行测试模型连接，再试一个小任务。
+
+### 从 v0.11.0 升级
+
+退出应用和工具任务，备份配套旧源码及 `.env`、整个 `config/`、`profiles/`（含工作区）、`data/`。更新时保留这些内容，重新安装依赖；使用 Harness 时重建镜像。旧 Docker 容器可能把 `/app/data` 存在容器内，重建前须先迁出。详见[备份与升级步骤](docs/SETUP_FIRST_RUN.zh.md#upgrade-v0110)。
 
 ### 常见问题
 
@@ -178,10 +190,10 @@ GEMINI_API_KEY=你的密钥
 
 - **启动后浏览器显示空白或无法连接**：后端可能尚未启动完成，查看终端输出，待服务就绪后刷新页面。若仍失败，查看具体报错信息。
 - **API Key 无效 / 无法对话**：`.env` 中的变量名须与 `config/app.yaml` 里 `llm_presets` 的预设名对应（如预设名为 `Gemini-2.5`，则变量名为 `GEMINI_2_5_API_KEY`）。
-- **记忆未提取**：确认 `config/app.yaml` 中 `memory.enabled: true`；内置的向量检索支持默认未启用，需额外安装 `chromadb`（在 **设置 → Onboarding** 中一键安装），再设置 `memory.vector_enabled: true`。
-- **TTS 没声音**：默认使用 `edge_tts`，需要网络连接；本地 TTS 引擎（KokoroTTS / GPT-SoVITS）需在 Onboarding 中单独安装配置。
-- **Windows Electron 闪退 / 启动失败**：确保先运行过 `init.bat`；若问题持续，尝试删除 `.venv` 目录后重新执行 `init.bat`。
-- **服务器 / NAS 部署**：使用 Docker 方式，数据目录已通过 volume 持久化，升级时不会丢失数据。
+- **记忆未提取**：先在**设置 → 记忆设置**启用记忆，核对所选人格的事实提取模型与提取轮次，再到**模型**测试该预设的连接。事实提取在达到配置轮次后执行，不需要 ChromaDB。向量仅单独改善语义检索：按需在**设置 → 新手引导**安装 `chromadb`、配置嵌入，再在记忆设置启用向量。
+- **TTS 没声音**：默认使用 `edge_tts`，需要网络连接；本地 TTS 引擎（KokoroTTS / GPT-SoVITS）需在新手引导中单独安装配置。
+- **Windows Electron 闪退 / 启动失败**：先运行 `init.bat`；若提示 `.venv` 无效或过旧，退出应用后先备份或重命名旧环境（如 `.venv-old`），再运行 `init.bat` 新建环境，保留旧环境以便回退。
+- **服务器 / NAS 部署**：使用 Docker 方式运行 Web UI。升级需保留挂载的数据和配置；旧容器内尚未迁出的 `/app/data` 要先复制出来再重建。
 
 <a id="cn-features"></a>
 
@@ -195,10 +207,11 @@ GEMINI_API_KEY=你的密钥
 
 - **长期事实**：LLM 周期性提取对话细节，通过 JSON 持久化与算法去重。
 - **向量检索**：可选 ChromaDB 语义检索，可与 BM25 关键词检索结合，从已提取的事实中查找与当前对话相关的记忆。
-- **午夜自省 (00:05) — “AI 写日记”**：
-  - **记下今天**：角色总结全天互动，写下带情绪色彩的日记。
-  - **去芜存菁**：零散的短期事实会被自动整合进长期认知。
-  - **模拟遗忘**：权重每日衰减，让记忆的取舍随时间变化。
+- **来源与整理**：记忆可关联原始消息，保留修订，可预览整理、归档与恢复；到期安排退出召回。侧栏记忆入口用于浏览内容，**设置 → 记忆设置**用于调整提取与整理。滚动摘要帮助长聊衔接，事实提取单独记录进度。
+- **日摘要与记忆整理**：
+  - **记下今天**：启用后，按记忆日任务时间（示例为 00:05），结合完整人格与当天对话生成随记；这与后台自省是独立流程。
+  - **可选整理**：先预览建议，再审阅、归档或恢复；定时整理有独立开关和周期，日摘要不等于每天自动合并所有事实。
+  - **到期与召回**：到期安排退出召回，关键词与可选向量索引随记忆变更同步；归档记录仍可审阅，不把权重衰减等同于删除。
 
 ### ❤️ 情绪与好感度 (Emotion & Affinity)
 
@@ -245,6 +258,11 @@ AI 不应住在黑盒里，它正与你共处同一时空。
 - **随聊随查**：
   - **信息互通**：使用 `/search` 指令实时抓取全网信息。
   - **无需跳出**：资料直接带回对话，聊天不再被打断。
+
+- **角色任务与工作区**：启用 Harness 后，可请求带来源的资料整理、原始聊天检索或文件与代码任务。聊天模型决定是否委派，工具执行模型负责执行，最终回复仍由聊天模型根据结果完成。聊天顶部的工作区按钮打开**文件 / 计划 / 任务**，可预览、下载产物并查看任务记录。**停止**保留已完成的效果；**继续**基于已有记录启动新一轮执行。
+- **提醒与汇报**：具体日期的提醒重启后仍保留；在**提醒 → 每日汇报**按角色配置汇报，后端运行且角色已加载时，按服务端本地时间执行。
+
+安装与权限细节见 [Harness 说明](integrations/deepseek-harness/README.md)。
 
 ### 🎙️ 语音（TTS & STT）
 

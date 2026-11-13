@@ -9,26 +9,26 @@
 
 ## 快速路径
 
-**已不再发布预编译桌面安装包（.exe / .dmg / .AppImage）。** 请使用下方 **源码运行**，或 **Docker**。[Releases](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 仅作版本标签与说明，附件为 GitHub 默认提供的**源码压缩包**；桌面端打包与发行形态**正在开发中**。
+**v0.12.0 Public Beta 正在 `dev` 准备，尚未正式发布。** 下方命令明确选择 `dev`；默认 `main` 与旧 [Release 压缩包](https://github.com/Shikigami-Lab/Shikigami-Protocol/releases) 不包含这些更新。源码可运行 Electron 或浏览器模式，Docker 用于主应用 Web UI。目前没有 v0.12.0 预编译桌面安装包。本文说明运行要求，不代表所有平台、CPU 架构及可选组件均已验收。
 
 ### 源码运行
 
-#### Windows
-```bat
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+#### Windows（PowerShell）
+```powershell
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
-init.bat
-launch.bat
+.\init.bat
+.\launch.bat
 ```
 
-`init.bat` 会自动：检测 Python → 创建/修复 `.venv` → `pip install -r requirements.txt` (核心依赖) → （有 Node 时）`npm install` → 复制 `.env.example` 为 `.env`。
+`init.bat` 会检测 Python、准备 `.venv`、安装核心依赖，并在有 Node 时安装 Node 依赖，复制缺失的配置模板。若提示环境无效或过旧，先保留或重命名旧 `.venv`，再重新运行。
 
-> **AI 增强组件**：ChromaDB、ModelScope、Qwen3-TTS 等较重依赖库不再默认安装，请在启动后的 **设置 → 入门** 页面点击一键安装。
+> **AI 增强组件**：ChromaDB、ModelScope、Qwen3-TTS 等较重依赖库不再默认安装，请在启动后的 **设置 → 新手引导** 页面点击一键安装。
 
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 bash init.sh
 bash launch.sh
@@ -37,14 +37,18 @@ bash launch.sh
 ### Docker（服务器 / NAS / 无 Electron）
 
 ```bash
-git clone https://github.com/Shikigami-Lab/Shikigami-Protocol.git
+git clone --branch dev https://github.com/Shikigami-Lab/Shikigami-Protocol.git
 cd Shikigami-Protocol
 cp .env.example .env        # 填写 API Key
 docker compose up -d
 # 浏览器打开 http://localhost:7788
 ```
 
-`profiles/`、`models/`、`Voices/`、`config/` 已挂载为 volume，数据不随容器销毁。GPU 可选：取消注释 `docker-compose.yml` 中的 `deploy.resources`（需 nvidia-container-toolkit）。
+上方为 macOS/Linux shell 语法；PowerShell 使用 `Copy-Item .env.example .env`，CMD 使用 `copy .env.example .env`（仅首次安装时复制）。
+
+`data/`、`profiles/`、`models/`、`Voices/`、`config/` 已挂载为 volume；`.env` 为只读挂载，API Key 需在宿主机编辑。旧容器若仍有只存在 `/app/data` 中的数据，须按[升级步骤](#upgrade-v0110)先迁出再重建。GPU 可选：取消注释 `docker-compose.yml` 中的 `deploy.resources`（需 nvidia-container-toolkit）。
+
+这是**主应用 Docker 部署**，与可选的 **Harness 任务容器**分开。现有主镜像没有 Docker CLI，Compose 未挂 Docker 套接字，单独 `docker compose up` 无法提供 Harness 访问。使用 Harness 请在宿主机运行源码，并按下文安装。
 
 常用命令：`docker compose up -d` / `down` / `logs -f` / `up -d --build`
 
@@ -52,9 +56,9 @@ docker compose up -d
 
 ## 前置依赖
 
-### Python 3.10+
+### Python 3.12（推荐）
 
-**作用**：运行 `server.py` 及全部后端逻辑。
+**作用**：运行 `server.py` 及全部后端逻辑。当前安装**推荐 Python 3.12**，源码安装测试以此为基础。项目标注 3.10+，不代表最新 Python 3.14/3.15 的重型可选 AI 依赖已兼容；创建虚拟环境时请选 3.12。
 
 **Windows 安装（任选其一）**：
 - 官网安装包：[python.org/downloads](https://www.python.org/downloads/) — 安装时**勾选 "Add Python to PATH"**
@@ -64,7 +68,9 @@ docker compose up -d
 **macOS**：`brew install python@3.12` 或官网 pkg
 **Linux**：`sudo apt install python3.12 python3.12-venv` 或发行版等价命令
 
-**验证**（新开终端）：`python --version` 或 `py -3 --version` → 应显示 3.10+
+**验证**（新开终端）：Windows 用 `py -3.12 --version`，macOS/Linux 用 `python3.12 --version`，应显示 3.12.x。
+
+留意 init 脚本实际选择的 Python；若选到其他版本，改用下方「手动步骤」中明确指定 3.12 的命令。
 
 ### Node.js 18+（仅 Electron 桌面版需要）
 
@@ -79,38 +85,33 @@ docker compose up -d
 
 ## 手动步骤（不想用 init 脚本时）
 
-```bash
-# 1. 创建虚拟环境（仅首次）
-python -m venv .venv
+**Windows（CMD）**
 
-# 2. 激活并安装依赖
-# Windows:
-.venv\Scripts\activate
-# macOS / Linux:
-source .venv/bin/activate
-
-pip install -r requirements.txt
-
-# 3. 桌面版：安装 Node 依赖（仅首次）
-npm install
-
-# 4. 复制环境变量模板（仅首次）
-cp .env.example .env
-# 编辑 .env，填入至少一个 LLM API Key
-
-# 5. 启动
-# 桌面版：
-npm start
-# 或仅后端 + 浏览器：
-python server.py
-# 浏览器访问 http://localhost:7788
+```bat
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+copy .env.example .env
+copy config\app.yaml.example config\app.yaml
+.venv\Scripts\python server.py
 ```
+
+**macOS / Linux**
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+cp config/app.yaml.example config/app.yaml
+.venv/bin/python server.py
+```
+
+**仅新安装时**复制模板，升级时保留原配置。浏览器访问 `http://localhost:7788`。使用 Electron 时另装 Node，执行 `npm install`，再用对应平台的启动脚本，不要同时另起 `server.py`。PowerShell 中 Windows 的 `.venv` 命令前加 `.\`，`copy` 改用 `Copy-Item`。
 
 ---
 
 ## 配置 API Key
 
-**推荐**：启动应用后，在 **设置 → 模型** 里直接填写 API Key，自动保存。
+**推荐**：打开**设置 → 模型**，选择或新建预设，填写提供方、模型 ID、Base URL 和 API Key，保存并测试连接，再选择用于聊天的预设。本地模型需先运行接口，并填写实际已安装的模型名。Docker 的 `.env` 为只读挂载，需在宿主机编辑；界面提示密钥保存失败时不代表已写入。
 
 也可在启动前编辑项目根目录的 `.env`（适合 Docker / 无界面部署）：
 
@@ -122,6 +123,8 @@ GEMINI_API_KEY=你的密钥
 
 ---
 
+<a id="harness-setup"></a>
+
 ## AI 工具（Harness，可选）
 
 让角色真正执行任务：读写其工作区文件、运行代码、搜索网页、查找历史消息、操作待办与计时器等。**所有工具能力默认关闭**——不打算用工具的话，本节可以完全跳过，普通聊天不受影响。
@@ -130,13 +133,13 @@ GEMINI_API_KEY=你的密钥
 
 ### 第 1 步：安装并启动 Docker
 
-工具代码在隔离的 Docker 容器里执行（无网络、只读文件系统），所以需要一个容器引擎：
+Harness 任务要求宿主应用可访问 **Docker Linux 容器引擎**。代码无直接网络访问，容器根文件系统只读，授权后角色工作区可写；模型和受控网页请求经宿主桥接。各平台要求：
 
 - **Windows**：安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（需要 WSL2，安装向导会引导）。**使用工具期间保持 Docker Desktop 运行**；可在其设置里勾选 "Start Docker Desktop when you sign in" 免每次手动开。
-- **macOS**：Docker Desktop for Mac，或免费替代品 [OrbStack](https://orbstack.dev/) / [colima](https://github.com/abiosoft/colima)——能提供 `docker` 命令即可。
+- **macOS**：可使用 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 等 Linux 容器引擎，应用进程须能访问引擎及其绑定挂载。Intel 与 Apple Silicon 各自需要原生镜像构建及运行检查；只有 `docker` 命令不代表已可用。
 - **Linux**：`sudo apt install docker.io`（或发行版等价命令）并启动服务；把用户加入 docker 组免 sudo。
 
-**验证**（新开终端）：`docker version` 应同时显示 Client 和 Server 两段。只有 Client 说明引擎没启动。
+**验证**（新开终端）：`docker version` 须同时显示 Client 和 Server；`docker info --format "{{.OSType}}"` 应返回 `linux`。应用进程也须能访问该引擎；仍需按本机 CPU 架构检查构建与运行。
 
 ### 第 2 步：构建 Harness 镜像（一次性，需联网）
 
@@ -149,8 +152,8 @@ docker build -t shikigami-harness:workspace-0.2.1rc2 integrations/deepseek-harne
 ### 第 3 步：在应用里启用
 
 1. **设置 → 模型 → 工具执行模型**：选一个已保存的模型预设（留空则跟随当前聊天模型）。
-2. **设置 → 工具**：打开"默认启用 AI 工具"，按需开启 workspace / code / web / history / memory / todo 等能力（code 需要先开 workspace）。状态显示 **ready** 即就绪。
-3. **人格 → 工具配置**（可选）：对单个角色覆盖全局默认，比如只给某个角色开工具。
+2. **设置 → 工具**：打开「默认启用 AI 工具」，按需开启 workspace / code / web / history / memory / todo 等能力（code 需要先开 workspace）。**ready** 仅说明本地前置条件与有效权限就绪；请另在「模型」测试连接，再试一个小任务。
+3. **设置 → 人格 → 工具配置**（可选）：各项可开启、关闭或继承；全局关闭时也可只给某角色开启。计时器与待办还有独立权限。先检查普通工具使用，再按需开启自省发起任务。
 
 更细的能力说明见 [integrations/deepseek-harness/README.md](../integrations/deepseek-harness/README.md)。
 
@@ -166,6 +169,17 @@ docker build -t shikigami-harness:workspace-0.2.1rc2 integrations/deepseek-harne
 
 ---
 
+<a id="upgrade-v0110"></a>
+
+## 从 v0.11.0 升级
+
+1. 退出应用及工具任务，备份配套旧源码、依赖版本，以及 **`.env`、整个 `config/`、`profiles/`、`data/`**。包括角色工作区 `profiles/<id>/workspace/`、聊天与记忆数据库、`data/agent/` 中的任务记录和工作区版本。若有 SQLite `-wal` / `-shm` 文件，一并保留；应用内工作区快照不等于完整备份。使用本地模型或语音资源时，也保留 `models/`、`Voices/`。
+2. **旧 Docker 部署**：若 `/app/data` 尚未绑定挂载，先停止旧容器，在重建或删除前复制出该目录。备份后将保留的内容放入新版 Compose 挂载的宿主机 `data/`。新的空挂载只会遮住旧容器数据，不会自动迁移。
+3. 更新源码时保留这些配置和数据，勿用模板覆盖或用空压缩包替换整个安装目录。在应用环境重装依赖：Windows 用 `.\.venv\Scripts\python -m pip install -r requirements.txt`，macOS/Linux 用 `.venv/bin/python -m pip install -r requirements.txt`。使用 Electron 时执行 `npm install` 更新依赖；使用 Harness 时按上方命令重建镜像。主应用 Docker 在数据迁移后执行 `docker compose up -d --build`。
+4. 先关闭 AI 工具启动，核对模型配置、原有聊天、记忆与工作区文件，再逐项开启权限。更新可能新增数据库列，回退时需停机并成套恢复旧源码、依赖/镜像和备份数据，先另存更新后产生的成果。
+
+---
+
 ## 常见问题与排查
 
 ### 闪退 / exit code 103
@@ -178,7 +192,7 @@ docker build -t shikigami-harness:workspace-0.2.1rc2 integrations/deepseek-harne
 
 **原因**：项目的 `.venv` 是从其他电脑复制来的，其 `pyvenv.cfg` 指向了原机器上的 Python 路径，本机不存在该路径。
 
-**解决**：在项目根目录运行 `init.bat`（会自动检测并重建 `.venv`），或手动删除 `.venv` 后重新执行 `pip install -r requirements.txt`。
+**解决**：退出应用，先保留或重命名旧 `.venv`（如 `.venv-old`），再在项目根目录运行 `init.bat` 创建新环境。保留旧环境与配置、数据备份以便回退。
 
 ---
 

@@ -8,11 +8,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Target: **v0.12.0 Public Beta** (not yet released; available for source testing on `dev`).
+
 ### Added
 
-- [Tools] Select a separate saved model preset for Harness chat turns and autonomous tasks in Models settings. The default follows the active chat model.
+- [Tools] Select a separate saved **tool execution model** for delegated chat and reflection tasks in Models settings; it defaults to the active chat model. The chat model decides whether to answer, ask or delegate, and writes the final chat reply from execution results.
 - [Tools] **Tool-assisted single chat and persistent character workspaces.** Opt-in file/code tasks, controlled web retrieval/search, original-history lookup and timers use the existing chat UI. The workspace drawer provides **Files**, **Plans** and **Tasks**, with file descriptions, separate user todos / character plans, artifact links and Stop/Continue controls.
 - [Reflection] **Opt-in autonomous tasks.** The selected single-chat character can start enabled tool work through the existing reflection loop; admitted tasks retain their owner after switching. Results return to that character's reflection without background chat messages. Autonomous tasks cannot change user todos or use timers; character on/off/inherit settings override application defaults while shared budgets and time limits remain hard bounds.
+- [Reminders] **Persistent dated reminders and per-character daily reports.** Dated reminders survive restarts; reports use the server-local schedule while the backend runs and the character is loaded.
+- [Memory] **Sources, revisions and review controls.** Memories retain available original-message links and revisions; preview curation, archive or restore records, and exclude expired plans from recall. Keyword retrieval remains available without vectors.
+- [Context] **Rolling conversation summaries** with separate progress for context compression and fact extraction.
+- [UI] Collapsible navigation, adjustable workspace width, separate memory content and settings views, and consistent Lucide icons.
+
+### Changed
+
+- [Setup] AI tools, autonomous tasks and optional capabilities default to off. Harness requires a separate Linux-container Docker engine and image build; the supplied main-app Compose setup does not provide Docker access for Harness.
+- [Memory] Fact extraction and daily summaries use the full persona, with editable task prompts in Memory settings.
+- [Models] Native Gemini presets and compatibility fixes for model configuration.
 
 ### Fixed
 
