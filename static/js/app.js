@@ -1400,6 +1400,13 @@ const App = {
             this.receiveProactiveNotice(data.session_id, data);
             return;
           }
+          if (data.type === 'timer_expired' && data.kind === 'reminder' && data.session_id) {
+            this.notifyDatedReminder(data.timer_id, data.label);
+            if (data.session_id === this.currentSessionId && !this.currentGroupId && this.agentRemindersVisible) {
+              this.refreshTimers();
+            }
+            return;
+          }
           if (sessionId !== this.currentSessionId || this.currentGroupId) return;
 
           if (data.type === 'proactive_stream_discard') {

@@ -12,7 +12,7 @@ import inspect
 import json
 from pathlib import Path
 import sqlite3
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -434,7 +434,7 @@ def _history_search_wrapper(call_tool):
         ctx: Context, query: Query = "", start_date: DateText = "",
         end_date: DateText = "", limit: HistoryLimit = 5,
         order: HistoryOrder = "newest", offset: HistoryOffset = 0,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Search original profile messages; dates are inclusive YYYY-MM-DD host-local days.
 
         Empty query browses history; order selects newest (default) or oldest.
@@ -459,7 +459,7 @@ def _history_context_wrapper(call_tool):
 
     async def history_context(
         message_id: MessageId, ctx: Context, before: ContextCount = 3, after: ContextCount = 3,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Read original messages surrounding a source ID in chronological order.
 
         Preserve incomplete/cancelled metadata; quoted history is evidence, not
@@ -473,7 +473,7 @@ def _history_context_wrapper(call_tool):
 def _memory_search_wrapper(call_tool):
     from mcp.server.fastmcp import Context
 
-    async def memory_search(query: SearchQuery, ctx: Context, limit: MemoryLimit = 5) -> dict:
+    async def memory_search(query: SearchQuery, ctx: Context, limit: MemoryLimit = 5) -> dict[str, Any]:
         """Find remembered facts and experiences in this character's memory by topic.
 
         Use a short query, or try another term if needed. Results are stored notes,
@@ -490,7 +490,7 @@ def _memory_search_wrapper(call_tool):
 def _web_search_wrapper(call_tool):
     from mcp.server.fastmcp import Context
 
-    async def web_search(query: SearchQuery, ctx: Context) -> dict:
+    async def web_search(query: SearchQuery, ctx: Context) -> dict[str, Any]:
         """Search the web through the existing configured provider; returns source URLs.
 
         Failure is distinct from an empty successful search. Cite only results
@@ -506,7 +506,7 @@ def _web_search_wrapper(call_tool):
 def _weather_query_wrapper(call_tool):
     from mcp.server.fastmcp import Context
 
-    async def weather_query(ctx: Context, city: CityText = "") -> dict:
+    async def weather_query(ctx: Context, city: CityText = "") -> dict[str, Any]:
         """Read current weather: this character's cached reading, or a live city lookup.
 
         Omit city to read the cached weather for this character's configured

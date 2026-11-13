@@ -115,7 +115,7 @@ class MessageBroadcastIdTests(unittest.IsolatedAsyncioTestCase):
         for target in ("src.config.effective_config.get_effective_max_history_turns",
                        "src.api.chat.get_effective_max_history_turns"):
             self._patches.enter_context(mock.patch(target, return_value=4))
-        self._patches.enter_context(mock.patch("src.api.memory._get_or_create_manager"))
+        self._patches.enter_context(mock.patch("src.api.memory.get_or_create_manager"))
         self._patches.enter_context(mock.patch.multiple(
             "src.api.chat", log_llm_call=mock.DEFAULT, log_llm_response=mock.DEFAULT,
             log_error=mock.DEFAULT, log_debug=mock.DEFAULT,

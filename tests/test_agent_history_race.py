@@ -54,7 +54,7 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = AgentRuntime(self.app, root=self.tmp.name, timer_manager=timers,
                                     profile_loader=lambda _: {"tool_configs": {"timer": {"enabled": True}}})
         self.app.state.agent_runtime = self.runtime
-        self.request = SimpleNamespace(app=self.app)
+        self.request = SimpleNamespace(app=self.app, headers={})
 
     async def asyncTearDown(self):
         await self.runtime.close()
@@ -78,7 +78,7 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
         for guard in (
             patch.object(self.runtime, "_drive", side_effect=drive),
             patch("src.api.agent._same_origin"),
-            patch("src.api.memory._get_or_create_manager"),
+            patch("src.api.memory.get_or_create_manager"),
             patch.object(chat, "get_effective_max_history_turns", return_value=10),
             patch.object(chat, "build_messages", return_value=deepcopy(MESSAGES)),
             patch.object(chat, "get_provider", return_value=SimpleNamespace(stream_chat=first_reply)),
@@ -147,7 +147,7 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(ValueError, "history is being changed"):
                     self.prepare()
                 releases[0].set()
-                self.assertEqual(await asyncio.wait_for(deletion, 3), {"ok": True})
+                self.assertEqual(await asyncio.wait_for(deletion, 3), {"ok": True, "compacted": False})
                 self.assertEqual(self.store.get_recent(), [])
                 self.assertFalse(self.runtime.store.is_current(run.id, "alpha"))
                 fresh = self.prepare()
@@ -197,7 +197,7 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                     if name.startswith("log_") and callable(getattr(module, name)):
                         guards.enter_context(patch.object(module, name))
             guards.enter_context(patch("src.api.agent._same_origin"))
-            guards.enter_context(patch("src.api.memory._get_or_create_manager"))
+            guards.enter_context(patch("src.api.memory.get_or_create_manager"))
             guards.enter_context(patch.object(chat, "get_effective_max_history_turns", return_value=10))
             guards.enter_context(patch.object(chat, "build_messages", return_value=deepcopy(MESSAGES)))
             provider = guards.enter_context(patch.object(chat, "get_provider",
@@ -217,7 +217,7 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                 second = json.loads((await anext(stream)).removeprefix("data: ").strip())
                 self.assertEqual(second["token"], "old-context partial")
                 provider.assert_called_once()
-                self.assertEqual(await clear_session_history("alpha", self.request, type=None), {"ok": True})
+                self.assertEqual(await clear_session_history("alpha", self.request, type=None), {"ok": True, "compacted": False})
                 self.assertGreater(self.runtime.store.revision("alpha"), revision)
                 release.set()
                 frames = [json.loads(frame.removeprefix("data: ").strip()) async for frame in stream]
@@ -256,12 +256,12 @@ class AgentHistoryRaceTests(unittest.IsolatedAsyncioTestCase):
                         clear_session_history("alpha", self.request, type=None)))
                     await asyncio.wait_for(entered[index].wait(), 3)
                 releases[0].set()
-                self.assertEqual(await asyncio.wait_for(tasks[0], 3), {"ok": True})
+                self.assertEqual(await asyncio.wait_for(tasks[0], 3), {"ok": True, "compacted": False})
                 self.assertFalse(tasks[1].done())
                 with self.assertRaisesRegex(ValueError, "history is being changed"):
                     self.prepare()
                 releases[1].set()
-                self.assertEqual(await asyncio.wait_for(tasks[1], 3), {"ok": True})
+                self.assertEqual(await asyncio.wait_for(tasks[1], 3), {"ok": True, "compacted": False})
                 self.assertTrue(self.runtime.context_valid(self.prepare()))
             finally:
                 for release in releases:

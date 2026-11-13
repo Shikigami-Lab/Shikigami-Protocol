@@ -53,8 +53,10 @@ class ReminderTests(unittest.IsolatedAsyncioTestCase):
                 # A host tool runs in a worker thread and wakes the waiting scheduler.
                 await asyncio.to_thread(store.schedule, "a", "2028-01-01T19:00:00+08:00", "later")
                 event = await asyncio.wait_for(owner.get(), 2)
-                self.assertEqual(event, {"type": "timer_expired", "kind": "reminder",
+                self.assertEqual(event, {"type": "timer_expired", "kind": "reminder", "session_id": "a",
                                          "label": "bring materials", "timer_id": row["id"]})
+                self.assertEqual(await asyncio.wait_for(other_device.get(), 2), event)
+                self.assertEqual(await asyncio.wait_for(other_profile.get(), 2), event)
             reopened = self.store()
             async with reopened.running(publish_reminder_expiry):
                 await asyncio.sleep(0)

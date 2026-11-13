@@ -689,6 +689,25 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
   model.showToast = () => {};
   return { model, sandbox, app };
 }
+test('a dated reminder notifies its owner even while another character or group is open', () => {
+  for (const group of [null, 'group-fixture']) {
+    const { model, sandbox } = harness();
+    sandbox.EventSource = class { close() {} };
+    model.currentGroupId = group;
+    const notices = [];
+    let refreshes = 0;
+    model.notifyDatedReminder = (...args) => notices.push(args);
+    model.refreshTimers = () => { refreshes++; };
+    model.subscribeEvents(group ? 'group:fixture' : 'p1');
+    model._sseSource.onmessage({ data: JSON.stringify({
+      type: 'timer_expired', kind: 'reminder', session_id: 'p2', label: 'Bring materials', timer_id: 'rem-1',
+    }) });
+    assert.deepEqual(notices, [['rem-1', 'Bring materials']]);
+    assert.equal(refreshes, 0);
+    assert.equal(model.messages.length, 0);
+  }
+});
+
 test('a daily report stays separate from an overlapping proactive stream', () => {
   const { model, sandbox } = harness();
   sandbox.EventSource = class { close() {} };

@@ -117,9 +117,10 @@ async def _on_expire(app, timer_info: dict):
 
 async def publish_reminder_expiry(reminder: dict):
     """A dated reminder only sends the deterministic, profile-scoped notice."""
-    await broadcast.push_one_for_session(reminder["session_id"], {
+    await broadcast.push_all({
         "type": "timer_expired",
         "kind": "reminder",
+        "session_id": reminder["session_id"],
         "label": reminder["label"],
         "timer_id": reminder["id"],
     })
