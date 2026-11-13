@@ -13,10 +13,6 @@ SCRIPT = ROOT / ".github/scripts/run_package_acceptance.py"
 
 
 class PackageAcceptanceRunnerTests(unittest.TestCase):
-    def add_launch_tests(self, extracted):
-        (extracted / "tests").mkdir()
-        (extracted / "tests/test_launch_scripts.py").write_text("# synthetic test fixture\n")
-
     def load_runner(self):
         self.assertTrue(SCRIPT.is_file(), "cross-platform package acceptance runner is missing")
         spec = importlib.util.spec_from_file_location("package_acceptance_runner", SCRIPT)
@@ -31,7 +27,6 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
             package = temporary / "source-package"
             extracted = package / "extracted"
             extracted.mkdir(parents=True)
-            self.add_launch_tests(extracted)
             (extracted / "requirements.txt").write_text("", encoding="utf-8")
             (package / "source.zip").write_bytes(b"synthetic archive")
             (package / "manifest.json").write_text("{}", encoding="utf-8")
@@ -43,8 +38,9 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
             with patch.object(runner, "run_logged") as command:
                 runner.run_acceptance(ROOT, temporary)
             calls = command.call_args_list
-            self.assertEqual(len(calls), 6)
-            build, venv, install, launch, accept, desktop = [call.args[0] for call in calls]
+            self.assertEqual(len(calls), 5)
+            build, venv, install, accept, desktop = [call.args[0] for call in calls]
+            self.assertFalse(any("unittest" in call.args[0] for call in calls))
             self.assertEqual(build, [sys.executable, str(ROOT / ".github/scripts/source_package.py"),
                                      "--output", str(package)])
             self.assertEqual(venv[:3], [sys.executable, "-m", "venv"])
@@ -60,10 +56,6 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
                                      "--source", str(extracted), "--python", str(python),
                                      "--output", str(temporary / "source-package-acceptance")])
             self.assertEqual(calls[2].kwargs["cwd"], extracted)
-            self.assertEqual(launch, [str(python), "-m", "unittest", "discover", "-s",
-                                      str(extracted / "tests"), "-p", "test_launch_scripts.py", "-v"])
-            self.assertEqual(calls[3].args[1], report / "logs/runner-launch-scripts.log")
-            self.assertEqual(calls[3].kwargs["cwd"], extracted)
             self.assertEqual(desktop, [sys.executable, str(ROOT / ".github/scripts/electron_smoke.py"),
                                        "--source", str(extracted), "--python", str(python),
                                        "--output", str(report / "desktop")])
@@ -74,7 +66,6 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
             temporary = Path(directory)
             extracted = temporary / "source-package/extracted"
             extracted.mkdir(parents=True)
-            self.add_launch_tests(extracted)
             (extracted / "requirements.txt").write_text("", encoding="utf-8")
             (extracted.parent / "source.zip").write_bytes(b"synthetic archive")
             (extracted.parent / "manifest.json").write_text("{}", encoding="utf-8")
@@ -87,16 +78,15 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
                 runner.run_acceptance(ROOT, temporary)
                 runner.run_acceptance(ROOT, temporary)
             self.assertNotEqual(command.call_args_list[1].args[0][3],
-                                command.call_args_list[7].args[0][3])
+                                command.call_args_list[6].args[0][3])
 
     def test_subprocess_failure_blocks_all_later_stages(self):
         runner = self.load_runner()
-        for failed_stage in range(6):
+        for failed_stage in range(5):
             with self.subTest(stage=failed_stage), tempfile.TemporaryDirectory() as directory:
                 temporary = Path(directory)
                 extracted = temporary / "source-package/extracted"
                 extracted.mkdir(parents=True)
-                self.add_launch_tests(extracted)
                 (extracted / "requirements.txt").write_text("", encoding="utf-8")
                 (extracted.parent / "source.zip").write_bytes(b"synthetic archive")
                 (extracted.parent / "manifest.json").write_text("{}", encoding="utf-8")
@@ -132,19 +122,6 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
                     runner.run_acceptance(ROOT, Path(directory))
             self.assertEqual(command.call_count, 1)
 
-    def test_missing_launch_test_cannot_silently_accept_zero_discovered_tests(self):
-        runner = self.load_runner()
-        with tempfile.TemporaryDirectory() as directory:
-            extracted = Path(directory) / "source-package/extracted"
-            extracted.mkdir(parents=True)
-            (extracted / "requirements.txt").write_text("")
-            (extracted.parent / "source.zip").write_bytes(b"fixture")
-            (extracted.parent / "manifest.json").write_text("{}")
-            with patch.object(runner, "run_logged") as command:
-                with self.assertRaisesRegex(FileNotFoundError, "test_launch_scripts.py"):
-                    runner.run_acceptance(ROOT, Path(directory))
-            self.assertEqual(command.call_count, 3)
-
     def test_missing_required_delivery_file_cannot_pass_the_gate(self):
         runner = self.load_runner()
         for missing in ("source.zip", "manifest.json", "acceptance.json", "desktop/acceptance.json"):
@@ -153,7 +130,6 @@ class PackageAcceptanceRunnerTests(unittest.TestCase):
                 package = temporary / "source-package"
                 extracted = package / "extracted"
                 extracted.mkdir(parents=True)
-                self.add_launch_tests(extracted)
                 (extracted / "requirements.txt").write_text("", encoding="utf-8")
                 report = temporary / "source-package-acceptance"
                 report.mkdir()

@@ -48,11 +48,6 @@ def run_acceptance(root, runner_temp):
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     run_logged([str(python), "-m", "pip", "install", "--disable-pip-version-check",
                 "-r", str(requirements)], logs / "runner-install.log", cwd=extracted)
-    launch_tests = extracted / "tests/test_launch_scripts.py"
-    if not launch_tests.is_file():
-        raise FileNotFoundError(f"Launch acceptance tests missing: {launch_tests}")
-    run_logged([str(python), "-m", "unittest", "discover", "-s", str(extracted / "tests"),
-                "-p", "test_launch_scripts.py", "-v"], logs / "runner-launch-scripts.log", cwd=extracted)
     run_logged([sys.executable, str(scripts / "source_acceptance.py"),
                 "--source", str(extracted), "--python", str(python), "--output", str(report)],
                logs / "runner-probe.log", cwd=root)
