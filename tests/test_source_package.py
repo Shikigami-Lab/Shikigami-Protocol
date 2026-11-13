@@ -24,13 +24,15 @@ class SourcePackageTests(unittest.TestCase):
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         for name, entries in (
             ("traversal", [("../outside.txt", "bad")]),
-            ("backslash", [("folder\\\\outside.txt", "bad")]),
+            ("backslash", [("folder\\outside.txt", "bad")]),
             ("collision", [("same.txt", "one"), ("SAME.txt", "two")]),
         ):
             archive = root / (name + ".zip")
             with ZipFile(archive, "w") as out:
                 for path, text in entries:
-                    out.writestr(path, text)
+                    info = ZipInfo(path)
+                    info.filename = path  # Preserve the literal on Windows for the malformed fixture.
+                    out.writestr(info, text)
             with self.subTest(case=name), self.assertRaises(ValueError):
                 builder.extract_checked(archive, root / name)
         archive = root / "link.zip"

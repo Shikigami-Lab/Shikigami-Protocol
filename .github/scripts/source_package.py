@@ -39,12 +39,13 @@ def extract_checked(archive, target):
             raise ValueError("Source archive exceeds extraction limits")
         seen = set()
         for member in members:
-            path = PurePosixPath(member.filename)
-            parts = member.filename.rstrip("/").split("/")
-            key = member.filename.rstrip("/").casefold()
+            name = member.orig_filename
+            path = PurePosixPath(name)
+            parts = name.rstrip("/").split("/")
+            key = name.rstrip("/").casefold()
             if (not parts or any(part in ("", ".", "..") for part in parts)
-                    or path.is_absolute() or "\\\\" in member.filename or ":" in member.filename
-                    or any(ord(char) < 32 for char in member.filename)
+                    or path.is_absolute() or "\\" in name or ":" in name
+                    or any(ord(char) < 32 for char in name)
                     or key in seen or stat.S_ISLNK(member.external_attr >> 16)
                     or not (target / path).resolve().is_relative_to(target)):
                 raise ValueError("Unsafe source archive member")
