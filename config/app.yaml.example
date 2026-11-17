@@ -40,6 +40,18 @@ llm_presets:
     presence_penalty: 0.05
     frequency_penalty: 0.05
 
+  # Demon Route: OpenAI-compatible, 1,700+ open-weight models incl. roleplay/character fine-tunes
+  # Model list: https://demonroute.com/models
+  DemonRoute:
+    type: openai_compat
+    api_key: '' # Set DEMONROUTE_API_KEY in .env
+    base_url: https://api.demonroute.com/v1
+    model: Nabbers1999/Bathory-X-26B-A4B-0.2
+    temperature: 1.0
+    top_p: 0.95
+    presence_penalty: 0.05
+    frequency_penalty: 0.05
+
 # ── TTS Engines ──────────────────────────────────────────────────────────────
 tts:
   edge_tts:
